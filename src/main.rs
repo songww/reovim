@@ -13,10 +13,10 @@ mod channel;
 mod color;
 mod cursor;
 mod elements;
+mod factory;
 mod keys;
 mod messager;
 mod style;
-mod factory;
 mod vim_window;
 mod vimview;
 
@@ -45,7 +45,7 @@ enum ConnectionMode {
     RemoteTcp(String),
 }
 
-#[derive(Parser, Clone, Debug, Default)]
+#[derive(Parser, Clone, Debug, Default, PartialEq)]
 #[clap(setting(AppSettings::AllowMissingPositional))]
 pub struct Opts {
     /// Path to neovim binary

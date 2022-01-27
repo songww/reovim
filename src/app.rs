@@ -8,6 +8,7 @@ use gtk::prelude::{
 use relm4::{send, AppUpdate, Model, RelmApp, Sender, WidgetPlus, Widgets};
 use rustc_hash::FxHashMap;
 
+use crate::vimview;
 use crate::{
     bridge::{self, RedrawEvent, UiCommand},
     style, vim_window, Opts,
@@ -25,6 +26,12 @@ impl From<UiCommand> for AppMessage {
     }
 }
 
+#[derive(Debug)]
+struct Relation {
+    id: u64,
+    is_base: bool,
+}
+
 pub struct AppModel {
     pub opts: Opts,
     pub title: String,
@@ -37,9 +44,13 @@ pub struct AppModel {
     pub linespace: Option<u64>,
     pub show_tab_line: Option<u64>,
 
-    pub hldefs: Rc<RwLock<crate::vimview::HighlightDefinitions>>,
+    pub font_description: Cell<Option<pango::FontDescription>>,
 
-    pub vwindows: crate::factory::FactoryMap<vim_window::VimWindow>,
+    pub hldefs: Rc<RwLock<vimview::HighlightDefinitions>>,
+
+    pub vwindows: crate::factory::FactoryMap<vimview::VimWindow>,
+    // relations about grid and window.
+    pub relationships: FxHashMap<u64, Relation>,
 }
 
 impl AppModel {
@@ -54,9 +65,12 @@ impl AppModel {
             linespace: None,
             show_tab_line: None,
 
-            hldefs: Rc::new(RwLock::new(crate::vimview::HighlightDefinitions::new())),
+            font_description: Cell::new(None),
+
+            hldefs: Rc::new(RwLock::new(vimview::HighlightDefinitions::new())),
 
             vwindows: crate::factory::FactoryMap::new(),
+            relationships: FxHashMap::default(),
 
             opts,
         }
@@ -89,7 +103,13 @@ impl AppUpdate for AppModel {
             AppMessage::RedrawEvent(event) => {
                 // components.messager.send(event);
                 match event {
-                    RedrawEvent::SetTitle { title } => self.title = title.replace("     ", ""),
+                    RedrawEvent::SetTitle { title } => {
+                        self.title = title
+                            .split("     ")
+                            .filter_map(|s| if s.is_empty() { None } else { Some(s.trim()) })
+                            .collect::<Vec<_>>()
+                            .join("  ")
+                    }
                     RedrawEvent::OptionSet { gui_option } => match gui_option {
                         bridge::GuiOption::AmbiWidth(ambi_width) => {
                             log::warn!("unhandled ambi_width {}", ambi_width);
@@ -102,10 +122,11 @@ impl AppUpdate for AppModel {
                         }
                         bridge::GuiOption::GuiFont(guifont) => {
                             let desc = pango::FontDescription::from_string(&guifont);
-                            for (_, win) in self.vwindows.iter() {
-                                win.set_font_description(&desc);
-                            }
+                            // for (_, win) in self.vwindows.iter() {
+                            //     win.set_font_description(desc.clone());
+                            // }
                             self.guifont.replace(guifont);
+                            self.font_description.replace(desc.into());
                         }
                         bridge::GuiOption::GuiFontSet(guifontset) => {
                             self.guifontset.replace(guifontset);
@@ -136,37 +157,50 @@ impl AppUpdate for AppModel {
                         self.hldefs.write().unwrap().set(id, style);
                     }
                     RedrawEvent::Clear { grid } => {
-                        self.vwindows
-                            .get_mut(grid)
-                            .map(|w| w.clear())
-                            .expect(&format!("grid {} not found.", grid));
+                        if let Some(win) = self.relationships.get(&grid) {
+                            self.vwindows
+                                .get_mut(win.id)
+                                .map(|w| w.get_mut(grid).clear())
+                                .expect(&format!("grid {} not found.", grid));
+                        };
                     }
                     RedrawEvent::GridLine {
                         grid,
                         row,
                         column_start,
                         cells,
-                    } => self
-                        .vwindows
-                        .get_mut(grid)
-                        .unwrap()
-                        .set_line(row, column_start, cells),
+                    } => {
+                        if let Some(win) = self.relationships.get(&grid) {
+                            // FIXME: check is base.
+                            self.vwindows
+                                .get_mut(win.id)
+                                .unwrap()
+                                .get_mut(grid)
+                                .unwrap()
+                                .set_line(row, column_start, cells);
+                        };
+                    }
                     RedrawEvent::Resize {
                         grid,
                         width,
                         height,
                     } => {
-                        let exists = self.vwindows.get(grid).is_some();
-                        if exists {
-                            self.vwindows
-                                .get_mut(grid)
-                                .unwrap()
-                                .resize(width as _, height as _);
-                        } else {
-                            let rect = gdk::Rectangle::new(0, 0, width as _, height as _);
-                            let win =
-                                vim_window::VimWindow::new(grid, rect, Rc::clone(&self.hldefs));
-                            self.vwindows.insert(grid, win);
+                        if let Some(win) = self.relationships.get(&grid) {
+                            // FIXME: check is base.
+                            let exists = self.vwindows.get(win.id).unwrap().get(grid).is_some();
+                            if exists {
+                                self.vwindows
+                                    .get_mut(win.id)
+                                    .unwrap()
+                                    .get_mut(grid)
+                                    .unwrap()
+                                    .resize(width as _, height as _);
+                            } else {
+                                let rect = gdk::Rectangle::new(0, 0, width as _, height as _);
+                                let window =
+                                    vimview::VimWindow::new(0, grid, rect, Rc::clone(&self.hldefs));
+                                self.vwindows.get_mut(win.id).unwrap().insert(grid, window);
+                            };
                         };
                     }
                     RedrawEvent::WindowPosition {
@@ -183,10 +217,11 @@ impl AppUpdate for AppModel {
                             width as _,
                             height as _,
                         );
-                        self.vwindows.insert(
-                            grid,
-                            vim_window::VimWindow::new(grid, rect, Rc::clone(&self.hldefs)),
-                        );
+                        // self.vwindows.insert(
+                        //     grid,
+                        //     vimview::VimWindow::new(0, grid, rect, Rc::clone(&self.hldefs)),
+                        // );
+                        // FIXME: window position
                     }
                     RedrawEvent::WindowViewport {
                         grid,
@@ -200,17 +235,36 @@ impl AppUpdate for AppModel {
                         // self.vwindows.insert(grid, win);
                     }
                     RedrawEvent::WindowHide { grid } => {
-                        self.vwindows.get(grid).unwrap().hide();
+                        if let Some(win) = self.relationships.get(&grid) {
+                            if win.is_base {
+                                self.vwindows.get(win.id).unwrap().hide();
+                            } else {
+                                self.vwindows.get_mut(win.id).unwrap().get_mut(grid).hide();
+                            }
+                        }
                     }
                     RedrawEvent::WindowClose { grid } => {
-                        self.vwindows.remove(grid);
+                        if let Some(win) = self.relationships.get(&grid) {
+                            if win.is_base {
+                                self.vwindows.remove(grid);
+                            } else {
+                                self.vwindows.get_mut(win.id).unwrap().remove(grid);
+                            }
+                        }
                     }
                     RedrawEvent::Destroy { grid } => {
-                        self.vwindows.remove(grid);
+                        if let Some(win) = self.relationships.get(&grid) {
+                            if win.is_base {
+                                self.vwindows.remove(grid);
+                            } else {
+                                self.vwindows.get_mut(win.id).unwrap().remove(grid);
+                            }
+                        }
                     }
                     RedrawEvent::Flush => {
-                        //
-                        self.vwindows.iter().for_each(|(_k, win)| win.queue_draw());
+                        // FIXME: redraw all only this set.
+                        self.vwindows.queue_draw();
+                        // self.vwindows.iter().for_each(|(_k, win)| win.queue_draw());
                     }
                     _ => {}
                 }
