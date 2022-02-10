@@ -5,9 +5,9 @@ use std::fmt::Debug;
 use log::debug;
 use nvim::Value;
 
-use crate::style::{Colors, Style};
-use crate::cursor::{CursorMode, CursorShape};
 use crate::color::{Color, ColorExt};
+use crate::cursor::{CursorMode, CursorShape};
+use crate::style::{Colors, Style};
 
 #[derive(Clone, Debug)]
 pub enum ParseError {
@@ -52,7 +52,7 @@ impl error::Error for ParseError {
 #[derive(Clone, Debug)]
 pub struct GridLineCell {
     pub text: String,
-    pub highlight_id: Option<u64>,
+    pub hldef: Option<u64>,
     pub repeat: Option<u64>,
     pub double_width: bool,
 }
@@ -561,7 +561,7 @@ fn parse_grid_line_cell(grid_line_cell: Value) -> Result<GridLineCell> {
         .map(|v| take_value(v))
         .ok_or_else(|| ParseError::Format(format!("{:?}", cell_contents)))?;
 
-    let highlight_id = cell_contents
+    let hldef = cell_contents
         .get_mut(1)
         .map(|v| take_value(v))
         .map(parse_u64)
@@ -574,7 +574,7 @@ fn parse_grid_line_cell(grid_line_cell: Value) -> Result<GridLineCell> {
 
     Ok(GridLineCell {
         text: parse_string(text_value)?,
-        highlight_id,
+        hldef,
         repeat,
         double_width: false,
     })
@@ -588,25 +588,23 @@ fn parse_grid_line(grid_line_arguments: Vec<Value>) -> Result<RedrawEvent> {
     let row = parse_u64(row)?;
     let column_start = parse_u64(column_start)?;
     let mut cells = parse_array(cells)?
-            .into_iter()
-            .map(parse_grid_line_cell)
-            .collect::<Result<Vec<GridLineCell>>>()?;
-    let mut highlight_id = None;
+        .into_iter()
+        .map(parse_grid_line_cell)
+        .collect::<Result<Vec<GridLineCell>>>()?;
+    let mut hldef = None;
     let mut iter = cells.iter_mut().peekable();
     while let Some(cell) = iter.next() {
-        match cell.highlight_id {
+        match cell.hldef {
             Some(hl_id) => {
-                highlight_id.replace(hl_id);
-            },
+                hldef.replace(hl_id);
+            }
             None => {}
         }
         let double_width = match iter.peek() {
-            Some(cell) if cell.text.is_empty() => {
-                true
-            },
-            _ => false
+            Some(cell) if cell.text.is_empty() => true,
+            _ => false,
         };
-        cell.highlight_id.replace(highlight_id.unwrap());
+        cell.hldef.replace(hldef.unwrap());
         cell.double_width = double_width;
     }
     Ok(RedrawEvent::GridLine {

@@ -2,6 +2,8 @@ use std::ops::{Deref, DerefMut};
 
 use glib::subclass::prelude::*;
 
+use crate::color::ColorExt;
+
 use super::highlights::HighlightDefinitions;
 
 mod imp {
@@ -24,6 +26,10 @@ mod imp {
             self.rows = rows;
             self.cols = cols;
             self.cells = super::TextBufCells::new(rows, cols);
+        }
+
+        fn clear(&mut self) {
+            self.cells = super::TextBufCells::new(self.rows, self.cols);
         }
     }
 
@@ -58,6 +64,12 @@ mod imp {
 
     impl TextBuf {
         pub(super) fn set_cells(&self, row: usize, col: usize, cells: &[super::TextCell]) {
+            log::debug!(
+                "textbuf {}x{}",
+                self.inner.borrow().rows,
+                self.inner.borrow().cols
+            );
+            log::debug!("Setting cells of row {}", row);
             let row = &mut self.inner.borrow_mut().cells[row];
             let mut expands = Vec::with_capacity(row.len());
             for cell in cells.iter() {
@@ -66,14 +78,13 @@ mod imp {
                 }
             }
             let col_to = col + expands.len();
+            log::debug!("Setting {} cells from {} to {}", expands.len(), col, col_to);
+            // log::info!("cells: {:?}", &expands);
             row[col..col_to].clone_from_slice(&expands);
         }
 
         pub(super) fn clear(&self) {
-            let inner = self.inner.borrow();
-            let rows = inner.rows;
-            let cols = inner.cols;
-            self.inner.borrow_mut().cells = super::TextBufCells::new(rows, cols);
+            self.inner.borrow_mut().clear();
         }
 
         pub(super) fn resize(&self, rows: usize, cols: usize) {
@@ -107,8 +118,28 @@ impl TextBuf {
         imp::TextBuf::from_instance(self)
     }
 
-    fn clear(&self) {
+    pub fn clear(&self) {
         self.imp().clear();
+    }
+
+    pub fn resize(&self, cols: usize, rows: usize) {
+        self.imp().resize(rows, cols);
+    }
+
+    pub fn rows(&self) -> usize {
+        self.imp().rows()
+    }
+
+    pub fn cols(&self) -> usize {
+        self.imp().cols()
+    }
+
+    pub fn cells(&self) -> &[TextLine] {
+        self.imp().cells()
+    }
+
+    pub fn set_cells(&self, row: usize, col: usize, cells: &[TextCell]) {
+        self.imp().set_cells(row, col, cells);
     }
 
     pub(super) fn layout(
@@ -131,7 +162,7 @@ impl TextBuf {
                 let start_index = text.len();
                 text.push_str(&cell.text);
                 let end_index = text.len();
-                let hldef = hldefs.get(cell.hldef.unwrap());
+                let hldef = hldefs.get(cell.hldef.unwrap_or(1));
                 if hldef.italic {
                     let mut attr = pango::AttrInt::new_style(pango::Style::Italic);
                     attr.set_start_index(start_index as _);
@@ -163,7 +194,7 @@ impl TextBuf {
                     attrs.insert(attr);
                 }
                 // alpha color
-                log::error!("alpha blend {}", hldef.blend);
+                // log::error!("alpha blend {}", hldef.blend);
                 let mut attr = pango::AttrInt::new_background_alpha(hldef.blend as _);
                 attr.set_start_index(start_index as _);
                 attr.set_end_index(end_index as _);
@@ -173,9 +204,11 @@ impl TextBuf {
                     .foreground
                     .or_else(|| default_colors.foreground)
                 {
-                    let color = pango::Color::parse(&fg.to_str()).unwrap();
-                    let mut attr =
-                        pango::AttrColor::new_foreground(color.red(), color.green(), color.blue());
+                    let mut attr = pango::AttrColor::new_foreground(
+                        (fg.red() * 255.0) as _,
+                        (fg.green() * 255.0) as _,
+                        (fg.blue() * 255.0) as _,
+                    );
                     attr.set_start_index(start_index as _);
                     attr.set_end_index(end_index as _);
                     attrs.insert(attr);
@@ -185,19 +218,20 @@ impl TextBuf {
                     .background
                     .or_else(|| default_colors.foreground)
                 {
-                    let color = pango::Color::parse(&bg.to_str()).unwrap();
-                    let mut attr =
-                        pango::AttrColor::new_background(color.red(), color.green(), color.blue());
+                    let mut attr = pango::AttrColor::new_background(
+                        (bg.red() * 255.0) as _,
+                        (bg.green() * 255.0) as _,
+                        (bg.blue() * 255.0) as _,
+                    );
                     attr.set_start_index(start_index as _);
                     attr.set_end_index(end_index as _);
                     attrs.insert(attr);
                 }
                 if let Some(special) = hldef.colors.special.or_else(|| default_colors.special) {
-                    let color = pango::Color::parse(&special.to_str()).unwrap();
                     let mut attr = pango::AttrColor::new_underline_color(
-                        color.red(),
-                        color.green(),
-                        color.blue(),
+                        (special.red() * 255.0) as _,
+                        (special.green() * 255.0) as _,
+                        (special.blue() * 255.0) as _,
                     );
                     attr.set_start_index(start_index as _);
                     attr.set_end_index(end_index as _);
@@ -206,8 +240,34 @@ impl TextBuf {
             }
             text.push('\n');
         }
+        log::info!("text to render:\n{}", &text);
         layout.set_text(&text);
         layout.set_attributes(Some(&attrs));
+        log::info!("pixel size {:?}", layout.pixel_size());
+        log::info!("layout height: {}", layout.height());
+        let x801 = layout.index_to_line_x(801, false);
+        log::info!("layout index 801 to x {:?}", x801);
+        log::info!(
+            "layout index 802 to x {:?}",
+            layout.index_to_line_x(802, false)
+        );
+        let pos801 = layout.index_to_pos(801);
+        log::info!("layout index 801 to pos {:?}", pos801);
+        pango::extents_to_pixels(Some(&pos801), None);
+        log::info!("layout index 801 to pos {:?} in pixel", pos801);
+        let pos802 = layout.index_to_pos(802);
+        log::info!("layout index 802 to pos {:?}", pos802);
+        pango::extents_to_pixels(Some(&pos802), None);
+        log::info!("layout index 802 to pos {:?} in pixel", pos802);
+        let l = layout.line(1).unwrap();
+        log::info!(
+            "line height: {} length {} start_index {}",
+            l.height(),
+            l.length(),
+            l.start_index()
+        );
+        log::info!("extents: {:?}", l.extents());
+        log::info!("pixel extents: {:?}", l.pixel_extents());
         // let mut cached_attr = attrs.iterator();
         // let items = pango::itemize(pctx, cell.text, 0, text.len(), &attrs, cached_attr.as_ref());
         // for item in items {
@@ -306,6 +366,6 @@ impl TextBufCells {
 }
 
 fn cells(rows: usize, cols: usize) -> Box<[TextLine]> {
-    let row = vec![TextCell::default(); rows].into_boxed_slice();
-    vec![TextLine(row); cols].into_boxed_slice()
+    let row = vec![TextCell::default(); cols].into_boxed_slice();
+    vec![TextLine(row); rows].into_boxed_slice()
 }

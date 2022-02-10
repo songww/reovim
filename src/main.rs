@@ -17,7 +17,6 @@ mod factory;
 mod keys;
 mod messager;
 mod style;
-mod vim_window;
 mod vimview;
 
 static WIN: OnceCell<Fragile<gtk::Window>> = OnceCell::new();
@@ -95,7 +94,7 @@ fn gtk_window() -> gtk::Window {
 
 fn main() {
     let mut opts: Opts = Opts::parse();
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug")).init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     log::trace!("command line options: {:?}", opts);
     let app = Opts::into_app();
     let title = app.get_bin_name().unwrap_or("relmvim");
@@ -127,5 +126,4 @@ fn main() {
     //     -1
     // });
     relm.run_with_args(&[title]);
-    // _relm.run();
 }

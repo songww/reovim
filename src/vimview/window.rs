@@ -1,18 +1,23 @@
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::sync::RwLock;
+use std::sync::{atomic, RwLock};
 
 use gdk::Rectangle;
 use glib::subclass::prelude::*;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
+use once_cell::sync::OnceCell;
 use relm4::factory::positions::FixedPosition;
 use relm4::*;
+use rustc_hash::FxHashMap as HashMap;
 
 use crate::app;
 use crate::bridge::UiCommand;
 use crate::cloned;
 use crate::color::{Color, ColorExt};
+
+use super::grid::VimGridView;
+use super::TextBuf;
 
 type HighlightDefinitions = Rc<RwLock<crate::vimview::HighlightDefinitions>>;
 
@@ -24,17 +29,17 @@ mod imp {
     #[derive(Debug)]
     pub struct VimWindowView {
         grid: u64,
-        grids: Vec<u64>,
         window: u64,
         rect: gdk::Rectangle,
-        // doc: Option<super::super::Document>,
     }
 
     impl Default for VimWindowView {
         fn default() -> Self {
             VimWindowView {
                 rect: gdk::Rectangle::new(0, 0, 0, 0),
-                ..Default::default()
+                grid: 0,
+                // grids: Vec::new(),
+                window: 0,
             }
         }
     }
@@ -44,7 +49,7 @@ mod imp {
     impl ObjectSubclass for VimWindowView {
         const NAME: &'static str = "VimWindow";
         type Type = super::VimWindowView;
-        type ParentType = gtk::Widget;
+        type ParentType = gtk::Fixed;
     }
 
     // Trait shared by all GObjects
@@ -66,141 +71,185 @@ mod imp {
             log::info!(
                 "font description of window {} {:?}",
                 self.window,
-                widget.pango_context().font_description()
+                widget.pango_context().font_description().unwrap().to_str()
             );
             self.parent_snapshot(widget, snapshot);
         }
     }
 
-    impl VimWindowView {
-        pub(super) fn set_font_description(&self, desc: &pango::FontDescription) {
-            // self.pango_context().set_font_description(desc);
-        }
-    }
+    impl FixedImpl for VimWindowView {}
 }
 
 glib::wrapper! {
     pub struct VimWindowView(ObjectSubclass<imp::VimWindowView>)
-        @extends gtk::Widget,
+        @extends gtk::Widget, gtk::Fixed,
         @implements gtk::Accessible, gtk::Actionable, gtk::Buildable, gtk::ConstraintTarget;
 }
 
 impl VimWindowView {
     pub fn new(window: u64, grid: u64, rect: Rectangle) -> VimWindowView {
-        glib::Object::new(&[("window", &window), ("grid", &grid), ("rect", &rect)])
-            .expect("Failed to create `VimWindowView`.")
+        // glib::Object::new(&[("window", &window), ("grid", &grid), ("rect", &rect)])
+        glib::Object::new(&[]).expect("Failed to create `VimWindowView`.")
     }
 
-    // pub fn render(&self, hldefs: &crate::app::HighlightDefinitions) {
-    //     let cr = self.dh.borrow_mut().get_context().unwrap();
-    //     cr.save().unwrap();
-    //     cr.rectangle(
-    //         self.rect.x() as f64,
-    //         self.rect.y() as f64,
-    //         self.rect.width() as f64,
-    //         self.rect.height() as f64,
-    //     );
-    //     if let Some(defaults) = hldefs.defaults() {
-    //         if let Some(background) = defaults.background {
-    //             cr.set_source_rgba(
-    //                 background.red() as _,
-    //                 background.green() as _,
-    //                 background.blue() as _,
-    //                 background.alpha() as _,
-    //             );
-    //             cr.paint().unwrap();
-    //     cr.restore().unwrap();
-    //             println!("default background {}", background.to_hex());
-    //         }
-    //     }
-    //     println!("rendering {}x{}", self.rect.width(), self.rect.height());
-    //     cr.fill().unwrap();
-    //     cr.restore().unwrap();
-    //     cr.save().unwrap();
-    //     cr.restore().unwrap();
-    // }
-
-    // pub fn resize(&mut self, width: u64, height: u64) {
-    // log::info!(
-    //     "resize request: {}x{} -> {}x{}",
-    //     self.rect.width(),
-    //     self.rect.height(),
-    //     width,
-    //     height
-    // );
-    //     self.rect.set_width(width as i32);
-    //     self.rect.set_height(height as i32);
-    // }
-
-    // pub fn set_fonts(&self, fonts: &pango::FontDescription) {
-    // self.da.pango_context().set_font_description(fonts);
-    // }
-
-    // pub fn set_linespace(&mut self, linespace: u64) {
-    //     self.linespace.replace(linespace);
-    // }
-
-    // pub fn grid(&self) -> u64 {
-    //     self.grid
-    // }
-
-    // pub fn linespace(&self) -> Option<u64> {
-    //     self.linespace
-    // }
-
-    // pub fn rect(&self) -> gdk::Rectangle {
-    //     self.rect
-    // }
-
-    pub fn flush(self) {
-        // self.should_flush = true;
-    }
-    // pub fn new(grid: u64, rect: gdk::Rectangle, hldefs: HighlightDefinitions) -> VimWindow {
-    //     Self {
-    //         id: 0,
-    //         grid,
-    //         rect,
-    //         hldefs: Rc::clone(&hldefs),
-    //         repaint: true,
-    //         linespace: None,
-    //         should_flush: true,
-    //         win: widget::VimWindow::new(),
-    //         // doc: Document::new(rect.height() as _, rect.width() as _, Rc::clone(&hldefs)),
-    //     }
-    // }
     fn imp(&self) -> &imp::VimWindowView {
         imp::VimWindowView::from_instance(self)
     }
 
     pub fn set_font_description(&self, desc: &pango::FontDescription) {
-        self.imp().set_font_description(desc)
-    }
-
-    pub fn clear(&mut self) {
-        //     self.doc.clear();
-    }
-
-    pub fn set_line(&mut self, row: u64, column: u64, cells: Vec<crate::bridge::GridLineCell>) {
-        //     self.doc.set_line(row as _, column as _, cells)
-    }
-
-    pub fn should_flush(&mut self) {
-        // self.should_flush = true;
-    }
-
-    pub fn resize(&mut self, width: i32, height: i32) {
-        // self.rect.set_width(width);
-        // self.rect.set_height(height);
-
-        // self.doc.rows = height as _;
-        // self.doc.columns = width as _;
-        // self.doc.clear();
+        self.pango_context().set_font_description(desc)
     }
 }
 
 #[derive(Debug)]
 pub struct VimWindowWidgets {
-    root: VimWindowView,
+    view: VimWindowView,
+}
+
+#[derive(Copy, Clone, Debug)]
+enum Visible {
+    No,
+    Yes,
+}
+
+impl Default for Visible {
+    fn default() -> Self {
+        Visible::Yes
+    }
+}
+
+#[derive(Debug)]
+pub struct VimGrid {
+    win: u64,
+    grid: u64,
+    linespace: u64,
+    charwidth: f64,
+    lineheight: f64,
+    rect: gdk::Rectangle,
+    hldefs: HighlightDefinitions,
+    font_description: Rc<RefCell<pango::FontDescription>>,
+
+    textbuf: TextBuf,
+
+    visible: bool,
+}
+
+#[derive(Debug)]
+pub struct VimGridWidgets {
+    view: VimGridView,
+}
+
+impl factory::FactoryPrototype for VimGrid {
+    type Factory = crate::factory::FactoryMap<Self>;
+    type Widgets = VimGridWidgets;
+    type Root = VimGridView;
+    type View = VimWindowView;
+    type Msg = app::AppMessage;
+
+    fn init_view(&self, grid: &u64, _sender: Sender<app::AppMessage>) -> VimGridWidgets {
+        view! {
+            view = VimGridView::new(*grid, self.rect.width() as _, self.rect.height() as _) {
+                set_widget_name: &format!("grid-{}/{}", self.win, grid),
+                set_hldefs: self.hldefs.clone(),
+                set_textbuf:self.textbuf.as_ref().clone(),
+
+                set_visible: watch!(self.visible),
+
+                // set_size_request: watch!(self.rect.width() as _, self.rect.height() as _),
+            }
+        }
+
+        let font_description = self.font_description.clone();
+        view.add_tick_callback(move |view, _| {
+            if let Some(desc) = view.pango_context().font_description() {
+                let font_desc = unsafe { &*font_description.as_ref().as_ptr() }.clone();
+                if desc != font_desc {
+                    view.pango_context().set_font_description(&font_desc);
+                }
+            }
+            glib::Continue(true)
+        });
+
+        VimGridWidgets { view }
+    }
+
+    fn position(&self, _grid: &u64) -> FixedPosition {
+        log::info!("requesting grid position {}", _grid);
+        FixedPosition {
+            x: self.rect.x() as f64,
+            y: self.rect.y() as f64,
+        }
+    }
+
+    fn view(&self, index: &u64, widgets: &VimGridWidgets) {
+        log::warn!("vim grid update {} {:?}", index, self.rect);
+        let grid = &widgets.view;
+        gtk::prelude::FixedExt::move_(
+            &grid.parent().unwrap().downcast::<gtk::Fixed>().unwrap(),
+            grid,
+            self.rect.x() as _,
+            self.rect.y() as _,
+        );
+        grid.queue_draw();
+        grid.queue_resize();
+        grid.queue_allocate();
+    }
+
+    fn root_widget(widgets: &VimGridWidgets) -> &VimGridView {
+        &widgets.view
+    }
+}
+
+impl VimGrid {
+    pub fn textbuf(&self) -> &TextBuf {
+        &self.textbuf
+    }
+
+    pub fn hide(&mut self) {
+        // self.visible.set(Some(Visible::No));
+        self.visible = false;
+    }
+
+    pub fn show(&mut self) {
+        // self.visible.set(Some(Visible::Yes));
+        self.visible = true;
+    }
+
+    pub fn resize(&mut self, width: u64, height: u64) {
+        self.rect.set_width(width as _);
+        self.rect.set_height(height as _);
+        self.textbuf.borrow().resize(width as _, height as _);
+    }
+
+    pub fn set_pos(&mut self, x: u64, y: u64) {
+        self.rect.set_x(x as i32);
+        self.rect.set_y(y as i32);
+    }
+
+    /// (width, height)
+    fn size_required(&self, cols: u64, rows: u64) -> (u64, u64) {
+        (
+            (cols as f64 * self.charwidth) as u64,
+            (rows as f64 * self.lineheight) as u64,
+        )
+    }
+}
+
+impl<Widget> relm4::factory::FactoryView<Widget> for VimWindowView
+where
+    Widget: glib::IsA<gtk::Widget>,
+{
+    type Position = FixedPosition;
+    type Root = Widget;
+
+    fn add(&self, widget: &Widget, position: &FixedPosition) -> Widget {
+        gtk::prelude::FixedExt::put(self, widget, position.x, position.y);
+        widget.clone()
+    }
+
+    fn remove(&self, widget: &Widget) {
+        gtk::prelude::FixedExt::remove(self, widget);
+    }
 }
 
 impl factory::FactoryPrototype for VimWindow {
@@ -211,7 +260,16 @@ impl factory::FactoryPrototype for VimWindow {
     type Msg = app::AppMessage;
 
     fn init_view(&self, grid: &u64, sender: Sender<app::AppMessage>) -> VimWindowWidgets {
-        let w = VimWindowView::new(self.id, *grid, self.rect);
+        view! {
+            view = VimWindowView::new(self.id, *grid, self.rect) {
+                set_visible: watch!(self.visible),
+                set_widget_name: &format!("win-{}-{}", self.id, grid),
+
+                factory!(self.grids),
+            }
+        }
+        // relm4::factory::Factory::generate(&self.grids, &view, sender.clone());
+
         // let grid_id = self.grid;
         let on_click = gtk::GestureClick::new();
         on_click.set_name("vim-window-onclick-listener");
@@ -243,7 +301,7 @@ impl factory::FactoryPrototype for VimWindow {
         //     // sender.send(AppMsg::Message(format!("Click({:?}) unpaired release {} times at {}x{} {:?}", c.group(), n_press, x, y, events))).unwrap();
         //     log::debug!("Click({:?}) unpaired release {} times at {}x{} {:?}", c.group(), n_press, x, y, events);
         // }));
-        w.add_controller(&on_click);
+        view.add_controller(&on_click);
 
         let on_scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::all());
         on_scroll.set_name("scroller");
@@ -266,12 +324,24 @@ impl factory::FactoryPrototype for VimWindow {
             println!("scroll end");
             // sender.send(AppMsg::Message(format!("scroll end"))).unwrap();
         }));
-        w.add_controller(&on_scroll);
+        view.add_controller(&on_scroll);
 
-        VimWindowWidgets { root: w }
+        let font_description = self.font_description.clone();
+        view.add_tick_callback(move |view, _| {
+            if let Some(desc) = view.pango_context().font_description() {
+                let font_desc = unsafe { &*font_description.as_ref().as_ptr() }.clone();
+                if desc != font_desc {
+                    view.pango_context().set_font_description(&font_desc);
+                }
+            }
+            glib::Continue(true)
+        });
+
+        VimWindowWidgets { view }
     }
 
     fn position(&self, _grid: &u64) -> FixedPosition {
+        log::info!("requesting window position {}", _grid);
         FixedPosition {
             x: self.rect.x() as f64,
             y: self.rect.y() as f64,
@@ -279,26 +349,40 @@ impl factory::FactoryPrototype for VimWindow {
     }
 
     fn view(&self, index: &u64, widgets: &VimWindowWidgets) {
-        log::info!("vim window update {} {:?}", index, self.rect);
-        let win = &widgets.root;
-        // win.render(&self.hldefs);
+        // log::warn!("vim window update {} {:?}", index, self.rect);
+        let view = &widgets.view;
+
+        gtk::prelude::FixedExt::move_(
+            &view.parent().unwrap().downcast::<gtk::Fixed>().unwrap(),
+            view,
+            self.rect.x() as _,
+            self.rect.y() as _,
+        );
+        view.queue_draw();
+        view.queue_resize();
+        view.queue_allocate();
     }
 
     fn root_widget(widgets: &VimWindowWidgets) -> &VimWindowView {
-        &widgets.root
+        &widgets.view
     }
 }
 
-#[derive(Clone)]
+// #[derive(Clone)]
 pub struct VimWindow {
     id: u64,
     grid: u64,
+    linespace: u64,
+    charwidth: f64,
+    lineheight: f64,
     rect: gdk::Rectangle,
     hldefs: HighlightDefinitions,
-    // repaint: bool,
-    // should_flush: bool,
-    // linespace: Option<u64>,
-    // view: VimWindowView,
+    font_description: Rc<RefCell<pango::FontDescription>>,
+
+    visible: bool,
+    queued_draw: bool,
+
+    grids: crate::factory::FactoryMap<VimGrid>,
 }
 
 impl std::fmt::Debug for VimWindow {
@@ -317,18 +401,92 @@ impl VimWindow {
         grid: u64,
         rect: gdk::Rectangle,
         hldefs: HighlightDefinitions,
+        font_description: Rc<RefCell<pango::FontDescription>>,
     ) -> VimWindow {
         VimWindow {
             id,
             grid,
             rect,
             hldefs,
-            // view: Cell::new(None),
+            linespace: 0,
+            charwidth: 0.,
+            lineheight: 0.,
+
+            visible: true,
+            queued_draw: false,
+
+            font_description,
+
+            grids: crate::factory::FactoryMap::new(),
         }
     }
 
     pub fn set_pos(&mut self, x: u64, y: u64) {
         self.rect.set_x(x as i32);
         self.rect.set_y(y as i32);
+    }
+
+    pub fn get(&self, grid: u64) -> Option<&VimGrid> {
+        self.grids.get(grid)
+    }
+
+    pub fn get_mut(&mut self, grid: u64) -> Option<&mut VimGrid> {
+        self.grids.get_mut(grid)
+    }
+
+    pub fn hide(&mut self) {
+        self.visible = false;
+    }
+
+    pub fn show(&mut self) {
+        self.visible = true;
+    }
+
+    pub fn clear(&mut self) {
+        self.grids
+            .iter_mut()
+            .for_each(|(_, grid)| grid.textbuf().borrow().clear());
+    }
+
+    pub fn queue_draw(&mut self) {
+        self.queued_draw = true;
+    }
+
+    pub fn remove(&mut self, grid: u64) {
+        self.grids.remove(grid);
+    }
+
+    pub fn add(&mut self, grid: u64, width: u64, height: u64, hldefs: HighlightDefinitions) {
+        // let view = VimGridView::new(grid, width, height);
+        let rect = gdk::Rectangle::new(0, 0, width as _, height as _);
+        log::error!("creating grid {} {}x{}", grid, width, height);
+        // FIXME: convert width to cols, height to rows.
+        let textbuf = TextBuf::new(height as _, width as _);
+        let vimgrid = VimGrid {
+            win: self.id,
+            grid,
+            rect,
+            hldefs,
+            textbuf,
+            visible: true,
+            linespace: 0,
+            charwidth: 0.,
+            lineheight: 0.,
+            font_description: self.font_description.clone(),
+        };
+        self.grids.insert(grid, vimgrid);
+    }
+
+    pub fn resize(&mut self, width: u64, height: u64) {
+        self.rect.set_width(width as _);
+        self.rect.set_height(height as _);
+    }
+
+    /// (width, height)
+    fn size_required(&self, cols: u64, rows: u64) -> (u64, u64) {
+        (
+            (cols as f64 * self.charwidth) as u64,
+            (rows as f64 * self.lineheight) as u64,
+        )
     }
 }

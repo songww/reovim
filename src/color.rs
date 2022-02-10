@@ -18,7 +18,7 @@ impl ColorExt for Color {
     }
     fn to_hex(&self) -> String {
         format!(
-            "{:02x}{:02x}{:02x}",
+            "#{:02x}{:02x}{:02x}",
             (self.red() * 255.0) as u8,
             (self.green() * 255.0) as u8,
             (self.blue() * 255.0) as u8

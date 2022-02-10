@@ -278,8 +278,9 @@ pub async fn start_neovim_runtime(
     options.set_hlstate_external(true);
     options.set_linegrid_external(true);
     options.set_multigrid_external(true);
+    // options.set_termcolors_external(true);
     // nvim.ui_attach(geometry.width as i64, geometry.height as i64, &options)
-    nvim.ui_attach(opts.width as i64, opts.height as i64, &options)
+    nvim.ui_attach(80, 24, &options)
         .await
         .expect("Could not attach ui to neovim process");
 

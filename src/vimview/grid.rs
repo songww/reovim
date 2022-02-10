@@ -1,5 +1,9 @@
+// #[derive(glib::Boxed, Clone, Debug)]
+// #[boxed_type(name = "SizeBoxed")]
+// pub struct SizeBoxed(Box<Size>);
+
 mod imp {
-    use std::cell::{Cell, RefCell};
+    use std::cell::{Cell, Ref, RefCell};
     use std::rc::Rc;
     use std::sync::RwLock;
 
@@ -13,12 +17,14 @@ mod imp {
 
     use super::super::highlights::HighlightDefinitions;
     use super::super::textbuf::TextBuf;
+    // use super::SizeBoxed;
 
     // #[derive(Debug)]
     pub struct VimGridView {
         grid: Cell<u64>,
-        size: Cell<Size>,
-        textbuf: RefCell<TextBuf>,
+        width: Cell<u64>,
+        height: Cell<u64>,
+        textbuf: Cell<Rc<RefCell<TextBuf>>>,
         hldefs: Cell<Rc<RwLock<HighlightDefinitions>>>,
     }
 
@@ -26,7 +32,7 @@ mod imp {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             f.debug_struct("VimGridView")
                 .field("grid", &self.grid)
-                .field("size", &self.size)
+                // .field("size", unsafe { &*self.size.as_ptr() })
                 .finish_non_exhaustive()
         }
     }
@@ -48,9 +54,10 @@ mod imp {
         fn new() -> Self {
             Self {
                 grid: 0.into(),
-                size: Size::new(0., 0.).into(),
+                width: 0.into(),
+                height: 0.into(),
                 hldefs: Cell::new(Rc::new(RwLock::new(HighlightDefinitions::new()))),
-                textbuf: TextBuf::new().into(),
+                textbuf: Cell::new(Rc::new(RefCell::new(TextBuf::new()))),
             }
         }
     }
@@ -59,16 +66,16 @@ mod imp {
     impl ObjectImpl for VimGridView {
         fn constructed(&self, obj: &Self::Type) {
             self.parent_constructed(obj);
-            let size = self.size.get();
-            obj.set_width_request(size.width() as _);
-            obj.set_height_request(size.height() as _);
+            // let size = &unsafe { &*self.size.as_ptr() }.0;
+            // obj.set_width_request(size.width() as _);
+            // obj.set_height_request(size.height() as _);
 
-            obj.bind_property("grid", obj, "grid")
-                .flags(glib::BindingFlags::SYNC_CREATE)
-                .build();
-            obj.bind_property("size", obj, "size")
-                .flags(glib::BindingFlags::SYNC_CREATE)
-                .build();
+            // obj.bind_property("grid", obj, "grid")
+            //     .flags(glib::BindingFlags::SYNC_CREATE)
+            //     .build();
+            // obj.bind_property("size", obj, "size")
+            //     .flags(glib::BindingFlags::SYNC_CREATE)
+            //     .build();
             // obj.bind_property("hldefs", obj, "hldefs")
             //     .flags(glib::BindingFlags::SYNC_CREATE)
             //     .build();
@@ -77,9 +84,46 @@ mod imp {
             //     .build();
         }
 
+        fn properties() -> &'static [glib::ParamSpec] {
+            use once_cell::sync::Lazy;
+            static PROPERTIES: Lazy<Vec<glib::ParamSpec>> = Lazy::new(|| {
+                vec![
+                    glib::ParamSpecUInt64::new(
+                        "grid",
+                        "grid-id",
+                        "grid",
+                        1,
+                        u64::MAX,
+                        1,
+                        glib::ParamFlags::READWRITE,
+                    ),
+                    glib::ParamSpecUInt64::new(
+                        "width",
+                        "cols",
+                        "width",
+                        1,
+                        u64::MAX,
+                        1,
+                        glib::ParamFlags::READWRITE,
+                    ),
+                    glib::ParamSpecUInt64::new(
+                        "height",
+                        "rows",
+                        "height",
+                        1,
+                        u64::MAX,
+                        1,
+                        glib::ParamFlags::READWRITE,
+                    ),
+                ]
+            });
+
+            PROPERTIES.as_ref()
+        }
+
         fn set_property(
             &self,
-            obj: &Self::Type,
+            _obj: &Self::Type,
             _id: usize,
             value: &glib::Value,
             pspec: &glib::ParamSpec,
@@ -88,60 +132,109 @@ mod imp {
                 "grid" => {
                     self.grid.replace(value.get::<u64>().unwrap());
                 }
-                "size" => {
-                    self.size.replace(value.get::<Size>().unwrap());
+                "width" => {
+                    self.width.replace(value.get::<u64>().unwrap());
+                    self.textbuf()
+                        .resize(self.height.get() as _, self.width.get() as _);
                 }
-                // "hldefs" => {
-                //     self.hldefs
-                //         .replace(value.get::<Rc<RwLock<HighlightDefinitions>>>().unwrap());
-                //     obj.queue_draw();
-                // }
-                // "replace-text-cells" => {
-                //     self.hldefs.update(value.get::<TextCells>().unwrap());
-                // }
-                "flush" => {
-                    obj.queue_draw();
+                "height" => {
+                    self.height.replace(value.get::<u64>().unwrap());
+                    self.textbuf()
+                        .resize(self.height.get() as _, self.width.get() as _);
                 }
                 _ => unimplemented!(),
             }
         }
 
-        // fn property(&self, _obj: &Self::Type, _id: usize, pspec: &glib::ParamSpec) -> glib::Value {
-        //     match pspec.name() {
-        //         "rmr" => self.inner.borrow().rmr.to_value(),
-        //         "x-lines-interval" => self.inner.borrow().x_lines_interval.to_value(),
-        //         _ => unimplemented!(),
-        //     }
-        // }
+        fn property(&self, _obj: &Self::Type, _id: usize, pspec: &glib::ParamSpec) -> glib::Value {
+            match pspec.name() {
+                "grid" => self.grid.get().to_value(),
+                "width" => self.width.get().to_value(),
+                "height" => self.height.get().to_value(),
+                _ => unimplemented!(),
+            }
+        }
     }
 
     // Trait shared by all widgets
     impl WidgetImpl for VimGridView {
         fn snapshot(&self, widget: &Self::Type, snapshot: &gtk::Snapshot) {
-            let size = self.size.get();
-            let rect = Rect::new(0., 0., size.width(), size.height());
-            let cr = snapshot.append_cairo(&rect);
+            log::info!("----------------> snapshot");
             let pctx = widget.pango_context();
+            // NOTE: Apply size required.
+            let (width, height) = self.size_required(widget);
+            widget.set_size_request(width, height);
+
+            let width = widget.width_request();
+            let height = widget.height_request();
+            let rect = Rect::new(0., 0., width as _, height as _);
+            let cr = snapshot.append_cairo(&rect);
             let hldefs = (unsafe { &*self.hldefs.as_ptr() }).read().unwrap();
-            let layout = self.textbuf.borrow().layout(&pctx, &hldefs);
+            let layout = self.textbuf().layout(&pctx, &hldefs);
             pangocairo::show_layout(&cr, &layout);
-            self.parent_snapshot(widget, snapshot);
+            // self.parent_snapshot(widget, snapshot);
+        }
+
+        fn measure(
+            &self,
+            widget: &Self::Type,
+            orientation: gtk::Orientation,
+            for_size: i32,
+        ) -> (i32, i32, i32, i32) {
+            let size_required = self.size_required(widget);
+            match orientation {
+                gtk::Orientation::Vertical => (size_required.1, size_required.1, -1, -1),
+                gtk::Orientation::Horizontal => (size_required.0, size_required.0, -1, -1),
+                _ => self.parent_measure(widget, orientation, for_size),
+            }
         }
     }
 
     impl VimGridView {
-        fn set_hldefs(&self, hldefs: Rc<RwLock<HighlightDefinitions>>) {
+        pub(super) fn set_hldefs(&self, hldefs: Rc<RwLock<HighlightDefinitions>>) {
             self.hldefs.replace(hldefs);
         }
 
-        fn set_textbuf(&self, textbuf: TextBuf) {
+        pub(super) fn set_textbuf(&self, textbuf: Rc<RefCell<TextBuf>>) {
             self.textbuf.replace(textbuf);
+        }
+
+        pub(super) fn textbuf(&self) -> Ref<TextBuf> {
+            unsafe { &*self.textbuf.as_ptr() }.borrow()
+        }
+
+        /// width, height
+        pub(super) fn size_required(&self, widget: &<Self as ObjectSubclass>::Type) -> (i32, i32) {
+            let metrics = widget.pango_context().metrics(None, None).unwrap();
+            let lineheight = metrics.height() as f64 / pango::SCALE as f64;
+            let charwidth = metrics.approximate_digit_width() as f64 / pango::SCALE as f64;
+            (
+                (self.width.get() as f64 * charwidth) as i32,
+                (self.height.get() as f64 * lineheight) as i32,
+            )
+        }
+
+        pub(super) fn set_height(&self, height: u64) {
+            self.height.replace(height);
+        }
+
+        pub(super) fn set_width(&self, width: u64) {
+            self.width.replace(width);
         }
     }
 }
 
-use gtk::gdk::prelude::*;
+use std::cell::{Ref, RefCell};
+use std::rc::Rc;
+use std::sync::RwLock;
+
+use glib::subclass::prelude::*;
 use gtk::graphene::Size;
+use gtk::prelude::*;
+use gtk::subclass::prelude::*;
+
+use super::textbuf::TextBuf;
+use super::HighlightDefinitions;
 
 glib::wrapper! {
     pub struct VimGridView(ObjectSubclass<imp::VimGridView>)
@@ -151,10 +244,66 @@ glib::wrapper! {
 
 impl VimGridView {
     pub fn new(grid: u64, width: u64, height: u64) -> VimGridView {
-        glib::Object::new(&[
-            ("grid", &grid),
-            ("size", &Size::new(width as _, height as _)),
-        ])
-        .expect("Failed to create `VimGridView`.")
+        glib::Object::new(&[("grid", &grid), ("width", &width), ("height", &height)])
+            .expect("Failed to create `VimGridView`.")
     }
+
+    fn imp(&self) -> &imp::VimGridView {
+        imp::VimGridView::from_instance(self)
+    }
+
+    pub fn set_hldefs(&self, hldefs: Rc<RwLock<HighlightDefinitions>>) {
+        self.imp().set_hldefs(hldefs);
+        self.queue_allocate();
+        self.queue_resize();
+        self.queue_draw();
+    }
+
+    pub fn set_textbuf(&self, textbuf: Rc<RefCell<TextBuf>>) {
+        self.imp().set_textbuf(textbuf);
+        self.queue_allocate();
+        self.queue_resize();
+        self.queue_draw();
+    }
+
+    pub fn set_font_description(&self, desc: &pango::FontDescription) {
+        self.pango_context().set_font_description(desc);
+        self.queue_allocate();
+        self.queue_resize();
+        self.queue_draw();
+    }
+
+    pub fn textbuf(&self) -> Ref<TextBuf> {
+        self.queue_allocate();
+        self.queue_resize();
+        self.queue_draw();
+        self.imp().textbuf()
+    }
+
+    pub fn resize(&self, width: f32, height: f32) {
+        // WidgetExt::set_width_request(self, width as i32);
+        // WidgetExt::set_height_request(self, height as i32);
+        // self.imp().textbuf().resize(height as _, width as _);
+        self.set_width(width as _);
+        self.set_height(height as _);
+        self.queue_allocate();
+        self.queue_resize();
+        self.queue_draw();
+    }
+
+    pub fn set_height(&self, height: u64) {
+        self.imp().set_height(height);
+    }
+
+    pub fn set_width(&self, width: u64) {
+        self.imp().set_width(width);
+    }
+
+    // pub fn hide(&self) {
+    //     self.imp().hide(self);
+    // }
+    //
+    // pub fn show(&self) {
+    //     self.imp().show(self);
+    // }
 }

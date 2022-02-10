@@ -3,7 +3,7 @@ use crate::bridge::GridLineCell;
 #[derive(Clone)]
 pub struct Cell {
     pub text: String,
-    pub hl_id: u64,
+    pub hldef: u64,
     pub double_width: bool,
 }
 
@@ -21,7 +21,7 @@ impl Line {
             grid,
             row,
             column_start,
-            cells
+            cells,
         }
     }
 }
@@ -31,7 +31,7 @@ impl Line {
 pub struct Segment {
     //pub cell: &'a Cell,
     pub text: String,
-    pub hl_id: u64,
+    pub hldef: u64,
     pub start: usize,
     pub len: usize,
 }
@@ -60,7 +60,7 @@ impl Row {
         for _ in 0..len {
             cells.push(Cell {
                 text: String::from(" "),
-                hl_id: 0,
+                hldef: 0,
                 double_width: false,
             })
         }
@@ -87,7 +87,7 @@ impl Row {
         let mut n = self.cells.clone();
         n.resize_with(new_size, || Cell {
             text: String::from(" "),
-            hl_id: 0,
+            hldef: 0,
             double_width: false,
         });
 
@@ -100,7 +100,7 @@ impl Row {
         for i in from..to {
             self.cells[i] = Cell {
                 text: String::from(" "),
-                hl_id: 0,
+                hldef: 0,
                 double_width: false,
             }
         }
@@ -130,12 +130,11 @@ impl Row {
         // for affected segments. This is so that if col_start is in middle of a
         // ligature, we'll render the whole segment where the ligature might have
         // gotten broken up.
-        let range_start =
-            if let Some(seg) = self.to_segments(col_start, col_start).first() {
-                seg.start
-            } else {
-                0
-            };
+        let range_start = if let Some(seg) = self.to_segments(col_start, col_start).first() {
+            seg.start
+        } else {
+            0
+        };
 
         let mut offset = col_start;
         for cell in line.cells.iter() {
@@ -144,7 +143,7 @@ impl Row {
                 self.cells[offset + r] = Cell {
                     // TODO(ville): Avoid clone here?
                     text: cell.text.clone(),
-                    hl_id: cell.highlight_id.unwrap(),
+                    hldef: cell.hldef.unwrap(),
                     double_width: cell.double_width,
                 };
             }
@@ -158,14 +157,14 @@ impl Row {
     }
 
     pub fn to_segments(&self, cell_start: usize, end: usize) -> Vec<Segment> {
-        let base_hl = self.cells[cell_start].hl_id;
+        let base_hl = self.cells[cell_start].hldef;
         let base = if let Some((i, _)) = self
             .cells
             .iter()
             .take(cell_start)
             .enumerate()
             .rev()
-            .find(|(_, c)| c.hl_id != base_hl)
+            .find(|(_, c)| c.hldef != base_hl)
         {
             // Plus one because we're already "past" from our
             // segment's start.
@@ -184,7 +183,7 @@ impl Row {
             }
 
             if let Some(ref mut seg) = segs.last_mut() {
-                if seg.hl_id == cell.hl_id {
+                if seg.hldef == cell.hldef {
                     seg.text.push_str(&cell.text);
                     seg.len += 1;
 
@@ -195,7 +194,7 @@ impl Row {
 
             segs.push(Segment {
                 text: cell.text.clone(),
-                hl_id: cell.hl_id,
+                hldef: cell.hldef,
                 start,
                 len: 1,
             });
@@ -222,52 +221,52 @@ mod benches {
             vec![
                 Cell {
                     text: "0".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "1".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "2".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "3".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "4".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "5".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "6".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "7".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "8".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "9".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
             ],
@@ -281,13 +280,13 @@ mod benches {
                 cells: vec![
                     bridge::Cell {
                         text: String::from("1"),
-                        hl_id: 1,
+                        hldef: 1,
                         repeat: 3,
                         double_width: false,
                     },
                     bridge::Cell {
                         text: String::from("1"),
-                        hl_id: 1,
+                        hldef: 1,
                         repeat: 3,
                         double_width: false,
                     },
@@ -304,52 +303,52 @@ mod benches {
             vec![
                 Cell {
                     text: "0".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "1".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "2".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "3".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "4".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "5".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "6".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "7".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "8".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "9".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
             ],
@@ -363,13 +362,13 @@ mod benches {
                 cells: vec![
                     bridge::Cell {
                         text: String::from("1"),
-                        hl_id: 1,
+                        hldef: 1,
                         repeat: 3,
                         double_width: false,
                     },
                     bridge::Cell {
                         text: String::from("1"),
-                        hl_id: 2,
+                        hldef: 2,
                         repeat: 3,
                         double_width: false,
                     },
@@ -386,52 +385,52 @@ mod benches {
             vec![
                 Cell {
                     text: "0".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "1".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "2".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "3".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "4".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "5".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "6".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "7".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "8".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "9".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
             ],
@@ -449,27 +448,27 @@ mod benches {
                 vec![
                     Cell {
                         text: "f".to_string(),
-                        hl_id: 0,
+                        hldef: 0,
                         double_width: false,
                     },
                     Cell {
                         text: "i".to_string(),
-                        hl_id: 0,
+                        hldef: 0,
                         double_width: false,
                     },
                     Cell {
                         text: "r".to_string(),
-                        hl_id: 0,
+                        hldef: 0,
                         double_width: false,
                     },
                     Cell {
                         text: "s".to_string(),
-                        hl_id: 0,
+                        hldef: 0,
                         double_width: false,
                     },
                     Cell {
                         text: "t".to_string(),
-                        hl_id: 0,
+                        hldef: 0,
                         double_width: false,
                     },
                 ],
@@ -481,8 +480,8 @@ mod benches {
 #[cfg(test)]
 mod tests {
 
-    use crate::bridge;
     use super::*;
+    use crate::bridge;
 
     #[test]
     fn test_row_update() {
@@ -492,52 +491,52 @@ mod tests {
             vec![
                 Cell {
                     text: "0".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "1".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "2".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "3".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "4".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "5".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "6".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "7".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "8".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "9".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
             ],
@@ -550,13 +549,13 @@ mod tests {
             cells: vec![
                 bridge::GridLineCell {
                     text: String::from("1"),
-                    highlight_id: Some(1),
+                    hldef: Some(1),
                     repeat: Some(3),
                     double_width: false,
                 },
                 bridge::GridLineCell {
                     text: String::from("2"),
-                    highlight_id: Some(1),
+                    hldef: Some(1),
                     repeat: Some(3),
                     double_width: false,
                 },
@@ -577,27 +576,27 @@ mod tests {
             vec![
                 Cell {
                     text: " ".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: " ".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "=".to_string(),
-                    hl_id: 1,
+                    hldef: 1,
                     double_width: false,
                 },
                 Cell {
                     text: "=".to_string(),
-                    hl_id: 1,
+                    hldef: 1,
                     double_width: false,
                 },
                 Cell {
                     text: "=".to_string(),
-                    hl_id: 1,
+                    hldef: 1,
                     double_width: false,
                 },
             ],
@@ -609,7 +608,7 @@ mod tests {
             column_start: 4,
             cells: vec![bridge::GridLineCell {
                 text: String::from(" "),
-                highlight_id: Some(2),
+                hldef: Some(2),
                 repeat: Some(1),
                 double_width: false,
             }],
@@ -625,13 +624,13 @@ mod tests {
             vec![
                 Segment {
                     text: "==".to_string(),
-                    hl_id: 1,
+                    hldef: 1,
                     start: 2,
                     len: 2,
                 },
                 Segment {
                     text: " ".to_string(),
-                    hl_id: 2,
+                    hldef: 2,
                     start: 4,
                     len: 1,
                 }
@@ -653,19 +652,19 @@ mod tests {
 
         let cell = rope.cell_at(5);
         assert_eq!(cell.text, "5");
-        assert_eq!(cell.hl_id, 1);
+        assert_eq!(cell.hldef, 1);
 
         let cell = rope.cell_at(1);
         assert_eq!(cell.text, "1");
-        assert_eq!(cell.hl_id, 0);
+        assert_eq!(cell.hldef, 0);
 
         let cell = rope.cell_at(7);
         assert_eq!(cell.text, "あ");
-        assert_eq!(cell.hl_id, 1);
+        assert_eq!(cell.hldef, 1);
 
         let cell = rope.cell_at(8);
         assert_eq!(cell.text, "あ");
-        assert_eq!(cell.hl_id, 1);
+        assert_eq!(cell.hldef, 1);
     }
     */
 
@@ -677,57 +676,57 @@ mod tests {
             vec![
                 Cell {
                     text: "f".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "i".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "r".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "s".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "t".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "s".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "e".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "c".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "o".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "n".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "d".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
             ],
@@ -748,82 +747,82 @@ mod tests {
             vec![
                 Cell {
                     text: "f".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "i".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "r".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "s".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "t".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "s".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "e".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "c".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "o".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "n".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "d".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "t".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "h".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "i".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "r".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "d".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
             ],
@@ -843,52 +842,52 @@ mod tests {
             vec![
                 Cell {
                     text: "0".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "1".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "2".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "3".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "4".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "5".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "6".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "7".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "8".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
                 Cell {
                     text: "9".to_string(),
-                    hl_id: 0,
+                    hldef: 0,
                     double_width: false,
                 },
             ],
@@ -910,22 +909,22 @@ mod tests {
             vec![
                 Cell {
                     text: "1".to_string(),
-                    hl_id: 1,
+                    hldef: 1,
                     double_width: false,
                 },
                 Cell {
                     text: "1".to_string(),
-                    hl_id: 1,
+                    hldef: 1,
                     double_width: false,
                 },
                 Cell {
                     text: "2".to_string(),
-                    hl_id: 2,
+                    hldef: 2,
                     double_width: false,
                 },
                 Cell {
                     text: "3".to_string(),
-                    hl_id: 3,
+                    hldef: 3,
                     double_width: false,
                 },
             ],
@@ -957,52 +956,52 @@ mod tests {
             vec![
                 Cell {
                     text: "1".to_string(),
-                    hl_id: 1,
+                    hldef: 1,
                     double_width: false,
                 },
                 Cell {
                     text: "1".to_string(),
-                    hl_id: 1,
+                    hldef: 1,
                     double_width: false,
                 },
                 Cell {
                     text: "2".to_string(),
-                    hl_id: 2,
+                    hldef: 2,
                     double_width: false,
                 },
                 Cell {
                     text: "2".to_string(),
-                    hl_id: 2,
+                    hldef: 2,
                     double_width: false,
                 },
                 Cell {
                     text: "2".to_string(),
-                    hl_id: 2,
+                    hldef: 2,
                     double_width: false,
                 },
                 Cell {
                     text: " ".to_string(),
-                    hl_id: 2,
+                    hldef: 2,
                     double_width: false,
                 },
                 Cell {
                     text: "3".to_string(),
-                    hl_id: 3,
+                    hldef: 3,
                     double_width: false,
                 },
                 Cell {
                     text: "3".to_string(),
-                    hl_id: 3,
+                    hldef: 3,
                     double_width: false,
                 },
                 Cell {
                     text: "3".to_string(),
-                    hl_id: 3,
+                    hldef: 3,
                     double_width: false,
                 },
                 Cell {
                     text: "3".to_string(),
-                    hl_id: 3,
+                    hldef: 3,
                     double_width: false,
                 },
             ],

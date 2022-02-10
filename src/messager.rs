@@ -3,10 +3,10 @@ use relm4::{
     send, AppUpdate, Components, MessageHandler, Model, RelmApp, RelmMsgHandler, Sender,
     WidgetPlus, Widgets,
 };
+use tokio::runtime::{Builder, Runtime};
 use tokio::sync::mpsc::{
     channel, unbounded_channel as unbound, Sender as TokioSender, UnboundedSender,
 };
-use tokio::runtime::{Builder, Runtime};
 
 use crate::{
     app::AppMessage,
@@ -41,9 +41,11 @@ impl MessageHandler<crate::app::AppModel> for VimMessager {
         });
 
         rt.spawn(bridge::start_neovim_runtime(
-            /* ui_command_sender */ LoggingTx::attach(ui_command_sender.clone(), "chan-ui-commands".to_string()),
+            /* ui_command_sender */
+            LoggingTx::attach(ui_command_sender.clone(), "chan-ui-commands".to_string()),
             ui_command_receiver,
-            /* redraw_event_sender */ LoggingTx::attach(sender, "chan-redraw-events".to_string()),
+            /* redraw_event_sender */
+            LoggingTx::attach(sender, "chan-redraw-events".to_string()),
             /* running */ std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
             /* opts */ parent_model.opts.clone(),
         ));
@@ -55,7 +57,7 @@ impl MessageHandler<crate::app::AppModel> for VimMessager {
     }
 
     fn send(&self, message: Self::Msg) {
-        log::warn!("Ignored message: {:?}", message);
+        log::error!("Ignored message: {:?}", message);
         /*
         match msg {
             AppMsg::UiCommand(command) => {
