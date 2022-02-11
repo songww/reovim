@@ -35,7 +35,9 @@ where
     Data: FactoryPrototype,
 {
     data: FxHashMap<u64, Data>,
-    widgets: RefCell<FxHashMap<u64, Widgets<Data::Widgets, <Data::View as FactoryView<Data::Root>>::Root>>>,
+    widgets: RefCell<
+        FxHashMap<u64, Widgets<Data::Widgets, <Data::View as FactoryView<Data::Root>>::Root>>,
+    >,
     changes: RefCell<FxHashMap<u64, ChangeType>>,
 }
 
@@ -60,8 +62,9 @@ where
 
         let mut changes = FxHashMap::default();
         changes.reserve(length);
-        data.keys()
-            .for_each(|k| {changes.insert(*k, ChangeType::Add);});
+        data.keys().for_each(|k| {
+            changes.insert(*k, ChangeType::Add);
+        });
         let mut widgets = FxHashMap::default();
         widgets.reserve(length);
         FactoryMap {
@@ -160,13 +163,19 @@ where
                     let new_widgets = data.init_view(index, sender.clone());
                     let position = data.position(index);
                     let root = view.add(Data::root_widget(&new_widgets), &position);
-                    widgets.insert(*index, Widgets {
-                        widgets: new_widgets,
-                        root,
-                    });
+                    widgets.insert(
+                        *index,
+                        Widgets {
+                            widgets: new_widgets,
+                            root,
+                        },
+                    );
                 }
                 ChangeType::Update => {
-                    self.data.get(index).unwrap().view(index, &widgets.get(index).unwrap().widgets);
+                    self.data
+                        .get(index)
+                        .unwrap()
+                        .view(index, &widgets.get(index).unwrap().widgets);
                 }
                 ChangeType::Remove => {
                     let remove_widget = widgets.remove(index).unwrap();
@@ -179,10 +188,13 @@ where
                     let new_widgets = data.init_view(index, sender.clone());
                     let position = data.position(index);
                     let root = view.add(Data::root_widget(&new_widgets), &position);
-                    widgets.insert(*index ,Widgets {
-                        widgets: new_widgets,
-                        root,
-                    });
+                    widgets.insert(
+                        *index,
+                        Widgets {
+                            widgets: new_widgets,
+                            root,
+                        },
+                    );
                 }
             }
         }

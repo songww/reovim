@@ -32,7 +32,7 @@ impl NeovimHandler {
 impl Handler for NeovimHandler {
     type Writer = Tx;
 
-    async fn handle_notify(&self, event_name: String, arguments: Vec<Value>, _neovim: Neovim<Tx>) {
+    async fn handle_notify(&self, event_name: String, arguments: Vec<Value>, neovim: Neovim<Tx>) {
         trace!("Neovim notification: {:?}", &event_name);
 
         #[cfg(windows)]
@@ -42,8 +42,8 @@ impl Handler for NeovimHandler {
         match event_name.as_ref() {
             "redraw" => {
                 for events in arguments {
-                    let parsed_events =
-                        parse_redraw_event(events).expect("Could not parse event from neovim");
+                    let parsed_events = parse_redraw_event(events, neovim.clone())
+                        .expect("Could not parse event from neovim");
 
                     for parsed_event in parsed_events {
                         let redraw_event_sender = redraw_event_sender.lock().await;

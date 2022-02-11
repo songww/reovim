@@ -134,7 +134,8 @@ pub enum EditorMode {
     Unknown(String),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Derivative)]
+#[derivative(Debug)]
 pub enum RedrawEvent {
     SetTitle {
         title: String,
@@ -194,6 +195,8 @@ pub enum RedrawEvent {
     },
     WindowPosition {
         grid: u64,
+        #[derivative(Debug = "ignore")]
+        window: nvim::Window<super::Tx>,
         start_row: u64,
         start_column: u64,
         width: u64,
@@ -225,6 +228,8 @@ pub enum RedrawEvent {
     },
     WindowViewport {
         grid: u64,
+        #[derivative(Debug = "ignore")]
+        window: nvim::Window<super::Tx>,
         top_line: f64,
         bottom_line: f64,
         current_line: f64,
@@ -304,36 +309,8 @@ impl Default for ChannelMode {
 }
 
 #[derive(Debug, Default)]
-pub struct ClientVersion {
-    pub major: u64,
-    pub minor: Option<u64>,
-    pub patch: Option<u64>,
-    pub prerelease: Option<String>,
-    pub commit: Option<String>,
-}
-
-#[derive(Debug)]
-pub enum ClientType {
-    Remote,
-    Ui,
-    Embedder,
-    Host,
-    Plugin,
-}
-
-impl Default for ClientType {
-    fn default() -> Self {
-        Self::Remote
-    }
-}
-
-#[derive(Debug, Default)]
 pub struct ClientInfo {
     pub name: String,
-    pub version: ClientVersion,
-    pub client_type: ClientType,
-    // methods
-    // attributes
 }
 
 #[derive(Debug, Default)]
@@ -346,17 +323,56 @@ pub struct ChannelInfo {
     pub client: Option<ClientInfo>,
 }
 
-fn extract_values<Arr: AsMut<[Value]>>(values: Vec<Value>, mut arr: Arr) -> Result<Arr> {
-    let arr_ref = arr.as_mut();
+fn unpack_color(packed_color: u64) -> Color {
+    let packed_color = packed_color as u32;
+    let r = ((packed_color & 0x00ff_0000) >> 16) as f32;
+    let g = ((packed_color & 0xff00) >> 8) as f32;
+    let b = (packed_color & 0xff) as f32;
+    Color::new(
+        /* r: */ r / 255.0,
+        /* g: */ g / 255.0,
+        /* b: */ b / 255.0,
+        /* a: */ 1.0,
+    )
+}
 
-    if values.len() != arr_ref.len() {
+fn extract_values<const REQ: usize>(values: Vec<Value>) -> Result<[Value; REQ]> {
+    if REQ > values.len() {
+        return Err(ParseError::Format(format!("{:?}", values)));
+    }
+
+    let mut required_values = vec![Value::Nil; REQ];
+
+    for (index, value) in values.into_iter().enumerate() {
+        if index < REQ {
+            required_values[index] = value;
+        }
+    }
+
+    Ok(required_values.try_into().unwrap())
+}
+
+fn extract_values_with_optional<const REQ: usize, const OPT: usize>(
+    values: Vec<Value>,
+) -> Result<([Value; REQ], [Option<Value>; OPT])> {
+    if REQ > values.len() {
         Err(ParseError::Format(format!("{:?}", values)))
     } else {
-        for (i, val) in values.into_iter().enumerate() {
-            arr_ref[i] = val;
+        let mut required_values = vec![Value::Nil; REQ];
+        let mut optional_values = vec![None; OPT];
+
+        for (index, value) in values.into_iter().enumerate() {
+            if index < REQ {
+                required_values[index] = value;
+            } else {
+                optional_values[index - REQ] = Some(value);
+            }
         }
 
-        Ok(arr)
+        Ok((
+            required_values.try_into().unwrap(),
+            optional_values.try_into().unwrap(),
+        ))
     }
 }
 
@@ -389,7 +405,7 @@ fn parse_bool(bool_value: Value) -> Result<bool> {
 }
 
 fn parse_set_title(set_title_arguments: Vec<Value>) -> Result<RedrawEvent> {
-    let [title] = extract_values(set_title_arguments, [Value::Nil])?;
+    let [title] = extract_values(set_title_arguments)?;
 
     Ok(RedrawEvent::SetTitle {
         title: parse_string(title)?,
@@ -397,8 +413,7 @@ fn parse_set_title(set_title_arguments: Vec<Value>) -> Result<RedrawEvent> {
 }
 
 fn parse_mode_info_set(mode_info_set_arguments: Vec<Value>) -> Result<RedrawEvent> {
-    let [_cursor_style_enabled, mode_info] =
-        extract_values(mode_info_set_arguments, [Value::Nil, Value::Nil])?;
+    let [_cursor_style_enabled, mode_info] = extract_values(mode_info_set_arguments)?;
 
     let mode_info_values = parse_array(mode_info)?;
     let mut cursor_modes = Vec::with_capacity(mode_info_values.len());
@@ -438,7 +453,7 @@ fn parse_mode_info_set(mode_info_set_arguments: Vec<Value>) -> Result<RedrawEven
 }
 
 fn parse_option_set(option_set_arguments: Vec<Value>) -> Result<RedrawEvent> {
-    let [name, value] = extract_values(option_set_arguments, [Value::Nil, Value::Nil])?;
+    let [name, value] = extract_values(option_set_arguments)?;
 
     let name = parse_string(name)?;
 
@@ -460,7 +475,7 @@ fn parse_option_set(option_set_arguments: Vec<Value>) -> Result<RedrawEvent> {
 }
 
 fn parse_mode_change(mode_change_arguments: Vec<Value>) -> Result<RedrawEvent> {
-    let [mode, mode_index] = extract_values(mode_change_arguments, [Value::Nil, Value::Nil])?;
+    let [mode, mode_index] = extract_values(mode_change_arguments)?;
     let mode_name = parse_string(mode)?;
 
     Ok(RedrawEvent::ModeChange {
@@ -477,8 +492,7 @@ fn parse_mode_change(mode_change_arguments: Vec<Value>) -> Result<RedrawEvent> {
 }
 
 fn parse_grid_resize(grid_resize_arguments: Vec<Value>) -> Result<RedrawEvent> {
-    let [grid_id, width, height] =
-        extract_values(grid_resize_arguments, [Value::Nil, Value::Nil, Value::Nil])?;
+    let [grid_id, width, height] = extract_values(grid_resize_arguments)?;
 
     Ok(RedrawEvent::Resize {
         grid: parse_u64(grid_id)?,
@@ -488,15 +502,14 @@ fn parse_grid_resize(grid_resize_arguments: Vec<Value>) -> Result<RedrawEvent> {
 }
 
 fn parse_default_colors(default_colors_arguments: Vec<Value>) -> Result<RedrawEvent> {
-    let values = [Value::Nil, Value::Nil, Value::Nil, Value::Nil, Value::Nil];
     let [foreground, background, special, _term_foreground, _term_background] =
-        extract_values(default_colors_arguments, values)?;
+        extract_values(default_colors_arguments)?;
 
     Ok(RedrawEvent::DefaultColorsSet {
         colors: Colors {
-            foreground: Some(Color::from_u64(parse_u64(foreground)?)),
-            background: Some(Color::from_u64(parse_u64(background)?)),
-            special: Some(Color::from_u64(parse_u64(special)?)),
+            foreground: Some(unpack_color(parse_u64(foreground)?)),
+            background: Some(unpack_color(parse_u64(background)?)),
+            special: Some(unpack_color(parse_u64(special)?)),
         },
     })
 }
@@ -510,13 +523,13 @@ fn parse_style(style_map: Value) -> Result<Style> {
         if let (Value::String(name), value) = attribute {
             match (name.as_str().unwrap(), value) {
                 ("foreground", Value::Integer(packed_color)) => {
-                    style.colors.foreground = Some(Color::from_u64(packed_color.as_u64().unwrap()))
+                    style.colors.foreground = Some(unpack_color(packed_color.as_u64().unwrap()))
                 }
                 ("background", Value::Integer(packed_color)) => {
-                    style.colors.background = Some(Color::from_u64(packed_color.as_u64().unwrap()))
+                    style.colors.background = Some(unpack_color(packed_color.as_u64().unwrap()))
                 }
                 ("special", Value::Integer(packed_color)) => {
-                    style.colors.special = Some(Color::from_u64(packed_color.as_u64().unwrap()))
+                    style.colors.special = Some(unpack_color(packed_color.as_u64().unwrap()))
                 }
                 ("reverse", Value::Boolean(reverse)) => style.reverse = reverse,
                 ("italic", Value::Boolean(italic)) => style.italic = italic,
@@ -538,9 +551,7 @@ fn parse_style(style_map: Value) -> Result<Style> {
 }
 
 fn parse_hl_attr_define(hl_attr_define_arguments: Vec<Value>) -> Result<RedrawEvent> {
-    let values = [Value::Nil, Value::Nil, Value::Nil, Value::Nil];
-    let [id, attributes, _terminal_attributes, _info] =
-        extract_values(hl_attr_define_arguments, values)?;
+    let [id, attributes, _terminal_attributes, _info] = extract_values(hl_attr_define_arguments)?;
 
     let style = parse_style(attributes)?;
     Ok(RedrawEvent::HighlightAttributesDefine {
@@ -558,17 +569,17 @@ fn parse_grid_line_cell(grid_line_cell: Value) -> Result<GridLineCell> {
 
     let text_value = cell_contents
         .first_mut()
-        .map(|v| take_value(v))
+        .map(take_value)
         .ok_or_else(|| ParseError::Format(format!("{:?}", cell_contents)))?;
 
     let hldef = cell_contents
         .get_mut(1)
-        .map(|v| take_value(v))
+        .map(take_value)
         .map(parse_u64)
         .transpose()?;
     let repeat = cell_contents
         .get_mut(2)
-        .map(|v| take_value(v))
+        .map(take_value)
         .map(parse_u64)
         .transpose()?;
 
@@ -581,8 +592,7 @@ fn parse_grid_line_cell(grid_line_cell: Value) -> Result<GridLineCell> {
 }
 
 fn parse_grid_line(grid_line_arguments: Vec<Value>) -> Result<RedrawEvent> {
-    let values = [Value::Nil, Value::Nil, Value::Nil, Value::Nil];
-    let [grid_id, row, column_start, cells] = extract_values(grid_line_arguments, values)?;
+    let [grid_id, row, column_start, cells] = extract_values(grid_line_arguments)?;
 
     let grid = parse_u64(grid_id)?;
     let row = parse_u64(row)?;
@@ -616,7 +626,7 @@ fn parse_grid_line(grid_line_arguments: Vec<Value>) -> Result<RedrawEvent> {
 }
 
 fn parse_grid_clear(grid_clear_arguments: Vec<Value>) -> Result<RedrawEvent> {
-    let [grid_id] = extract_values(grid_clear_arguments, [Value::Nil])?;
+    let [grid_id] = extract_values(grid_clear_arguments)?;
 
     Ok(RedrawEvent::Clear {
         grid: parse_u64(grid_id)?,
@@ -624,7 +634,7 @@ fn parse_grid_clear(grid_clear_arguments: Vec<Value>) -> Result<RedrawEvent> {
 }
 
 fn parse_grid_destroy(grid_destroy_arguments: Vec<Value>) -> Result<RedrawEvent> {
-    let [grid_id] = extract_values(grid_destroy_arguments, [Value::Nil])?;
+    let [grid_id] = extract_values(grid_destroy_arguments)?;
 
     Ok(RedrawEvent::Destroy {
         grid: parse_u64(grid_id)?,
@@ -632,8 +642,7 @@ fn parse_grid_destroy(grid_destroy_arguments: Vec<Value>) -> Result<RedrawEvent>
 }
 
 fn parse_grid_cursor_goto(cursor_goto_arguments: Vec<Value>) -> Result<RedrawEvent> {
-    let [grid_id, row, column] =
-        extract_values(cursor_goto_arguments, [Value::Nil, Value::Nil, Value::Nil])?;
+    let [grid_id, row, column] = extract_values(cursor_goto_arguments)?;
 
     Ok(RedrawEvent::CursorGoto {
         grid: parse_u64(grid_id)?,
@@ -643,17 +652,7 @@ fn parse_grid_cursor_goto(cursor_goto_arguments: Vec<Value>) -> Result<RedrawEve
 }
 
 fn parse_grid_scroll(grid_scroll_arguments: Vec<Value>) -> Result<RedrawEvent> {
-    let values = [
-        Value::Nil,
-        Value::Nil,
-        Value::Nil,
-        Value::Nil,
-        Value::Nil,
-        Value::Nil,
-        Value::Nil,
-    ];
-    let [grid_id, top, bottom, left, right, rows, columns] =
-        extract_values(grid_scroll_arguments, values)?;
+    let [grid_id, top, bottom, left, right, rows, columns] = extract_values(grid_scroll_arguments)?;
     Ok(RedrawEvent::Scroll {
         grid: parse_u64(grid_id)?,
         top: parse_u64(top)?,
@@ -665,20 +664,15 @@ fn parse_grid_scroll(grid_scroll_arguments: Vec<Value>) -> Result<RedrawEvent> {
     })
 }
 
-fn parse_win_pos(win_pos_arguments: Vec<Value>) -> Result<RedrawEvent> {
-    let values = [
-        Value::Nil,
-        Value::Nil,
-        Value::Nil,
-        Value::Nil,
-        Value::Nil,
-        Value::Nil,
-    ];
-    let [grid, _window, start_row, start_column, width, height] =
-        extract_values(win_pos_arguments, values)?;
+fn parse_win_pos(
+    win_pos_arguments: Vec<Value>,
+    neovim: nvim::Neovim<super::Tx>,
+) -> Result<RedrawEvent> {
+    let [grid, window, start_row, start_column, width, height] = extract_values(win_pos_arguments)?;
 
     Ok(RedrawEvent::WindowPosition {
         grid: parse_u64(grid)?,
+        window: nvim::Window::new(window, neovim),
         start_row: parse_u64(start_row)?,
         start_column: parse_u64(start_column)?,
         width: parse_u64(width)?,
@@ -698,58 +692,28 @@ fn parse_window_anchor(value: Value) -> Result<WindowAnchor> {
 }
 
 fn parse_win_float_pos(win_float_pos_arguments: Vec<Value>) -> Result<RedrawEvent> {
-    if win_float_pos_arguments.len() == 8 {
-        let values = [
-            Value::Nil,
-            Value::Nil,
-            Value::Nil,
-            Value::Nil,
-            Value::Nil,
-            Value::Nil,
-            Value::Nil,
-            Value::Nil,
-        ];
+    let ([grid, _window, anchor, anchor_grid, anchor_row, anchor_column, focusable], [sort_order]) =
+        extract_values_with_optional(win_float_pos_arguments)?;
 
-        let [grid, _window, anchor, anchor_grid, anchor_row, anchor_column, focusable, sort_order] =
-            extract_values(win_float_pos_arguments, values)?;
-
-        Ok(RedrawEvent::WindowFloatPosition {
-            grid: parse_u64(grid)?,
-            anchor: parse_window_anchor(anchor)?,
-            anchor_grid: parse_u64(anchor_grid)?,
-            anchor_row: parse_f64(anchor_row)?,
-            anchor_column: parse_f64(anchor_column)?,
-            focusable: parse_bool(focusable)?,
-            sort_order: Some(parse_u64(sort_order)?),
-        })
+    let sort_order = if let Some(sort_order) = sort_order {
+        Some(parse_u64(sort_order)?)
     } else {
-        let values = [
-            Value::Nil,
-            Value::Nil,
-            Value::Nil,
-            Value::Nil,
-            Value::Nil,
-            Value::Nil,
-            Value::Nil,
-        ];
+        None
+    };
 
-        let [grid, _window, anchor, anchor_grid, anchor_row, anchor_column, focusable] =
-            extract_values(win_float_pos_arguments, values)?;
-
-        Ok(RedrawEvent::WindowFloatPosition {
-            grid: parse_u64(grid)?,
-            anchor: parse_window_anchor(anchor)?,
-            anchor_grid: parse_u64(anchor_grid)?,
-            anchor_row: parse_f64(anchor_row)?,
-            anchor_column: parse_f64(anchor_column)?,
-            focusable: parse_bool(focusable)?,
-            sort_order: None,
-        })
-    }
+    Ok(RedrawEvent::WindowFloatPosition {
+        grid: parse_u64(grid)?,
+        anchor: parse_window_anchor(anchor)?,
+        anchor_grid: parse_u64(anchor_grid)?,
+        anchor_row: parse_f64(anchor_row)?,
+        anchor_column: parse_f64(anchor_column)?,
+        focusable: parse_bool(focusable)?,
+        sort_order,
+    })
 }
 
 fn parse_win_external_pos(win_external_pos_arguments: Vec<Value>) -> Result<RedrawEvent> {
-    let [grid, _window] = extract_values(win_external_pos_arguments, [Value::Nil, Value::Nil])?;
+    let [grid, _window] = extract_values(win_external_pos_arguments)?;
 
     Ok(RedrawEvent::WindowExternalPosition {
         grid: parse_u64(grid)?,
@@ -757,7 +721,7 @@ fn parse_win_external_pos(win_external_pos_arguments: Vec<Value>) -> Result<Redr
 }
 
 fn parse_win_hide(win_hide_arguments: Vec<Value>) -> Result<RedrawEvent> {
-    let [grid] = extract_values(win_hide_arguments, [Value::Nil])?;
+    let [grid] = extract_values(win_hide_arguments)?;
 
     Ok(RedrawEvent::WindowHide {
         grid: parse_u64(grid)?,
@@ -765,7 +729,7 @@ fn parse_win_hide(win_hide_arguments: Vec<Value>) -> Result<RedrawEvent> {
 }
 
 fn parse_win_close(win_close_arguments: Vec<Value>) -> Result<RedrawEvent> {
-    let [grid] = extract_values(win_close_arguments, [Value::Nil])?;
+    let [grid] = extract_values(win_close_arguments)?;
 
     Ok(RedrawEvent::WindowClose {
         grid: parse_u64(grid)?,
@@ -773,8 +737,7 @@ fn parse_win_close(win_close_arguments: Vec<Value>) -> Result<RedrawEvent> {
 }
 
 fn parse_msg_set_pos(msg_set_pos_arguments: Vec<Value>) -> Result<RedrawEvent> {
-    let values = [Value::Nil, Value::Nil, Value::Nil, Value::Nil];
-    let [grid, row, scrolled, separator_character] = extract_values(msg_set_pos_arguments, values)?;
+    let [grid, row, scrolled, separator_character] = extract_values(msg_set_pos_arguments)?;
 
     Ok(RedrawEvent::MessageSetPosition {
         grid: parse_u64(grid)?,
@@ -784,21 +747,16 @@ fn parse_msg_set_pos(msg_set_pos_arguments: Vec<Value>) -> Result<RedrawEvent> {
     })
 }
 
-fn parse_win_viewport(win_viewport_arguments: Vec<Value>) -> Result<RedrawEvent> {
-    let values = [
-        Value::Nil,
-        Value::Nil,
-        Value::Nil,
-        Value::Nil,
-        Value::Nil,
-        Value::Nil,
-        Value::Nil,
-    ];
-    let [grid, _window, top_line, bottom_line, current_line, current_column, line_count] =
-        extract_values(win_viewport_arguments, values)?;
+fn parse_win_viewport(
+    win_viewport_arguments: Vec<Value>,
+    neovim: nvim::Neovim<super::Tx>,
+) -> Result<RedrawEvent> {
+    let [grid, window, top_line, bottom_line, current_line, current_column, line_count] =
+        extract_values(win_viewport_arguments)?;
 
     Ok(RedrawEvent::WindowViewport {
         grid: parse_u64(grid)?,
+        window: nvim::Window::new(window, neovim),
         top_line: parse_f64(top_line)?,
         bottom_line: parse_f64(bottom_line)?,
         current_line: parse_f64(current_line)?,
@@ -811,7 +769,7 @@ fn parse_styled_content(line: Value) -> Result<StyledContent> {
     parse_array(line)?
         .into_iter()
         .map(|tuple| {
-            let [style_id, text] = extract_values(parse_array(tuple)?, [Value::Nil, Value::Nil])?;
+            let [style_id, text] = extract_values(parse_array(tuple)?)?;
 
             Ok((parse_u64(style_id)?, parse_string(text)?))
         })
@@ -819,16 +777,8 @@ fn parse_styled_content(line: Value) -> Result<StyledContent> {
 }
 
 fn parse_cmdline_show(cmdline_show_arguments: Vec<Value>) -> Result<RedrawEvent> {
-    let values = [
-        Value::Nil,
-        Value::Nil,
-        Value::Nil,
-        Value::Nil,
-        Value::Nil,
-        Value::Nil,
-    ];
     let [content, position, first_character, prompt, indent, level] =
-        extract_values(cmdline_show_arguments, values)?;
+        extract_values(cmdline_show_arguments)?;
 
     Ok(RedrawEvent::CommandLineShow {
         content: parse_styled_content(content)?,
@@ -841,7 +791,7 @@ fn parse_cmdline_show(cmdline_show_arguments: Vec<Value>) -> Result<RedrawEvent>
 }
 
 fn parse_cmdline_pos(cmdline_pos_arguments: Vec<Value>) -> Result<RedrawEvent> {
-    let [position, level] = extract_values(cmdline_pos_arguments, [Value::Nil, Value::Nil])?;
+    let [position, level] = extract_values(cmdline_pos_arguments)?;
 
     Ok(RedrawEvent::CommandLinePosition {
         position: parse_u64(position)?,
@@ -850,10 +800,7 @@ fn parse_cmdline_pos(cmdline_pos_arguments: Vec<Value>) -> Result<RedrawEvent> {
 }
 
 fn parse_cmdline_special_char(cmdline_special_char_arguments: Vec<Value>) -> Result<RedrawEvent> {
-    let [character, shift, level] = extract_values(
-        cmdline_special_char_arguments,
-        [Value::Nil, Value::Nil, Value::Nil],
-    )?;
+    let [character, shift, level] = extract_values(cmdline_special_char_arguments)?;
 
     Ok(RedrawEvent::CommandLineSpecialCharacter {
         character: parse_string(character)?,
@@ -863,7 +810,7 @@ fn parse_cmdline_special_char(cmdline_special_char_arguments: Vec<Value>) -> Res
 }
 
 fn parse_cmdline_block_show(cmdline_block_show_arguments: Vec<Value>) -> Result<RedrawEvent> {
-    let [lines] = extract_values(cmdline_block_show_arguments, [Value::Nil])?;
+    let [lines] = extract_values(cmdline_block_show_arguments)?;
 
     Ok(RedrawEvent::CommandLineBlockShow {
         lines: parse_array(lines)?
@@ -874,7 +821,7 @@ fn parse_cmdline_block_show(cmdline_block_show_arguments: Vec<Value>) -> Result<
 }
 
 fn parse_cmdline_block_append(cmdline_block_append_arguments: Vec<Value>) -> Result<RedrawEvent> {
-    let [line] = extract_values(cmdline_block_append_arguments, [Value::Nil])?;
+    let [line] = extract_values(cmdline_block_append_arguments)?;
 
     Ok(RedrawEvent::CommandLineBlockAppend {
         line: parse_styled_content(line)?,
@@ -882,8 +829,7 @@ fn parse_cmdline_block_append(cmdline_block_append_arguments: Vec<Value>) -> Res
 }
 
 fn parse_msg_show(msg_show_arguments: Vec<Value>) -> Result<RedrawEvent> {
-    let [kind, content, replace_last] =
-        extract_values(msg_show_arguments, [Value::Nil, Value::Nil, Value::Nil])?;
+    let [kind, content, replace_last] = extract_values(msg_show_arguments)?;
 
     Ok(RedrawEvent::MessageShow {
         kind: MessageKind::parse(&parse_string(kind)?),
@@ -893,7 +839,7 @@ fn parse_msg_show(msg_show_arguments: Vec<Value>) -> Result<RedrawEvent> {
 }
 
 fn parse_msg_showmode(msg_showmode_arguments: Vec<Value>) -> Result<RedrawEvent> {
-    let [content] = extract_values(msg_showmode_arguments, [Value::Nil])?;
+    let [content] = extract_values(msg_showmode_arguments)?;
 
     Ok(RedrawEvent::MessageShowMode {
         content: parse_styled_content(content)?,
@@ -901,7 +847,7 @@ fn parse_msg_showmode(msg_showmode_arguments: Vec<Value>) -> Result<RedrawEvent>
 }
 
 fn parse_msg_showcmd(msg_showcmd_arguments: Vec<Value>) -> Result<RedrawEvent> {
-    let [content] = extract_values(msg_showcmd_arguments, [Value::Nil])?;
+    let [content] = extract_values(msg_showcmd_arguments)?;
 
     Ok(RedrawEvent::MessageShowCommand {
         content: parse_styled_content(content)?,
@@ -909,7 +855,7 @@ fn parse_msg_showcmd(msg_showcmd_arguments: Vec<Value>) -> Result<RedrawEvent> {
 }
 
 fn parse_msg_ruler(msg_ruler_arguments: Vec<Value>) -> Result<RedrawEvent> {
-    let [content] = extract_values(msg_ruler_arguments, [Value::Nil])?;
+    let [content] = extract_values(msg_ruler_arguments)?;
 
     Ok(RedrawEvent::MessageRuler {
         content: parse_styled_content(content)?,
@@ -917,7 +863,7 @@ fn parse_msg_ruler(msg_ruler_arguments: Vec<Value>) -> Result<RedrawEvent> {
 }
 
 fn parse_msg_history_entry(entry: Value) -> Result<(MessageKind, StyledContent)> {
-    let [kind, content] = extract_values(parse_array(entry)?, [Value::Nil, Value::Nil])?;
+    let [kind, content] = extract_values(parse_array(entry)?)?;
 
     Ok((
         MessageKind::parse(&parse_string(kind)?),
@@ -926,7 +872,7 @@ fn parse_msg_history_entry(entry: Value) -> Result<(MessageKind, StyledContent)>
 }
 
 fn parse_msg_history_show(msg_history_show_arguments: Vec<Value>) -> Result<RedrawEvent> {
-    let [entries] = extract_values(msg_history_show_arguments, [Value::Nil])?;
+    let [entries] = extract_values(msg_history_show_arguments)?;
 
     Ok(RedrawEvent::MessageHistoryShow {
         entries: parse_array(entries)?
@@ -936,7 +882,10 @@ fn parse_msg_history_show(msg_history_show_arguments: Vec<Value>) -> Result<Redr
     })
 }
 
-pub fn parse_redraw_event(event_value: Value) -> Result<Vec<RedrawEvent>> {
+pub fn parse_redraw_event(
+    event_value: Value,
+    neovim: nvim::Neovim<super::Tx>,
+) -> Result<Vec<RedrawEvent>> {
     let mut event_contents = parse_array(event_value)?.into_iter();
     let event_name = event_contents
         .next()
@@ -967,13 +916,13 @@ pub fn parse_redraw_event(event_value: Value) -> Result<Vec<RedrawEvent>> {
             "grid_destroy" => Some(parse_grid_destroy(event_parameters)?),
             "grid_cursor_goto" => Some(parse_grid_cursor_goto(event_parameters)?),
             "grid_scroll" => Some(parse_grid_scroll(event_parameters)?),
-            "win_pos" => Some(parse_win_pos(event_parameters)?),
+            "win_pos" => Some(parse_win_pos(event_parameters, neovim.clone())?),
             "win_float_pos" => Some(parse_win_float_pos(event_parameters)?),
             "win_external_pos" => Some(parse_win_external_pos(event_parameters)?),
             "win_hide" => Some(parse_win_hide(event_parameters)?),
             "win_close" => Some(parse_win_close(event_parameters)?),
             "msg_set_pos" => Some(parse_msg_set_pos(event_parameters)?),
-            "win_viewport" => Some(parse_win_viewport(event_parameters)?),
+            "win_viewport" => Some(parse_win_viewport(event_parameters, neovim.clone())?),
             "cmdline_show" => Some(parse_cmdline_show(event_parameters)?),
             "cmdline_pos" => Some(parse_cmdline_pos(event_parameters)?),
             "cmdline_special_char" => Some(parse_cmdline_special_char(event_parameters)?),
@@ -1017,40 +966,6 @@ pub fn parse_channel_mode(channel_mode_value: Value) -> Result<ChannelMode> {
     }
 }
 
-pub fn parse_client_version(version_value: Value) -> Result<ClientVersion> {
-    let version_map = parse_map(version_value)?;
-
-    let mut version = ClientVersion::default();
-
-    for version_property in version_map {
-        if let (Value::String(name), value) = version_property {
-            match (name.as_str().unwrap(), value) {
-                ("major", major) => version.major = parse_u64(major)?,
-                ("minor", minor) => version.minor = Some(parse_u64(minor)?),
-                ("patch", patch) => version.patch = Some(parse_u64(patch)?),
-                ("prerelease", prerelease) => version.prerelease = Some(parse_string(prerelease)?),
-                ("commit", commit) => version.commit = Some(parse_string(commit)?),
-                _ => debug!("Ignored client version property: {}", name),
-            }
-        } else {
-            debug!("Invalid client version format");
-        }
-    }
-
-    Ok(version)
-}
-
-pub fn parse_client_type(client_type_value: Value) -> Result<ClientType> {
-    match parse_string(client_type_value)?.as_ref() {
-        "remote" => Ok(ClientType::Remote),
-        "ui" => Ok(ClientType::Ui),
-        "embedder" => Ok(ClientType::Embedder),
-        "host" => Ok(ClientType::Host),
-        "plugin" => Ok(ClientType::Plugin),
-        client_type => Err(ParseError::Format(format!("{:?}", client_type))),
-    }
-}
-
 pub fn parse_client_info(client_info_value: Value) -> Result<ClientInfo> {
     let client_info_map = parse_map(client_info_value)?;
 
@@ -1060,8 +975,6 @@ pub fn parse_client_info(client_info_value: Value) -> Result<ClientInfo> {
         if let (Value::String(name), value) = info_property {
             match (name.as_str().unwrap(), value) {
                 ("name", name) => client_info.name = parse_string(name)?,
-                ("version", version) => client_info.version = parse_client_version(version)?,
-                ("type", client_type) => client_info.client_type = parse_client_type(client_type)?,
                 _ => debug!("Ignored client type property: {}", name),
             }
         } else {

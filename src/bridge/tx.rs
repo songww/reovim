@@ -8,6 +8,7 @@ use tokio::{
     process::ChildStdin,
 };
 
+#[derive(Debug)]
 #[pin_project(project = TxProj)]
 pub enum Tx {
     Child(#[pin] ChildStdin),
@@ -41,7 +42,7 @@ impl futures::io::AsyncWrite for Tx {
     }
 }
 
-impl From<ChildStdin > for Tx {
+impl From<ChildStdin> for Tx {
     fn from(cs: ChildStdin) -> Tx {
         Tx::Child(cs)
     }

@@ -1,10 +1,13 @@
+#![feature(new_uninit)]
+#![feature(maybe_uninit_write_slice)]
 #[macro_use]
 extern crate derive_new;
+#[macro_use]
+extern crate derivative;
 
 use clap::{AppSettings, IntoApp, Parser};
-use fragile::Fragile;
-use gdk::prelude::ApplicationExtManual;
-use gtk::prelude::GtkApplicationExt;
+use gdk::prelude::*;
+use gtk::prelude::*;
 use once_cell::sync::OnceCell;
 
 mod app;
@@ -18,8 +21,6 @@ mod keys;
 mod messager;
 mod style;
 mod vimview;
-
-static WIN: OnceCell<Fragile<gtk::Window>> = OnceCell::new();
 
 #[macro_export]
 macro_rules! cloned {
@@ -82,14 +83,6 @@ impl Opts {
             ConnectionMode::Child
         }
     }
-}
-
-fn gtk_window() -> gtk::Window {
-    WIN.get()
-        .expect("The gloabl gtk window hasn't been initialized yet")
-        .try_get()
-        .expect("The global gtk window can only be read from the main thread")
-        .clone()
 }
 
 fn main() {

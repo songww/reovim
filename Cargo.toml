@@ -15,6 +15,7 @@ fragile = "1"
 futures = "0.3"
 tracker = "0.1"
 once_cell = "1"
+derivative = "2"
 derive-new = "0.5"
 env_logger = "0.9"
 rustc-hash = "1"
@@ -38,4 +39,7 @@ relm-macros = { version = "0.4", package = "relm4-macros" }
 relm-components = { version = "0.4", package = "relm4-components" }
 
 tokio = { version = "1", features = ["process", "io-util", "sync", "rt", "time", "signal", "rt-multi-thread"] }
-tokio-util = { version = "0.6", features = ["compat"] }
+tokio-util = { version = "0.7", features = ["compat"] }
+
+[profile.release]
+debug = true

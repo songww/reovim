@@ -43,14 +43,6 @@ mod imp {
         type ParentType = gtk::Widget;
         type Type = super::VimGridView;
 
-        // fn new(grid: u64, size: Size, hldefs: Rc<RwLock<HighlightDefinitions>>) -> Self {
-        //     Self {
-        //         grid: grid.into(),
-        //         size: size.into(),
-        //         hldefs: hldefs.into(),
-        //         textbuf: TextBuf::new().into(),
-        //     }
-        // }
         fn new() -> Self {
             Self {
                 grid: 0.into(),
@@ -66,10 +58,6 @@ mod imp {
     impl ObjectImpl for VimGridView {
         fn constructed(&self, obj: &Self::Type) {
             self.parent_constructed(obj);
-            // let size = &unsafe { &*self.size.as_ptr() }.0;
-            // obj.set_width_request(size.width() as _);
-            // obj.set_height_request(size.height() as _);
-
             // obj.bind_property("grid", obj, "grid")
             //     .flags(glib::BindingFlags::SYNC_CREATE)
             //     .build();
@@ -159,20 +147,31 @@ mod imp {
     // Trait shared by all widgets
     impl WidgetImpl for VimGridView {
         fn snapshot(&self, widget: &Self::Type, snapshot: &gtk::Snapshot) {
-            log::info!("----------------> snapshot");
             let pctx = widget.pango_context();
             // NOTE: Apply size required.
+            log::info!(
+                "height {} width {} cols {} rows {}",
+                self.height.get(),
+                self.width.get(),
+                self.textbuf().cols(),
+                self.textbuf().rows()
+            );
+            assert_eq!(self.height.get(), self.textbuf().rows() as u64);
+            assert_eq!(self.width.get(), self.textbuf().cols() as u64);
             let (width, height) = self.size_required(widget);
-            widget.set_size_request(width, height);
+            log::info!("size required {}x{}", width, height);
+            // widget.set_size_request(width, height);
 
-            let width = widget.width_request();
-            let height = widget.height_request();
+            // let width = widget.width_request();
+            // let height = widget.height_request();
             let rect = Rect::new(0., 0., width as _, height as _);
             let cr = snapshot.append_cairo(&rect);
             let hldefs = (unsafe { &*self.hldefs.as_ptr() }).read().unwrap();
             let layout = self.textbuf().layout(&pctx, &hldefs);
             pangocairo::show_layout(&cr, &layout);
-            // self.parent_snapshot(widget, snapshot);
+            // log::info!("apply layout");
+            self.parent_snapshot(widget, snapshot);
+            // log::info!("parent snapshot");
         }
 
         fn measure(
@@ -182,6 +181,12 @@ mod imp {
             for_size: i32,
         ) -> (i32, i32, i32, i32) {
             let size_required = self.size_required(widget);
+            log::error!(
+                "measuring VimGridView orientation {} for_size {} size_required {:?}",
+                orientation,
+                for_size,
+                size_required
+            );
             match orientation {
                 gtk::Orientation::Vertical => (size_required.1, size_required.1, -1, -1),
                 gtk::Orientation::Horizontal => (size_required.0, size_required.0, -1, -1),
@@ -214,13 +219,13 @@ mod imp {
             )
         }
 
-        pub(super) fn set_height(&self, height: u64) {
-            self.height.replace(height);
-        }
+        // pub(super) fn set_height(&self, height: u64) {
+        //     self.height.replace(height);
+        // }
 
-        pub(super) fn set_width(&self, width: u64) {
-            self.width.replace(width);
-        }
+        // pub(super) fn set_width(&self, width: u64) {
+        //     self.width.replace(width);
+        // }
     }
 }
 
@@ -254,56 +259,43 @@ impl VimGridView {
 
     pub fn set_hldefs(&self, hldefs: Rc<RwLock<HighlightDefinitions>>) {
         self.imp().set_hldefs(hldefs);
-        self.queue_allocate();
-        self.queue_resize();
-        self.queue_draw();
     }
 
     pub fn set_textbuf(&self, textbuf: Rc<RefCell<TextBuf>>) {
         self.imp().set_textbuf(textbuf);
-        self.queue_allocate();
-        self.queue_resize();
-        self.queue_draw();
     }
 
     pub fn set_font_description(&self, desc: &pango::FontDescription) {
         self.pango_context().set_font_description(desc);
-        self.queue_allocate();
-        self.queue_resize();
-        self.queue_draw();
     }
 
     pub fn textbuf(&self) -> Ref<TextBuf> {
-        self.queue_allocate();
-        self.queue_resize();
-        self.queue_draw();
         self.imp().textbuf()
     }
 
     pub fn resize(&self, width: f32, height: f32) {
         // WidgetExt::set_width_request(self, width as i32);
         // WidgetExt::set_height_request(self, height as i32);
-        // self.imp().textbuf().resize(height as _, width as _);
-        self.set_width(width as _);
-        self.set_height(height as _);
-        self.queue_allocate();
-        self.queue_resize();
-        self.queue_draw();
+        self.imp().textbuf().resize(height as _, width as _);
+        self.set_property("width", &width);
+        self.set_property("height", &height);
+        log::info!(
+            " -> resize grid {} from {}x{} to {}x{}",
+            self.property::<u64>("grid"),
+            self.property::<u64>("width"),
+            self.property::<u64>("height"),
+            width,
+            height
+        );
+        // self.set_width(width as _);
+        // self.set_height(height as _);
     }
 
-    pub fn set_height(&self, height: u64) {
-        self.imp().set_height(height);
-    }
-
-    pub fn set_width(&self, width: u64) {
-        self.imp().set_width(width);
-    }
-
-    // pub fn hide(&self) {
-    //     self.imp().hide(self);
+    // pub fn set_height(&self, height: u64) {
+    //     self.imp().set_height(height);
     // }
-    //
-    // pub fn show(&self) {
-    //     self.imp().show(self);
+
+    // pub fn set_width(&self, width: u64) {
+    //     self.imp().set_width(width);
     // }
 }

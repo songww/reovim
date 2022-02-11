@@ -1,3 +1,7 @@
 target/
 src/ui
 vim/
+.vscode/
+perf.data
+perf.data.old
+flamegraph.svg

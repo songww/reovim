@@ -1,4 +1,8 @@
-use std::ops::{Deref, DerefMut};
+use std::{
+    cell::RefCell,
+    mem::MaybeUninit,
+    ops::{Deref, DerefMut},
+};
 
 use glib::subclass::prelude::*;
 
@@ -14,18 +18,39 @@ mod imp {
     use glib::prelude::*;
     use glib::subclass::prelude::*;
 
-    #[derive(Debug, Default)]
+    #[derive(Debug)]
     pub struct _TextBuf {
         pub(super) rows: usize,
         pub(super) cols: usize,
         pub(super) cells: super::TextBufCells,
     }
 
+    impl Default for _TextBuf {
+        fn default() -> Self {
+            _TextBuf::new(0, 0)
+        }
+    }
+
     impl _TextBuf {
+        fn new(rows: usize, cols: usize) -> _TextBuf {
+            _TextBuf {
+                rows,
+                cols,
+                cells: super::TextBufCells::new(rows, cols),
+            }
+        }
+
         fn resize(&mut self, rows: usize, cols: usize) {
+            log::warn!(
+                "_TextBuf resize to {}x{} from {}x{}",
+                cols,
+                rows,
+                self.cols,
+                self.rows
+            );
             self.rows = rows;
             self.cols = cols;
-            self.cells = super::TextBufCells::new(rows, cols);
+            self.cells.resize(rows, cols);
         }
 
         fn clear(&mut self) {
@@ -46,30 +71,19 @@ mod imp {
     }
 
     impl ObjectImpl for TextBuf {
-        // fn signals() -> &'static [Signal] {
-        //     static SIGNALS: Lazy<Vec<Signal>> = Lazy::new(|| {
-        //         vec![
-        //             Signal::builder(
-        //                 "countdown-update",
-        //                 &[u32::static_type().into(), u32::static_type().into()],
-        //                 <()>::static_type().into(),
-        //             )
-        //             .build(),
-        //             Signal::builder("lap", &[], <()>::static_type().into()).build(),
-        //         ]
-        //     });
-        //     SIGNALS.as_ref()
-        // }
+        fn constructed(&self, obj: &Self::Type) {
+            self.parent_constructed(obj);
+        }
     }
 
     impl TextBuf {
         pub(super) fn set_cells(&self, row: usize, col: usize, cells: &[super::TextCell]) {
-            log::debug!(
+            log::info!(
                 "textbuf {}x{}",
                 self.inner.borrow().rows,
                 self.inner.borrow().cols
             );
-            log::debug!("Setting cells of row {}", row);
+            log::warn!("textbuf setting cells of row {}", row);
             let row = &mut self.inner.borrow_mut().cells[row];
             let mut expands = Vec::with_capacity(row.len());
             for cell in cells.iter() {
@@ -78,12 +92,18 @@ mod imp {
                 }
             }
             let col_to = col + expands.len();
-            log::debug!("Setting {} cells from {} to {}", expands.len(), col, col_to);
+            log::info!(
+                "textbuf setting {} cells from {} to {}",
+                expands.len(),
+                col,
+                col_to
+            );
             // log::info!("cells: {:?}", &expands);
             row[col..col_to].clone_from_slice(&expands);
         }
 
         pub(super) fn clear(&self) {
+            log::warn!("textbuf cleared");
             self.inner.borrow_mut().clear();
         }
 
@@ -111,7 +131,7 @@ glib::wrapper! {
 
 impl TextBuf {
     pub fn new() -> Self {
-        glib::Object::new::<Self>(&[]).expect("Failed to initialize Timer object")
+        glib::Object::new::<Self>(&[]).expect("Failed to initialize TextBuf object")
     }
 
     fn imp(&self) -> &imp::TextBuf {
@@ -122,7 +142,7 @@ impl TextBuf {
         self.imp().clear();
     }
 
-    pub fn resize(&self, cols: usize, rows: usize) {
+    pub fn resize(&self, rows: usize, cols: usize) {
         self.imp().resize(rows, cols);
     }
 
@@ -147,6 +167,7 @@ impl TextBuf {
         pctx: &pango::Context,
         hldefs: &HighlightDefinitions,
     ) -> pango::Layout {
+        const U16MAX: f32 = u16::MAX as f32 + 1.;
         let imp = self.imp();
         let cells = imp.cells();
         let layout = pango::Layout::new(pctx);
@@ -194,44 +215,35 @@ impl TextBuf {
                     attrs.insert(attr);
                 }
                 // alpha color
-                // log::error!("alpha blend {}", hldef.blend);
                 let mut attr = pango::AttrInt::new_background_alpha(hldef.blend as _);
                 attr.set_start_index(start_index as _);
                 attr.set_end_index(end_index as _);
                 attrs.insert(attr);
-                if let Some(fg) = hldef
-                    .colors
-                    .foreground
-                    .or_else(|| default_colors.foreground)
-                {
+                if let Some(fg) = hldef.colors.foreground.or(default_colors.foreground) {
                     let mut attr = pango::AttrColor::new_foreground(
-                        (fg.red() * 255.0) as _,
-                        (fg.green() * 255.0) as _,
-                        (fg.blue() * 255.0) as _,
+                        (fg.red() * U16MAX) as _,
+                        (fg.green() * U16MAX) as _,
+                        (fg.blue() * U16MAX) as _,
                     );
                     attr.set_start_index(start_index as _);
                     attr.set_end_index(end_index as _);
                     attrs.insert(attr);
                 }
-                if let Some(bg) = hldef
-                    .colors
-                    .background
-                    .or_else(|| default_colors.foreground)
-                {
+                if let Some(bg) = hldef.colors.background.or(default_colors.foreground) {
                     let mut attr = pango::AttrColor::new_background(
-                        (bg.red() * 255.0) as _,
-                        (bg.green() * 255.0) as _,
-                        (bg.blue() * 255.0) as _,
+                        (bg.red() * U16MAX) as _,
+                        (bg.green() * U16MAX) as _,
+                        (bg.blue() * U16MAX) as _,
                     );
                     attr.set_start_index(start_index as _);
                     attr.set_end_index(end_index as _);
                     attrs.insert(attr);
                 }
-                if let Some(special) = hldef.colors.special.or_else(|| default_colors.special) {
+                if let Some(special) = hldef.colors.special.or(default_colors.special) {
                     let mut attr = pango::AttrColor::new_underline_color(
-                        (special.red() * 255.0) as _,
-                        (special.green() * 255.0) as _,
-                        (special.blue() * 255.0) as _,
+                        (special.red() * U16MAX) as _,
+                        (special.green() * U16MAX) as _,
+                        (special.blue() * U16MAX) as _,
                     );
                     attr.set_start_index(start_index as _);
                     attr.set_end_index(end_index as _);
@@ -240,40 +252,34 @@ impl TextBuf {
             }
             text.push('\n');
         }
-        log::info!("text to render:\n{}", &text);
         layout.set_text(&text);
         layout.set_attributes(Some(&attrs));
         log::info!("pixel size {:?}", layout.pixel_size());
         log::info!("layout height: {}", layout.height());
-        let x801 = layout.index_to_line_x(801, false);
-        log::info!("layout index 801 to x {:?}", x801);
-        log::info!(
-            "layout index 802 to x {:?}",
-            layout.index_to_line_x(802, false)
-        );
-        let pos801 = layout.index_to_pos(801);
-        log::info!("layout index 801 to pos {:?}", pos801);
-        pango::extents_to_pixels(Some(&pos801), None);
-        log::info!("layout index 801 to pos {:?} in pixel", pos801);
-        let pos802 = layout.index_to_pos(802);
-        log::info!("layout index 802 to pos {:?}", pos802);
-        pango::extents_to_pixels(Some(&pos802), None);
-        log::info!("layout index 802 to pos {:?} in pixel", pos802);
-        let l = layout.line(1).unwrap();
-        log::info!(
-            "line height: {} length {} start_index {}",
-            l.height(),
-            l.length(),
-            l.start_index()
-        );
-        log::info!("extents: {:?}", l.extents());
-        log::info!("pixel extents: {:?}", l.pixel_extents());
-        // let mut cached_attr = attrs.iterator();
-        // let items = pango::itemize(pctx, cell.text, 0, text.len(), &attrs, cached_attr.as_ref());
-        // for item in items {
-        //     // item.analysis();
-        //     item
-        // }
+        // let x801 = layout.index_to_line_x(801, false);
+        // log::info!("layout index 801 to x {:?}", x801);
+        // log::info!(
+        //     "layout index 802 to x {:?}",
+        //     layout.index_to_line_x(802, false)
+        // );
+        // let pos801 = layout.index_to_pos(801);
+        // log::info!("layout index 801 to pos {:?}", pos801);
+        // pango::extents_to_pixels(Some(&pos801), None);
+        // log::info!("layout index 801 to pos {:?} in pixel", pos801);
+        // let pos802 = layout.index_to_pos(802);
+        // log::info!("layout index 802 to pos {:?}", pos802);
+        // pango::extents_to_pixels(Some(&pos802), None);
+        // log::info!("layout index 802 to pos {:?} in pixel", pos802);
+        // let l = layout.line(1).unwrap();
+        // log::info!(
+        //     "line height: {} length {} start_index {}",
+        //     l.height(),
+        //     l.length(),
+        //     l.start_index()
+        // );
+        // log::info!("extents: {:?}", l.extents());
+        // log::info!("pixel extents: {:?}", l.pixel_extents());
+        log::info!("text to render:\n{}", &text);
         layout
     }
 }
@@ -299,6 +305,15 @@ impl Default for TextCell {
 
 #[derive(Clone, Debug, Default)]
 pub struct TextLine(Box<[TextCell]>);
+
+impl TextLine {
+    fn new(cols: usize) -> TextLine {
+        let mut line = Vec::with_capacity(1000);
+        line.resize(cols, TextCell::default());
+        // vec![TextCell::default(); cols].into_boxed_slice())
+        Self(line.into_boxed_slice())
+    }
+}
 
 impl Deref for TextLine {
     type Target = [TextCell];
@@ -328,44 +343,113 @@ impl AsMut<[TextCell]> for TextLine {
 
 #[derive(Debug, Default)]
 struct TextBufCells {
-    cells: Box<[TextLine]>,
+    cells: RefCell<Box<[TextLine]>>,
 }
 
 impl Deref for TextBufCells {
     type Target = [TextLine];
 
     fn deref(&self) -> &[TextLine] {
-        &self.cells
+        unsafe { &*self.cells.as_ptr() }
     }
 }
 
 impl DerefMut for TextBufCells {
     fn deref_mut(&mut self) -> &mut [TextLine] {
-        &mut self.cells
+        self.cells.get_mut()
     }
 }
 
 impl AsRef<[TextLine]> for TextBufCells {
     fn as_ref(&self) -> &[TextLine] {
-        &self.cells
+        unsafe { &*self.cells.as_ptr() }
     }
 }
 
 impl AsMut<[TextLine]> for TextBufCells {
     fn as_mut(&mut self) -> &mut [TextLine] {
-        &mut self.cells
+        self.cells.get_mut()
     }
 }
 
 impl TextBufCells {
     pub fn new(rows: usize, cols: usize) -> TextBufCells {
         TextBufCells {
-            cells: cells(rows, cols),
+            cells: RefCell::new(cells(rows, cols)),
         }
+    }
+
+    pub fn resize(&mut self, rows: usize, cols: usize) {
+        assert!(rows < 1000);
+        assert!(cols < 1000);
+        log::info!("1 buf cells resizing");
+        log::info!("2 buf cells resizing");
+        log::info!("3 buf cells resizing");
+        log::info!("4 buf cells resizing");
+        let cells = self.cells.take().into_vec();
+        let old_rows = cells.len();
+        let nrows = rows.min(old_rows);
+        log::info!("5 buf cells resizing {} {}", cells.len(), nrows);
+        let cells: Vec<_> = cells
+            .into_iter()
+            .take(nrows)
+            .map(|line| {
+                // log::info!("x1 buf cells resizing {}, {:?}", line.0.len(), line.0);
+                let mut textline = line.0.into_vec();
+                // let mut textline =
+                //     unsafe { Vec::from_raw_parts(line.0.as_mut_ptr(), line.0.len(), 1000) };
+                // log::info!("x2 buf cells resizing {}, {:?}", line.0.len(), line.0);
+                textline.resize(cols, TextCell::default());
+                // log::info!("x3 buf cells resizing {}, {:?}", line.0.len(), line.0);
+                TextLine(textline.into_boxed_slice())
+            })
+            .chain(vec![TextLine::new(cols); rows.saturating_sub(old_rows)].into_iter())
+            .collect();
+
+        log::info!("6 buf cells resizing");
+        // cells.append(&mut vec![
+        //     TextLine::new(cols);
+        //     rows.saturating_sub(old_rows)
+        // ]);
+        log::info!("buf cells resizing to {} rows from {}", rows, old_rows);
+        // let cells_ = unsafe { Vec::from_raw_parts(cells.as_mut_ptr(), old_rows, 1000) };
+        // let mut _cells = Box::new_uninit_slice(rows);
+        //log::info!("buf cells resizing cloning head {} rows", nrows);
+        //if nrows > 0 {
+        //    MaybeUninit::write_slice_cloned(&mut _cells[0..nrows], &cells[0..nrows]);
+        //}
+        //if nrows < rows {
+        //    for nrow in nrows..rows {
+        //        log::info!("buf cells resizing writing row {}", nrow);
+        //        _cells[nrow].write({
+        //            let mut default_line = Vec::with_capacity(1000);
+        //            default_line.resize(cols, TextCell::default());
+        //            TextLine(default_line.into_boxed_slice())
+        //        });
+        //    }
+        //}
+        // cells.resize_with(rows, || {
+        //     let mut default_line = Vec::with_capacity(1000);
+        //     default_line.resize(cols, TextCell::default());
+        //     TextLine(default_line.into_boxed_slice())
+        // });
+        log::info!("buf cells resized to {}x{}", cols, rows);
+        // self.cells = cells.into_boxed_slice();
+        log::info!("buf cells resized to {}x{}", cols, rows);
+        // self.cells.replace(unsafe { _cells.assume_init() });
+        self.cells.replace(cells.into_boxed_slice());
     }
 }
 
 fn cells(rows: usize, cols: usize) -> Box<[TextLine]> {
-    let row = vec![TextCell::default(); cols].into_boxed_slice();
-    vec![TextLine(row); rows].into_boxed_slice()
+    log::error!("creating cells {}x{}", rows, cols);
+    assert!(rows < 1000);
+    assert!(cols < 1000);
+    let mut row = Vec::with_capacity(1000);
+    row.resize(cols, TextCell::default());
+    // let row = vec![TextCell::default(); cols].into_boxed_slice();
+    let tl = TextLine(row.into_boxed_slice());
+    let mut cells = Vec::with_capacity(1000);
+    cells.resize(rows, tl);
+    cells.into_boxed_slice()
 }
