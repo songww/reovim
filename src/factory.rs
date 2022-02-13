@@ -20,7 +20,7 @@ impl<WidgetsType: Debug, Root: Debug> Debug for Widgets<WidgetsType, Root> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 enum ChangeType {
     Add,
     Remove,
@@ -45,7 +45,8 @@ where
     widgets: RefCell<
         FxHashMap<u64, Widgets<Data::Widgets, <Data::View as FactoryView<Data::Root>>::Root>>,
     >,
-    changes: RefCell<VecMap<u64, ChangeType>>,
+    staged: RefCell<VecMap<u64, ChangeType>>,
+    flushes: RefCell<VecMap<u64, ChangeType>>,
 }
 
 impl<Data> FactoryMap<Data>
@@ -58,7 +59,8 @@ where
         FactoryMap {
             data: FxHashMap::default(),
             widgets: RefCell::new(FxHashMap::default()),
-            changes: RefCell::new(VecMap::new()),
+            staged: RefCell::new(VecMap::new()),
+            flushes: RefCell::new(VecMap::new()),
         }
     }
 
@@ -67,17 +69,20 @@ where
     pub fn from_hashmap(data: FxHashMap<u64, Data>) -> Self {
         let length = data.len();
 
-        let mut changes = VecMap::default();
-        changes.reserve(length);
+        let mut staged = VecMap::default();
+        staged.reserve(length);
+        let mut flushes = VecMap::default();
+        flushes.reserve(length);
         data.keys().for_each(|k| {
-            changes.insert(*k, ChangeType::Add);
+            staged.insert(*k, ChangeType::Add);
         });
         let mut widgets = FxHashMap::default();
         widgets.reserve(length);
         FactoryMap {
             data,
             widgets: RefCell::new(widgets),
-            changes: RefCell::new(changes),
+            staged: RefCell::new(staged),
+            flushes: RefCell::new(flushes),
         }
     }
 
@@ -95,10 +100,10 @@ where
 
     /// Remove all data from the [`FactoryMap`].
     pub fn clear(&mut self) {
-        let changes = &mut self.changes.borrow_mut();
+        let stage = &mut self.staged.borrow_mut();
 
         for key in self.data.keys() {
-            changes.insert(*key, ChangeType::Remove);
+            stage.insert(*key, ChangeType::Remove);
         }
         self.data.clear();
     }
@@ -117,18 +122,18 @@ where
     pub fn insert(&mut self, key: u64, data: Data) {
         self.data.insert(key, data);
 
-        let change = match self.changes.borrow().get(&key) {
+        let change = match self.staged.borrow().get(&key) {
             Some(ChangeType::Recreate | ChangeType::Remove) => ChangeType::Recreate,
             _ => ChangeType::Add,
         };
-        self.changes.borrow_mut().insert(key, change);
+        self.staged.borrow_mut().insert(key, change);
     }
 
     /// Remove an element of a [`FactoryMap].
     pub fn remove(&mut self, key: u64) -> Option<Data> {
         let data = self.data.remove(&key);
         if data.is_some() {
-            self.changes.borrow_mut().insert(key, ChangeType::Remove);
+            self.staged.borrow_mut().insert(key, ChangeType::Remove);
         }
 
         data
@@ -146,12 +151,21 @@ where
     /// needs to be updated.
     #[must_use]
     pub fn get_mut(&mut self, key: u64) -> Option<&mut Data> {
-        let mut changes = self.changes.borrow_mut();
-        if !changes.contains_key(&key) {
-            changes.insert(key, ChangeType::Update);
+        let mut staged = self.staged.borrow_mut();
+        if !staged.contains_key(&key) {
+            staged.insert(key, ChangeType::Update);
         }
 
         self.data.get_mut(&key)
+    }
+
+    pub fn flush(&mut self) {
+        let mut staged = self.staged.borrow_mut();
+        let mut flushes = self.flushes.borrow_mut();
+        for (k, v) in staged.iter() {
+            flushes.insert(*k, *v);
+        }
+        staged.clear();
     }
 }
 
@@ -163,7 +177,7 @@ where
     type Key = u64;
 
     fn generate(&self, view: &View, sender: Sender<Data::Msg>) {
-        for (index, change) in self.changes.borrow().iter().rev() {
+        for (index, change) in self.flushes.borrow().iter() {
             let mut widgets = self.widgets.borrow_mut();
 
             match change {
@@ -207,7 +221,7 @@ where
                 }
             }
         }
-        self.changes.borrow_mut().clear();
+        self.flushes.borrow_mut().clear();
     }
 }
 

@@ -1,8 +1,5 @@
-use std::{
-    cell::RefCell,
-    mem::MaybeUninit,
-    ops::{Deref, DerefMut},
-};
+use std::cell::RefCell;
+use std::ops::{Deref, DerefMut};
 
 use gdk::prelude::FontExt;
 use glib::subclass::prelude::*;
@@ -12,9 +9,8 @@ use crate::color::ColorExt;
 use super::highlights::HighlightDefinitions;
 
 mod imp {
-    use std::borrow::Borrow;
-    use std::cell::{Ref, RefCell};
-    use std::ops::Deref;
+    use std::marker::PhantomData;
+    use std::sync::{RwLock, RwLockReadGuard};
 
     use glib::prelude::*;
     use glib::subclass::prelude::*;
@@ -23,7 +19,7 @@ mod imp {
     pub struct _TextBuf {
         pub(super) rows: usize,
         pub(super) cols: usize,
-        pub(super) cells: super::TextBufCells,
+        pub(super) cells: Box<[super::TextLine]>,
     }
 
     impl Default for _TextBuf {
@@ -37,10 +33,11 @@ mod imp {
             _TextBuf {
                 rows,
                 cols,
-                cells: super::TextBufCells::new(rows, cols),
+                cells: _TextBuf::make(rows, cols),
             }
         }
 
+        /*
         fn resize(&mut self, rows: usize, cols: usize) {
             if self.rows == rows && self.cols == cols {
                 return;
@@ -54,17 +51,17 @@ mod imp {
             );
             self.rows = rows;
             self.cols = cols;
-            self.cells.resize(rows, cols);
         }
+        */
 
         fn clear(&mut self) {
-            self.cells = super::TextBufCells::new(self.rows, self.cols);
+            self.cells = _TextBuf::make(self.rows, self.cols);
         }
     }
 
     #[derive(Debug, Default)]
     pub struct TextBuf {
-        inner: RefCell<_TextBuf>,
+        inner: RwLock<_TextBuf>,
     }
 
     #[glib::object_subclass]
@@ -82,13 +79,9 @@ mod imp {
 
     impl TextBuf {
         pub(super) fn set_cells(&self, row: usize, col: usize, cells: &[super::TextCell]) {
-            log::info!(
-                "textbuf {}x{}",
-                self.inner.borrow().rows,
-                self.inner.borrow().cols
-            );
-            log::warn!("textbuf setting cells of row {}", row);
-            let row = &mut self.inner.borrow_mut().cells[row];
+            let nrows = self.inner.read().unwrap().rows;
+            let ncols = self.inner.read().unwrap().cols;
+            let row = &mut self.inner.write().unwrap().cells[row];
             let mut expands = Vec::with_capacity(row.len());
             for cell in cells.iter() {
                 for _ in 0..cell.repeat.unwrap_or(1) {
@@ -97,7 +90,9 @@ mod imp {
             }
             let col_to = col + expands.len();
             log::info!(
-                "textbuf setting {} cells from {} to {}",
+                "textbuf {}x{} setting {} cells from {} to {}",
+                ncols,
+                nrows,
                 expands.len(),
                 col,
                 col_to
@@ -108,25 +103,84 @@ mod imp {
 
         pub(super) fn clear(&self) {
             log::warn!("textbuf cleared");
-            self.inner.borrow_mut().clear();
+            self.inner.write().unwrap().clear();
         }
 
         pub(super) fn resize(&self, rows: usize, cols: usize) {
-            self.inner.borrow_mut().resize(rows, cols);
-        }
-
-        pub(super) fn cells(&self) -> &[super::TextLine] {
-            &unsafe { &*self.inner.as_ptr() }.cells
+            self.inner.write().unwrap().resize(rows, cols);
         }
 
         pub(super) fn rows(&self) -> usize {
-            self.inner.borrow().rows
+            self.inner.read().unwrap().rows
         }
 
         pub(super) fn cols(&self) -> usize {
-            self.inner.borrow().cols
+            self.inner.read().unwrap().cols
+        }
+
+        pub(super) fn lines(&self) -> Lines {
+            Lines {
+                guard: self.inner.read().unwrap(),
+                // at: 0,
+            }
         }
     }
+
+    trait TextBufExt {
+        fn resize(&mut self, rows: usize, cols: usize);
+
+        fn make(rows: usize, cols: usize) -> Box<[super::TextLine]> {
+            let tl = super::TextLine::new(cols);
+            vec![tl; rows].into_boxed_slice()
+        }
+    }
+
+    impl TextBufExt for _TextBuf {
+        fn resize(&mut self, rows: usize, cols: usize) {
+            let old_rows = self.rows;
+            let old_cols = self.cols;
+            if old_rows == rows && old_cols == cols {
+                return;
+            }
+            self.cols = cols;
+            self.rows = rows;
+            let nrows = rows.min(old_rows);
+            let mut cells = vec![super::TextLine::new(0); rows];
+            cells[..nrows].swap_with_slice(&mut self.cells[..nrows]);
+            let cells: Vec<_> = cells
+                .into_iter()
+                .map(|tl| {
+                    let mut tl = tl.into_inner().into_vec();
+                    tl.resize(cols, super::TextCell::default());
+                    super::TextLine(tl.into_boxed_slice())
+                })
+                .collect();
+
+            log::debug!("buf cells resizing to {} rows from {}", rows, old_rows);
+
+            self.cells = cells.into_boxed_slice();
+        }
+    }
+
+    pub(super) struct Lines<'a> {
+        guard: RwLockReadGuard<'a, _TextBuf>,
+        // at: usize,
+    }
+
+    impl<'a> Lines<'a> {
+        pub(super) fn line(&self, no: usize) -> Option<&super::TextLine> {
+            self.guard.cells.get(no)
+        }
+    }
+
+    // impl<'a> Iterator for Lines<'a> {
+    //     type Item = &'a super::TextLine;
+    //     fn next(&mut self) -> Option<Self::Item> {
+    //         let at = self.at;
+    //         self.at += 1;
+    //         self.guard.cells.get(at)
+    //     }
+    // }
 }
 
 glib::wrapper! {
@@ -158,10 +212,6 @@ impl TextBuf {
         self.imp().cols()
     }
 
-    pub fn cells(&self) -> &[TextLine] {
-        self.imp().cells()
-    }
-
     pub fn set_cells(&self, row: usize, col: usize, cells: &[TextCell]) {
         self.imp().set_cells(row, col, cells);
     }
@@ -169,20 +219,9 @@ impl TextBuf {
     pub(super) fn layout(&self, layout: &pango::Layout, hldefs: &HighlightDefinitions) {
         const U16MAX: f32 = u16::MAX as f32 + 1.;
         let imp = self.imp();
-        let cells = imp.cells();
         if imp.cols() == 0 || imp.rows() == 0 {
             return;
         }
-        // log::info!(
-        //     "layout font description {}",
-        //     layout.font_description().unwrap().to_str()
-        // );
-        // let font_desc = layout.font_description().unwrap();
-        // let fontset = layout
-        //     .context()
-        //     .unwrap()
-        //     .load_fontset(&font_desc, &pango::Language::default())
-        //     .unwrap();
         let nchars = imp.cols() * imp.rows() + imp.rows();
         let mut text = String::with_capacity(nchars);
         let default_colors = hldefs.defaults().unwrap();
@@ -194,7 +233,10 @@ impl TextBuf {
             attr
         });
         let default_hldef = hldefs.get(0).unwrap();
-        for line_cells in cells.iter() {
+        let rows = imp.rows();
+        let lines = imp.lines();
+        for lno in 0..rows {
+            let line_cells = lines.line(lno).unwrap();
             for cell in line_cells.iter() {
                 if cell.text.is_empty() {
                     continue;
@@ -202,16 +244,6 @@ impl TextBuf {
                 let start_index = text.len();
                 text.push_str(&cell.text);
                 let end_index = text.len();
-                // use pango::prelude::FontsetExt;
-                // let font = fontset
-                //     .font(cell.text.chars().next().unwrap() as u32)
-                //     .unwrap();
-                // let desc = font.describe().unwrap();
-                // let mut attr = pango::AttrFontDesc::new(&desc);
-                // log::info!("text:'{}' with font: {}", cell.text, desc.to_str());
-                // attr.set_start_index(start_index as _);
-                // attr.set_end_index(end_index as _);
-                // attrs.insert(attr);
                 let mut background = None;
                 let mut hldef = default_hldef;
                 if let Some(ref id) = cell.hldef {
@@ -251,15 +283,13 @@ impl TextBuf {
                     attr.set_end_index(end_index as _);
                     attrs.insert(attr);
                 }
-                /*
                 // alpha color
                 let mut attr =
                     pango::AttrInt::new_background_alpha(u16::MAX - (hldef.blend as u16).pow(2));
-                log::info!("blend {}", hldef.blend);
+                // log::info!("blend {}", hldef.blend);
                 attr.set_start_index(start_index as _);
                 attr.set_end_index(end_index as _);
                 attrs.insert(attr);
-                */
                 if let Some(fg) = hldef.colors.foreground.or(default_colors.foreground) {
                     // log::info!(
                     //     "foreground #{:.2x}{:.2x}{:.2x}",
@@ -367,9 +397,8 @@ pub struct TextLine(Box<[TextCell]>);
 
 impl TextLine {
     fn new(cols: usize) -> TextLine {
-        let mut line = Vec::with_capacity(1000);
+        let mut line = Vec::with_capacity(cols);
         line.resize(cols, TextCell::default());
-        // vec![TextCell::default(); cols].into_boxed_slice())
         Self(line.into_boxed_slice())
     }
 }
@@ -400,111 +429,20 @@ impl AsMut<[TextCell]> for TextLine {
     }
 }
 
-#[derive(Debug, Default)]
-struct TextBufCells {
-    cells: RefCell<Box<[TextLine]>>,
-}
-
-impl Deref for TextBufCells {
-    type Target = [TextLine];
-
-    fn deref(&self) -> &[TextLine] {
-        unsafe { &*self.cells.as_ptr() }
+impl From<Box<[TextCell]>> for TextLine {
+    fn from(boxed: Box<[TextCell]>) -> Self {
+        Self(boxed)
     }
 }
 
-impl DerefMut for TextBufCells {
-    fn deref_mut(&mut self) -> &mut [TextLine] {
-        self.cells.get_mut()
+impl Into<Box<[TextCell]>> for TextLine {
+    fn into(self) -> Box<[TextCell]> {
+        self.0
     }
 }
 
-impl AsRef<[TextLine]> for TextBufCells {
-    fn as_ref(&self) -> &[TextLine] {
-        unsafe { &*self.cells.as_ptr() }
+impl TextLine {
+    fn into_inner(self) -> Box<[TextCell]> {
+        self.0
     }
-}
-
-impl AsMut<[TextLine]> for TextBufCells {
-    fn as_mut(&mut self) -> &mut [TextLine] {
-        self.cells.get_mut()
-    }
-}
-
-impl TextBufCells {
-    pub fn new(rows: usize, cols: usize) -> TextBufCells {
-        TextBufCells {
-            cells: RefCell::new(cells(rows, cols)),
-        }
-    }
-
-    pub fn resize(&mut self, rows: usize, cols: usize) {
-        assert!(rows < 1000);
-        assert!(cols < 1000);
-        let cells = self.cells.take().into_vec();
-        let old_rows = cells.len();
-        let nrows = rows.min(old_rows);
-        log::debug!("5 buf cells resizing {} {}", cells.len(), nrows);
-        let cells: Vec<_> = cells
-            .into_iter()
-            .take(nrows)
-            .map(|line| {
-                // log::info!("x1 buf cells resizing {}, {:?}", line.0.len(), line.0);
-                let mut textline = line.0.into_vec();
-                // let mut textline =
-                //     unsafe { Vec::from_raw_parts(line.0.as_mut_ptr(), line.0.len(), 1000) };
-                // log::info!("x2 buf cells resizing {}, {:?}", line.0.len(), line.0);
-                textline.resize(cols, TextCell::default());
-                // log::info!("x3 buf cells resizing {}, {:?}", line.0.len(), line.0);
-                TextLine(textline.into_boxed_slice())
-            })
-            .chain(vec![TextLine::new(cols); rows.saturating_sub(old_rows)].into_iter())
-            .collect();
-
-        // log::debug!("6 buf cells resizing");
-        // cells.append(&mut vec![
-        //     TextLine::new(cols);
-        //     rows.saturating_sub(old_rows)
-        // ]);
-        log::debug!("buf cells resizing to {} rows from {}", rows, old_rows);
-        // let cells_ = unsafe { Vec::from_raw_parts(cells.as_mut_ptr(), old_rows, 1000) };
-        // let mut _cells = Box::new_uninit_slice(rows);
-        //log::info!("buf cells resizing cloning head {} rows", nrows);
-        //if nrows > 0 {
-        //    MaybeUninit::write_slice_cloned(&mut _cells[0..nrows], &cells[0..nrows]);
-        //}
-        //if nrows < rows {
-        //    for nrow in nrows..rows {
-        //        log::info!("buf cells resizing writing row {}", nrow);
-        //        _cells[nrow].write({
-        //            let mut default_line = Vec::with_capacity(1000);
-        //            default_line.resize(cols, TextCell::default());
-        //            TextLine(default_line.into_boxed_slice())
-        //        });
-        //    }
-        //}
-        // cells.resize_with(rows, || {
-        //     let mut default_line = Vec::with_capacity(1000);
-        //     default_line.resize(cols, TextCell::default());
-        //     TextLine(default_line.into_boxed_slice())
-        // });
-        // log::info!("buf cells resized to {}x{}", cols, rows);
-        // self.cells = cells.into_boxed_slice();
-        // log::info!("buf cells resized to {}x{}", cols, rows);
-        // self.cells.replace(unsafe { _cells.assume_init() });
-        self.cells.replace(cells.into_boxed_slice());
-    }
-}
-
-fn cells(rows: usize, cols: usize) -> Box<[TextLine]> {
-    log::error!("creating cells {}x{}", rows, cols);
-    assert!(rows < 1000);
-    assert!(cols < 1000);
-    let mut row = Vec::with_capacity(1000);
-    row.resize(cols, TextCell::default());
-    // let row = vec![TextCell::default(); cols].into_boxed_slice();
-    let tl = TextLine(row.into_boxed_slice());
-    let mut cells = Vec::with_capacity(1000);
-    cells.resize(rows, tl);
-    cells.into_boxed_slice()
 }

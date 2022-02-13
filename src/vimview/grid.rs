@@ -132,7 +132,11 @@ mod imp {
             const SCALE: f32 = pango::SCALE as f32;
             let pctx = widget.pango_context();
             let font_desc = widget.pango_context().font_description().unwrap();
-            log::debug!("snapshot font description {}", font_desc.to_str());
+            log::debug!(
+                "snapshot grid {} font description {}",
+                self.id.get(),
+                font_desc.to_str()
+            );
             log::info!(
                 "grid {} height {} width {} cols {} rows {}",
                 self.id.get(),
@@ -157,10 +161,16 @@ mod imp {
             // let (w, h) = layout.size();
             // let (w, h) = (w as f32 / SCALE, h as f32 / SCALE);
             let (w, h) = layout.pixel_size();
-            log::info!("snapshoting size required {}x{}", width, height);
-            log::info!("layout size {}x{}", w, h);
             log::info!(
-                "layout line-height: {}",
+                "snapshoting grid {} size required {}x{}",
+                self.id.get(),
+                width,
+                height
+            );
+            log::info!("grid {} layout size {}x{}", self.id.get(), w, h);
+            log::info!(
+                "grid {} layout line-height: {}",
+                self.id.get(),
                 layout.line(1).unwrap().height() as f32 / SCALE
             );
 
@@ -206,7 +216,8 @@ mod imp {
         ) -> (i32, i32, i32, i32) {
             let (w, h) = self.size_required();
             log::error!(
-                "measuring VimGridView orientation {} for_size {} size_required {}x{}",
+                "measuring grid {} orientation {} for_size {} size_required {}x{}",
+                self.id.get(),
                 orientation,
                 for_size,
                 w,
@@ -247,9 +258,7 @@ mod imp {
                 .expect("FontMetrics must set only once.");
         }
 
-        // pub(super) fn size_required(&self, widget: &<Self as ObjectSubclass>::Type) -> (i32, i32) {
         pub(super) fn size_required(&self) -> (i32, i32) {
-            // const SCALE: f64 = pango::SCALE as f64;
             let width = self.width.get() as f64;
             let height = self.height.get() as f64;
             let metrics = self.metrics.get().unwrap().get();
@@ -310,13 +319,5 @@ impl VimGridView {
         self.imp().set_width(width);
         self.imp().set_height(height);
         self.imp().textbuf().resize(height as _, width as _);
-        log::debug!(
-            " -> resize grid {} from {}x{} to {}x{}",
-            self.property::<u64>("id"),
-            self.property::<u64>("width"),
-            self.property::<u64>("height"),
-            width,
-            height
-        );
     }
 }

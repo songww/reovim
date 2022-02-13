@@ -2,6 +2,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{atomic, RwLock};
 
+use glib::ObjectExt;
 use gtk::prelude::{
     BoxExt, DrawingAreaExt, DrawingAreaExtManual, EventControllerExt, GtkWindowExt, OrientableExt,
     WidgetExt,
@@ -85,6 +86,9 @@ pub struct AppModel {
     pub pctx: OnceCell<Rc<pango::Context>>,
 
     pub hldefs: Rc<RwLock<vimview::HighlightDefinitions>>,
+
+    pub flush: Rc<atomic::AtomicBool>,
+    pub focused: Rc<atomic::AtomicU64>,
     pub background_changed: Rc<atomic::AtomicBool>,
 
     pub vgrids: crate::factory::FactoryMap<vimview::VimGrid>,
@@ -117,6 +121,9 @@ impl AppModel {
             pctx: OnceCell::new(),
 
             hldefs: Rc::new(RwLock::new(vimview::HighlightDefinitions::new())),
+
+            flush: Rc::new(false.into()),
+            focused: Rc::new(1.into()),
             background_changed: Rc::new(false.into()),
 
             vgrids: crate::factory::FactoryMap::new(),
@@ -127,17 +134,6 @@ impl AppModel {
             rt,
         }
     }
-
-    /*
-    /// (width, height)
-    fn size_required(&self, cols: u64, rows: u64) -> (u64, u64) {
-        let factors = self.font_metrics.get();
-        (
-            (cols as f64 * factors.charwidth) as u64,
-            (rows as f64 * (factors.lineheight)) as u64, //  + factors.linespace
-        )
-    }
-    */
 
     pub fn compute(&self) {
         const SINGLE_WIDTH_CHARS: &'static str = concat!(
@@ -225,6 +221,8 @@ impl AppUpdate for AppModel {
                                 self.font_description.replace(desc);
 
                                 self.compute();
+
+                                self.flush.store(true, atomic::Ordering::Relaxed);
                             }
                         }
                         bridge::GuiOption::GuiFontSet(guifontset) => {
@@ -261,13 +259,7 @@ impl AppUpdate for AppModel {
                         self.hldefs.write().unwrap().set(id, style);
                     }
                     RedrawEvent::Clear { grid } => {
-                        log::info!("clearing {}", grid);
-                        // if let Some(win) = self.relationships.get(&grid) {
-                        //     let window = self.vwindows.get_mut(win.id).unwrap();
-                        //     window.get_mut(grid).unwrap().textbuf().borrow().clear();
-                        //     //}
-                        // };
-                        log::info!("cleared grid {}", grid);
+                        log::debug!("cleared grid {}", grid);
                         self.vgrids.get_mut(grid).map(|grid| grid.clear());
                     }
                     RedrawEvent::GridLine {
@@ -301,7 +293,7 @@ impl AppUpdate for AppModel {
                             column_start
                         );
 
-                        let grids: Vec<_> = self.vgrids.iter().map(|(k, v)| *k).collect();
+                        let grids: Vec<_> = self.vgrids.iter().map(|(k, _)| *k).collect();
                         self.vgrids
                             .get_mut(grid)
                             .expect(&format!(
@@ -317,6 +309,8 @@ impl AppUpdate for AppModel {
                         width,
                         height,
                     } => {
+                        self.focused.store(grid, atomic::Ordering::Relaxed);
+
                         let exists = self.vgrids.get(grid).is_some();
                         if exists {
                             self.vgrids
@@ -332,6 +326,7 @@ impl AppUpdate for AppModel {
                                     0,
                                     (0., 0.).into(),
                                     (width, height).into(),
+                                    self.flush.clone(),
                                     self.hldefs.clone(),
                                     self.font_metrics.clone(),
                                     self.font_description.clone(),
@@ -353,6 +348,8 @@ impl AppUpdate for AppModel {
                         log::info!("window pos number: {}", winid);
                         let winid = winid as u64;
 
+                        self.focused.store(grid, atomic::Ordering::Relaxed);
+
                         let font_metrics = self.font_metrics.get();
                         let x = (start_column) as f64 * font_metrics.charwidth;
                         let y =
@@ -367,6 +364,7 @@ impl AppUpdate for AppModel {
                                     winid,
                                     (x.floor(), y.floor()).into(),
                                     (width, height).into(),
+                                    self.flush.clone(),
                                     self.hldefs.clone(),
                                     self.font_metrics.clone(),
                                     self.font_description.clone(),
@@ -426,6 +424,8 @@ impl AppUpdate for AppModel {
                             }
                         };
 
+                        // self.focused.store(grid, atomic::Ordering::Relaxed);
+
                         let (x, y) = self.rt.block_on(window.get_position()).unwrap();
                         let (x, y) = (x as f64, y as f64);
                         async fn allocated(
@@ -454,6 +454,7 @@ impl AppUpdate for AppModel {
                                     winid,
                                     (x, y).into(),
                                     (width, height).into(),
+                                    self.flush.clone(),
                                     self.hldefs.clone(),
                                     self.font_metrics.clone(),
                                     self.font_description.clone(),
@@ -477,21 +478,46 @@ impl AppUpdate for AppModel {
                         }
                     }
                     RedrawEvent::WindowHide { grid } => {
+                        self.focused
+                            .compare_exchange(
+                                grid,
+                                1,
+                                atomic::Ordering::Acquire,
+                                atomic::Ordering::Relaxed,
+                            )
+                            .ok();
                         log::info!("hide {}", grid);
                         self.vgrids.get_mut(grid).unwrap().hide();
                     }
                     RedrawEvent::WindowClose { grid } => {
+                        self.focused
+                            .compare_exchange(
+                                grid,
+                                1,
+                                atomic::Ordering::Acquire,
+                                atomic::Ordering::Relaxed,
+                            )
+                            .ok();
                         log::info!("removing relations {}", grid);
                         self.relationships.remove(&grid);
                         self.vgrids.remove(grid);
                     }
                     RedrawEvent::Destroy { grid } => {
+                        self.focused
+                            .compare_exchange(
+                                grid,
+                                1,
+                                atomic::Ordering::Acquire,
+                                atomic::Ordering::Relaxed,
+                            )
+                            .ok();
                         log::info!("destroying relations {}", grid);
                         self.relationships.remove(&grid);
                         self.vgrids.remove(grid);
                     }
                     RedrawEvent::Flush => {
-                        // TODO
+                        self.flush.store(true, atomic::Ordering::Relaxed);
+                        self.vgrids.flush();
                     }
                     _ => {}
                 }
@@ -580,7 +606,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
         model.pctx.set(vbox.pango_context().into()).ok();
         model.compute();
 
-        let grid = 1;
+        /*
         let click_listener = gtk::GestureClick::builder()
             .button(0)
             .exclusive(false)
@@ -613,7 +639,6 @@ impl Widgets<AppModel, ()> for AppWidgets {
             }),
         );
         windows_container.add_controller(&click_listener);
-        /*
         let on_click = gtk::GestureClick::new();
         on_click.set_name("vim-window-onclick-listener");
         on_click.connect_pressed(glib::clone!(@strong sender => move |c, n_press, x, y| {
@@ -647,28 +672,53 @@ impl Widgets<AppModel, ()> for AppWidgets {
         //     log::debug!("Click({:?}) unpaired release {} times at {}x{} {:?}", c.group(), n_press, x, y, events);
         // }));
 
-        let on_scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::all());
-        on_scroll.set_name("scroller");
-        on_scroll.connect_decelerate(glib::clone!(@strong sender => move |_, x, y| {
-            log::debug!("scroll decelerate x: {}, y: {}", x, y);
-            // UiCommand::Scroll { direction:  }
-            // sender.send(AppMsg::Message(format!("scroll decelerate x: {}, y: {}", x, y))).unwrap();
-        }));
-        on_scroll.connect_scroll(glib::clone!(@strong sender => move |_, x, y| {
-            log::debug!("scroll x: {}, y: {}", x, y);
-            // sender.send(AppMsg::Message(format!("scroll x: {}, y: {}", x, y))).unwrap();
-            // sender.send(UiCommand::Scroll { grid_id: grid_id,  }).unwrap();
+        /*
+        listener.connect_decelerate(
+            glib::clone!(@strong sender, @strong model.focused as focused => move |_, x, y| {
+                let grid_id = focused.load(atomic::Ordering::Relaxed);
+                log::debug!("scroll decelerate x: {}, y: {}", x, y);
+                // sender.send(AppMsg::Message(format!("scroll decelerate x: {}, y: {}", x, y))).unwrap();
+            }),
+        );
+        listener.connect_scroll_begin(
+            glib::clone!(@strong sender, @strong model.focused as focused => move |_| {
+                let grid_id = focused.load(atomic::Ordering::Relaxed);
+                log::debug!("scroll begin");
+                // sender.send(AppMsg::Message(format!("scroll begin"))).unwrap();
+            }),
+        );
+        listener.connect_scroll_end(
+            glib::clone!(@strong sender, @strong model.focused as focused => move |_| {
+                let grid_id = focused.load(atomic::Ordering::Relaxed);
+                log::debug!("scroll end");
+                // sender.send(AppMsg::Message(format!("scroll end"))).unwrap();
+            }),
+        );
+        overlay.add_controller(&listener);
+        */
+
+        let listener = gtk::EventControllerScroll::builder()
+            .flags(gtk::EventControllerScrollFlags::all())
+            .name("scroller-listener")
+            .build();
+        listener.connect_scroll(glib::clone!(@strong sender => move |c, x, y| {
+            let grid: u64 = if let Some(child) = c.widget().focus_child() {
+                child.property("id")
+            } else {
+                return gtk::Inhibit(false)
+            };
+            let direction = if y > 0. {
+                "down"
+            } else {
+                "up"
+            };
+            // let grid_id = focused.load(atomic::Ordering::Relaxed);
+            let command = UiCommand::Scroll { direction: direction.into(), grid_id: grid, position: (0, 1) };
+            sender.send(AppMessage::UiCommand(command)).unwrap();
+            log::debug!("scrolling grid {} x: {}, y: {}", grid, x, y);
             gtk::Inhibit(false)
         }));
-        on_scroll.connect_scroll_begin(glib::clone!(@strong sender => move |_| {
-            log::debug!("scroll begin");
-            // sender.send(AppMsg::Message(format!("scroll begin"))).unwrap();
-        }));
-        on_scroll.connect_scroll_end(glib::clone!(@strong sender => move |_| {
-            log::debug!("scroll end");
-            // sender.send(AppMsg::Message(format!("scroll end"))).unwrap();
-        }));
-        overlay.add_controller(&on_scroll);
+        overlay.add_controller(&listener);
     }
 
     fn pre_view() {
