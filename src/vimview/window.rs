@@ -5,21 +5,19 @@ use std::sync::RwLock;
 use glib::subclass::prelude::*;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
-use once_cell::sync::OnceCell;
 use relm4::factory::positions::FixedPosition;
 use relm4::*;
-use rustc_hash::FxHashMap as HashMap;
 
 use crate::app;
 use crate::bridge::UiCommand;
 use crate::cloned;
-use crate::color::{Color, ColorExt};
 
 use super::grid::VimGridView;
 use super::TextBuf;
 
 type HighlightDefinitions = Rc<RwLock<crate::vimview::HighlightDefinitions>>;
 
+/*
 mod imp {
     use std::cell::Cell;
 
@@ -225,6 +223,7 @@ impl VimWindowView {
 pub struct VimWindowWidgets {
     view: VimWindowView,
 }
+*/
 
 #[derive(Copy, Clone, Debug)]
 enum Visible {
@@ -244,9 +243,10 @@ pub struct VimGrid {
     grid: u64,
     move_to: Cell<Option<FixedPosition>>,
     pos: FixedPosition,
-    width: u64,
-    height: u64,
+    width: usize,
+    height: usize,
     hldefs: HighlightDefinitions,
+    metrics: Rc<Cell<app::FontMetrics>>,
     font_description: Rc<RefCell<pango::FontDescription>>,
 
     textbuf: TextBuf,
@@ -263,40 +263,68 @@ impl factory::FactoryPrototype for VimGrid {
     type Factory = crate::factory::FactoryMap<Self>;
     type Widgets = VimGridWidgets;
     type Root = VimGridView;
-    type View = VimWindowView;
+    type View = gtk::Fixed;
     type Msg = app::AppMessage;
 
-    fn init_view(&self, grid: &u64, _sender: Sender<app::AppMessage>) -> VimGridWidgets {
+    fn init_view(&self, grid: &u64, sender: Sender<app::AppMessage>) -> VimGridWidgets {
         view! {
-            view = VimGridView::new(*grid, self.width, self.height) {
+            view = VimGridView::new(*grid, self.width as _, self.height as _) {
                 set_widget_name: &format!("vim-grid-{}-{}", self.win, grid),
                 set_hldefs: self.hldefs.clone(),
-                set_textbuf:self.textbuf.as_ref().clone(),
+                set_textbuf:self.textbuf.clone(),
+                set_font_metrics: self.metrics.clone(),
 
                 set_visible: self.visible,
 
                 set_overflow: gtk::Overflow::Hidden,
 
-                inline_css: b"border: 1px solid green;",
+                set_font_description: &self.font_description.borrow(),
+
+                set_css_classes: &[&format!("vim-view-grid-{}", self.grid)],
+
+                // inline_css: b"border: 1px solid @borders;",
+
             }
         }
 
-        let font_description = self.font_description.clone();
-        view.add_tick_callback(move |view, _| {
-            if let Some(desc) = view.pango_context().font_description() {
-                let font_desc = unsafe { &*font_description.as_ref().as_ptr() }.clone();
-                if desc != font_desc {
-                    view.pango_context().set_font_description(&font_desc);
-                }
-            }
-            glib::Continue(true)
-        });
+        let click_listener = gtk::GestureClick::builder()
+            .button(0)
+            .exclusive(false)
+            .touch_only(false)
+            .n_points(1)
+            .name("click-listener")
+            .build();
+        click_listener.connect_pressed(
+            glib::clone!(@strong sender, @strong grid => move |c, n_press, x, y| {
+                log::info!("{:?} pressed {} times at {}x{}", c.name(), n_press, x, y);
+                sender.send(
+                    UiCommand::MouseButton {
+                        action: "press".to_string(),
+                        grid_id: grid,
+                        position: (x as u32, y as u32)
+                    }.into()
+                ).expect("Failed to send mouse press event");
+            }),
+        );
+        click_listener.connect_released(
+            glib::clone!(@strong sender, @strong grid => move |c, n_press, x, y| {
+                log::info!("{:?} released {} times at {}x{}", c.name(), n_press, x, y);
+                sender.send(
+                    UiCommand::MouseButton {
+                        action: "release".to_string(),
+                        grid_id: grid,
+                        position: (x as u32, y as u32)
+                    }.into()
+                ).expect("Failed to send mouse event");
+            }),
+        );
+        windows_container.add_controller(&click_listener);
 
         VimGridWidgets { view }
     }
 
-    fn position(&self, grid: &u64) -> FixedPosition {
-        log::debug!("requesting grid position {}", grid);
+    fn position(&self, _: &u64) -> FixedPosition {
+        log::debug!("requesting grid position {}", self.grid);
         FixedPosition {
             x: self.pos.x,
             y: self.pos.y,
@@ -311,23 +339,34 @@ impl factory::FactoryPrototype for VimGrid {
             self.width,
             self.height
         );
-        let grid = &widgets.view;
+        let view = &widgets.view;
 
-        grid.set_visible(self.visible);
-        grid.set_property("width", &self.width);
-        grid.set_property("height", &self.height);
+        view.set_visible(self.visible);
+        view.set_font_description(&self.font_description.borrow());
+
+        let p_width = view.property::<u64>("width") as usize;
+        let p_height = view.property::<u64>("height") as usize;
+        if self.width != p_width || self.height != p_height {
+            view.resize(self.width as _, self.height as _);
+        }
 
         if let Some(pos) = self.move_to.take() {
             gtk::prelude::FixedExt::move_(
-                &grid.parent().unwrap().downcast::<gtk::Fixed>().unwrap(),
-                grid,
+                &view.parent().unwrap().downcast::<gtk::Fixed>().unwrap(),
+                view,
                 pos.x,
                 pos.y,
             );
         }
-        grid.queue_draw();
-        grid.queue_resize();
-        grid.queue_allocate();
+
+        view.queue_allocate();
+        view.queue_resize();
+        // grid.queue_draw();
+
+        log::info!(
+            "font-description {}",
+            self.font_description.borrow().to_str()
+        );
     }
 
     fn root_widget(widgets: &VimGridWidgets) -> &VimGridView {
@@ -335,13 +374,90 @@ impl factory::FactoryPrototype for VimGrid {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Position {
+    pub x: f64,
+    pub y: f64,
+}
+
+impl Position {
+    pub fn new(x: f64, y: f64) -> Position {
+        Position { x, y }
+    }
+}
+
+impl Into<FixedPosition> for Position {
+    fn into(self) -> FixedPosition {
+        FixedPosition {
+            x: self.x,
+            y: self.y,
+        }
+    }
+}
+
+impl From<(f64, f64)> for Position {
+    fn from((x, y): (f64, f64)) -> Self {
+        Position { x, y }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Rectangle {
+    pub width: usize,
+    pub height: usize,
+}
+
+impl Rectangle {
+    fn new(width: usize, height: usize) -> Rectangle {
+        Rectangle { width, height }
+    }
+}
+
+impl From<(usize, usize)> for Rectangle {
+    fn from((width, height): (usize, usize)) -> Self {
+        Rectangle { width, height }
+    }
+}
+
+impl From<(u64, u64)> for Rectangle {
+    fn from((width, height): (u64, u64)) -> Self {
+        Rectangle {
+            width: width as usize,
+            height: height as usize,
+        }
+    }
+}
+
 impl VimGrid {
+    pub fn new(
+        id: u64,
+        winid: u64,
+        pos: Position,
+        rect: Rectangle,
+        hldefs: HighlightDefinitions,
+        metrics: Rc<Cell<app::FontMetrics>>,
+        font_description: Rc<RefCell<pango::FontDescription>>,
+    ) -> VimGrid {
+        let textbuf = TextBuf::new(rect.height, rect.width);
+        VimGrid {
+            win: winid,
+            grid: id,
+            pos: pos.into(),
+            width: rect.width as _,
+            height: rect.height as _,
+            move_to: None.into(),
+            hldefs: hldefs.clone(),
+            metrics,
+            textbuf,
+            visible: true,
+            font_description,
+        }
+    }
     pub fn textbuf(&self) -> &TextBuf {
         &self.textbuf
     }
 
     pub fn hide(&mut self) {
-        // self.visible.set(Some(Visible::No));
         self.visible = false;
     }
 
@@ -349,28 +465,23 @@ impl VimGrid {
         self.visible = true;
     }
 
-    pub fn resize(&mut self, width: u64, height: u64) {
+    pub fn clear(&self) {
+        self.textbuf().borrow().clear();
+    }
+
+    pub fn resize(&mut self, width: usize, height: usize) {
         self.width = width;
         self.height = height;
-        self.textbuf.borrow().resize(height as _, width as _);
+        self.textbuf.borrow().resize(height, width);
     }
 
     pub fn set_pos(&mut self, x: f64, y: f64) {
         self.pos = FixedPosition { x, y };
         self.move_to.replace(FixedPosition { x, y }.into());
     }
-
-    /*
-    /// (width, height)
-    fn size_required(&self, cols: u64, rows: u64) -> (u64, u64) {
-        (
-            (cols as f64 * self.charwidth) as u64,
-            (rows as f64 * self.lineheight) as u64,
-        )
-    }
-    */
 }
 
+/*
 impl<Widget> relm4::factory::FactoryView<Widget> for VimWindowView
 where
     Widget: glib::IsA<gtk::Widget>,
@@ -403,7 +514,9 @@ impl factory::FactoryPrototype for VimWindow {
 
                 set_overflow: gtk::Overflow::Hidden,
 
-                inline_css: b"border: 1px solid blue;",
+                set_font_description: &self.font_description.borrow(),
+
+                // inline_css: b"border: 1px solid @borders;",
             }
         }
         relm4::factory::Factory::generate(&self.grids, &view, sender.clone());
@@ -411,71 +524,6 @@ impl factory::FactoryPrototype for VimWindow {
         self.sender.set(sender.clone()).ok();
 
         // let grid_id = self.grid;
-        let on_click = gtk::GestureClick::new();
-        on_click.set_name("vim-window-onclick-listener");
-        on_click.connect_pressed(cloned!(sender, grid => move |c, n_press, x, y| {
-            log::debug!("{:?} pressed {} times at {}x{}", c.name(), n_press, x, y);
-            sender.send(
-                UiCommand::MouseButton {
-                    action: "press".to_string(),
-                    grid_id: grid,
-                    position: (x as u32, y as u32)
-                }.into()
-            ).expect("Failed to send mouse press event");
-        }));
-        on_click.connect_released(cloned!(sender, grid => move |c, n_press, x, y| {
-            log::debug!("{:?} released {} times at {}x{}", c.name(), n_press, x, y);
-            sender.send(
-                UiCommand::MouseButton {
-                    action: "release".to_string(),
-                    grid_id: grid,
-                    position: (x as u32, y as u32)
-                }.into()
-            ).expect("Failed to send mouse event");
-        }));
-        // on_click.connect_stopped(cloned!(sender => move |c| {
-        //     log::debug!("Click({}) stopped", c.name().unwrap());
-        //     // sender.send(AppMsg::Message(format!("Click({}) stopped", c.name().unwrap()))).unwrap();
-        // }));
-        // on_click.connect_unpaired_release(cloned!(sender => move |c, n_press, x, y, events| {
-        //     // sender.send(AppMsg::Message(format!("Click({:?}) unpaired release {} times at {}x{} {:?}", c.group(), n_press, x, y, events))).unwrap();
-        //     log::debug!("Click({:?}) unpaired release {} times at {}x{} {:?}", c.group(), n_press, x, y, events);
-        // }));
-        view.add_controller(&on_click);
-
-        let on_scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::all());
-        on_scroll.set_name("scroller");
-        on_scroll.connect_decelerate(cloned!(sender => move |_, x, y| {
-            println!("scroll decelerate x: {}, y: {}", x, y);
-            // UiCommand::Scroll { direction:  }
-            // sender.send(AppMsg::Message(format!("scroll decelerate x: {}, y: {}", x, y))).unwrap();
-        }));
-        on_scroll.connect_scroll(cloned!(sender => move |_, x, y| {
-            println!("scroll x: {}, y: {}", x, y);
-            // sender.send(AppMsg::Message(format!("scroll x: {}, y: {}", x, y))).unwrap();
-            // sender.send(UiCommand::Scroll { grid_id: grid_id,  }).unwrap();
-            gtk::Inhibit(false)
-        }));
-        on_scroll.connect_scroll_begin(cloned!(sender => move |_| {
-            println!("scroll begin");
-            // sender.send(AppMsg::Message(format!("scroll begin"))).unwrap();
-        }));
-        on_scroll.connect_scroll_end(cloned!(sender => move |_| {
-            println!("scroll end");
-            // sender.send(AppMsg::Message(format!("scroll end"))).unwrap();
-        }));
-        view.add_controller(&on_scroll);
-
-        let font_description = self.font_description.clone();
-        view.add_tick_callback(move |view, _| {
-            if let Some(desc) = view.pango_context().font_description() {
-                let font_desc = unsafe { &*font_description.as_ref().as_ptr() }.clone();
-                if desc != font_desc {
-                    view.pango_context().set_font_description(&font_desc);
-                }
-            }
-            glib::Continue(true)
-        });
 
         VimWindowWidgets { view }
     }
@@ -495,6 +543,7 @@ impl factory::FactoryPrototype for VimWindow {
         view.set_visible(self.visible);
         view.set_property("width", self.width);
         view.set_property("height", self.height);
+        view.set_font_description(&self.font_description.borrow());
 
         if let Some(pos) = self.move_to.take() {
             gtk::prelude::FixedExt::move_(
@@ -507,7 +556,7 @@ impl factory::FactoryPrototype for VimWindow {
 
         relm4::factory::Factory::generate(&self.grids, &view, self.sender.get().unwrap().clone());
 
-        view.queue_draw();
+        // view.queue_draw();
         view.queue_resize();
         view.queue_allocate();
     }
@@ -601,11 +650,13 @@ impl VimWindow {
         self.visible = true;
     }
 
+    /*
     pub fn clear(&mut self) {
         self.grids
             .iter_mut()
             .for_each(|(_, grid)| grid.textbuf().borrow().clear());
     }
+    */
 
     pub fn queue_draw(&mut self) {
         self.queued_draw = true;
@@ -615,7 +666,7 @@ impl VimWindow {
         self.grids.remove(grid)
     }
 
-    pub fn add(&mut self, grid: u64, width: u64, height: u64, hldefs: HighlightDefinitions) {
+    pub fn add(&mut self, grid: u64, width: u64, height: u64) {
         // let view = VimGridView::new(grid, width, height);
         log::info!("creating grid {} {}x{}", grid, width, height);
         let textbuf = TextBuf::new(height as _, width as _);
@@ -626,7 +677,7 @@ impl VimWindow {
             width,
             height,
             move_to: None.into(),
-            hldefs,
+            hldefs: self.hldefs.clone(),
             textbuf,
             visible: true,
             font_description: self.font_description.clone(),
@@ -645,3 +696,4 @@ impl VimWindow {
         self.height = height;
     }
 }
+*/

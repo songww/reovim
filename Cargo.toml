@@ -19,6 +19,7 @@ derivative = "2"
 derive-new = "0.5"
 env_logger = "0.9"
 rustc-hash = "1"
+vector-map = "1"
 async-trait = "0.1"
 derive_more = "0.99"
 pin-project = "1"
@@ -34,7 +35,7 @@ cairo = { version = "0.15", package = "cairo-rs" }
 gdk = { version = "0.4", package = "gdk4", features = [ "v4_4" ] }
 gtk = { version = "0.4", package = "gtk4", features = [ "v4_4" ] }
 
-relm4 = { version = "0.4", features = ["tokio-rt"] }
+relm4 = {  version = "0.4", features = ["tokio-rt"] }
 relm-macros = { version = "0.4", package = "relm4-macros" }
 relm-components = { version = "0.4", package = "relm4-components" }
 

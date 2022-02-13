@@ -4,6 +4,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
+use gdk::prelude::FontExt;
 use glib::subclass::prelude::*;
 
 use crate::color::ColorExt;
@@ -41,6 +42,9 @@ mod imp {
         }
 
         fn resize(&mut self, rows: usize, cols: usize) {
+            if self.rows == rows && self.cols == cols {
+                return;
+            }
             log::warn!(
                 "_TextBuf resize to {}x{} from {}x{}",
                 cols,
@@ -162,28 +166,61 @@ impl TextBuf {
         self.imp().set_cells(row, col, cells);
     }
 
-    pub(super) fn layout(
-        &self,
-        pctx: &pango::Context,
-        hldefs: &HighlightDefinitions,
-    ) -> pango::Layout {
+    pub(super) fn layout(&self, layout: &pango::Layout, hldefs: &HighlightDefinitions) {
         const U16MAX: f32 = u16::MAX as f32 + 1.;
         let imp = self.imp();
         let cells = imp.cells();
-        let layout = pango::Layout::new(pctx);
         if imp.cols() == 0 || imp.rows() == 0 {
-            return layout;
+            return;
         }
+        // log::info!(
+        //     "layout font description {}",
+        //     layout.font_description().unwrap().to_str()
+        // );
+        // let font_desc = layout.font_description().unwrap();
+        // let fontset = layout
+        //     .context()
+        //     .unwrap()
+        //     .load_fontset(&font_desc, &pango::Language::default())
+        //     .unwrap();
+        let nchars = imp.cols() * imp.rows() + imp.rows();
+        let mut text = String::with_capacity(nchars);
+        let default_colors = hldefs.defaults().unwrap();
         let attrs = pango::AttrList::new();
-        let mut text = String::with_capacity(imp.cols() * imp.rows() + imp.rows());
-        let default_colors = hldefs.get(0).colors;
+        attrs.insert({
+            let mut attr = pango::AttrInt::new_fallback(true);
+            attr.set_start_index(0);
+            attr.set_end_index(nchars as _);
+            attr
+        });
+        let default_hldef = hldefs.get(0).unwrap();
         for line_cells in cells.iter() {
-            // let mut linetext = String::with_capacity(imp.cols + 1);
             for cell in line_cells.iter() {
+                if cell.text.is_empty() {
+                    continue;
+                }
                 let start_index = text.len();
                 text.push_str(&cell.text);
                 let end_index = text.len();
-                let hldef = hldefs.get(cell.hldef.unwrap_or(1));
+                // use pango::prelude::FontsetExt;
+                // let font = fontset
+                //     .font(cell.text.chars().next().unwrap() as u32)
+                //     .unwrap();
+                // let desc = font.describe().unwrap();
+                // let mut attr = pango::AttrFontDesc::new(&desc);
+                // log::info!("text:'{}' with font: {}", cell.text, desc.to_str());
+                // attr.set_start_index(start_index as _);
+                // attr.set_end_index(end_index as _);
+                // attrs.insert(attr);
+                let mut background = None;
+                let mut hldef = default_hldef;
+                if let Some(ref id) = cell.hldef {
+                    let style = hldefs.get(*id);
+                    if let Some(style) = style {
+                        background = style.background();
+                        hldef = style;
+                    }
+                }
                 if hldef.italic {
                     let mut attr = pango::AttrInt::new_style(pango::Style::Italic);
                     attr.set_start_index(start_index as _);
@@ -203,23 +240,33 @@ impl TextBuf {
                     attrs.insert(attr);
                 }
                 if hldef.underline {
-                    let mut attr = pango::AttrInt::new_underline(pango::Underline::SingleLine);
+                    let mut attr = pango::AttrInt::new_underline(pango::Underline::Single);
                     attr.set_start_index(start_index as _);
                     attr.set_end_index(end_index as _);
                     attrs.insert(attr);
                 }
                 if hldef.undercurl {
-                    let mut attr = pango::AttrInt::new_underline(pango::Underline::ErrorLine);
+                    let mut attr = pango::AttrInt::new_underline(pango::Underline::Error);
                     attr.set_start_index(start_index as _);
                     attr.set_end_index(end_index as _);
                     attrs.insert(attr);
                 }
+                /*
                 // alpha color
-                let mut attr = pango::AttrInt::new_background_alpha(hldef.blend as _);
+                let mut attr =
+                    pango::AttrInt::new_background_alpha(u16::MAX - (hldef.blend as u16).pow(2));
+                log::info!("blend {}", hldef.blend);
                 attr.set_start_index(start_index as _);
                 attr.set_end_index(end_index as _);
                 attrs.insert(attr);
+                */
                 if let Some(fg) = hldef.colors.foreground.or(default_colors.foreground) {
+                    // log::info!(
+                    //     "foreground #{:.2x}{:.2x}{:.2x}",
+                    //     (fg.red() * U16MAX) as u16,
+                    //     (fg.green() * U16MAX) as u16,
+                    //     (fg.blue() * U16MAX) as u16
+                    // );
                     let mut attr = pango::AttrColor::new_foreground(
                         (fg.red() * U16MAX) as _,
                         (fg.green() * U16MAX) as _,
@@ -229,7 +276,13 @@ impl TextBuf {
                     attr.set_end_index(end_index as _);
                     attrs.insert(attr);
                 }
-                if let Some(bg) = hldef.colors.background.or(default_colors.foreground) {
+                if let Some(bg) = background {
+                    // log::info!(
+                    //     "background #{:.2x}{:.2x}{:.2x}",
+                    //     (bg.red() * U16MAX) as u16,
+                    //     (bg.green() * U16MAX) as u16,
+                    //     (bg.blue() * U16MAX) as u16
+                    // );
                     let mut attr = pango::AttrColor::new_background(
                         (bg.red() * U16MAX) as _,
                         (bg.green() * U16MAX) as _,
@@ -252,10 +305,17 @@ impl TextBuf {
             }
             text.push('\n');
         }
+        // layout.set_ellipsize(pango::EllipsizeMode::None);
+        // layout.set_justify(true);
+        // layout.set_alignment(pango::Alignment::Center);
+        // let mut tabs = pango::TabArray::new(2, false);
+        // tabs.set_tab(0, pango::TabAlign::Left, 0);
+        // tabs.set_tab(1, pango::TabAlign::Left, 1);
+        // layout.set_tabs(Some(&tabs));
         layout.set_text(&text);
         layout.set_attributes(Some(&attrs));
         log::info!("pixel size {:?}", layout.pixel_size());
-        log::info!("layout height: {}", layout.height());
+        // log::info!("layout height: {}", layout.height());
         // let x801 = layout.index_to_line_x(801, false);
         // log::info!("layout index 801 to x {:?}", x801);
         // log::info!(
@@ -280,7 +340,6 @@ impl TextBuf {
         // log::info!("extents: {:?}", l.extents());
         // log::info!("pixel extents: {:?}", l.pixel_extents());
         log::info!("text to render:\n{}", &text);
-        layout
     }
 }
 
@@ -382,14 +441,10 @@ impl TextBufCells {
     pub fn resize(&mut self, rows: usize, cols: usize) {
         assert!(rows < 1000);
         assert!(cols < 1000);
-        log::info!("1 buf cells resizing");
-        log::info!("2 buf cells resizing");
-        log::info!("3 buf cells resizing");
-        log::info!("4 buf cells resizing");
         let cells = self.cells.take().into_vec();
         let old_rows = cells.len();
         let nrows = rows.min(old_rows);
-        log::info!("5 buf cells resizing {} {}", cells.len(), nrows);
+        log::debug!("5 buf cells resizing {} {}", cells.len(), nrows);
         let cells: Vec<_> = cells
             .into_iter()
             .take(nrows)
@@ -406,12 +461,12 @@ impl TextBufCells {
             .chain(vec![TextLine::new(cols); rows.saturating_sub(old_rows)].into_iter())
             .collect();
 
-        log::info!("6 buf cells resizing");
+        // log::debug!("6 buf cells resizing");
         // cells.append(&mut vec![
         //     TextLine::new(cols);
         //     rows.saturating_sub(old_rows)
         // ]);
-        log::info!("buf cells resizing to {} rows from {}", rows, old_rows);
+        log::debug!("buf cells resizing to {} rows from {}", rows, old_rows);
         // let cells_ = unsafe { Vec::from_raw_parts(cells.as_mut_ptr(), old_rows, 1000) };
         // let mut _cells = Box::new_uninit_slice(rows);
         //log::info!("buf cells resizing cloning head {} rows", nrows);
@@ -433,9 +488,9 @@ impl TextBufCells {
         //     default_line.resize(cols, TextCell::default());
         //     TextLine(default_line.into_boxed_slice())
         // });
-        log::info!("buf cells resized to {}x{}", cols, rows);
+        // log::info!("buf cells resized to {}x{}", cols, rows);
         // self.cells = cells.into_boxed_slice();
-        log::info!("buf cells resized to {}x{}", cols, rows);
+        // log::info!("buf cells resized to {}x{}", cols, rows);
         // self.cells.replace(unsafe { _cells.assume_init() });
         self.cells.replace(cells.into_boxed_slice());
     }

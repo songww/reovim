@@ -4,6 +4,7 @@ use std::fmt::Debug;
 use gtk::glib::Sender;
 use relm4::factory::{Factory, FactoryPrototype, FactoryView};
 use rustc_hash::FxHashMap;
+use vector_map::VecMap;
 
 struct Widgets<Widgets: Debug, Root: Debug> {
     widgets: Widgets,
@@ -27,6 +28,12 @@ enum ChangeType {
     Update,
 }
 
+impl Default for ChangeType {
+    fn default() -> Self {
+        ChangeType::Add
+    }
+}
+
 /// A container similar to [`HashMap`] that implements [`Factory`].
 #[allow(clippy::type_complexity)]
 #[derive(Default, Debug)]
@@ -38,7 +45,7 @@ where
     widgets: RefCell<
         FxHashMap<u64, Widgets<Data::Widgets, <Data::View as FactoryView<Data::Root>>::Root>>,
     >,
-    changes: RefCell<FxHashMap<u64, ChangeType>>,
+    changes: RefCell<VecMap<u64, ChangeType>>,
 }
 
 impl<Data> FactoryMap<Data>
@@ -51,7 +58,7 @@ where
         FactoryMap {
             data: FxHashMap::default(),
             widgets: RefCell::new(FxHashMap::default()),
-            changes: RefCell::new(FxHashMap::default()),
+            changes: RefCell::new(VecMap::new()),
         }
     }
 
@@ -60,7 +67,7 @@ where
     pub fn from_hashmap(data: FxHashMap<u64, Data>) -> Self {
         let length = data.len();
 
-        let mut changes = FxHashMap::default();
+        let mut changes = VecMap::default();
         changes.reserve(length);
         data.keys().for_each(|k| {
             changes.insert(*k, ChangeType::Add);
@@ -140,7 +147,9 @@ where
     #[must_use]
     pub fn get_mut(&mut self, key: u64) -> Option<&mut Data> {
         let mut changes = self.changes.borrow_mut();
-        changes.entry(key).or_insert(ChangeType::Update);
+        if !changes.contains_key(&key) {
+            changes.insert(key, ChangeType::Update);
+        }
 
         self.data.get_mut(&key)
     }
@@ -154,7 +163,7 @@ where
     type Key = u64;
 
     fn generate(&self, view: &View, sender: Sender<Data::Msg>) {
-        for (index, change) in self.changes.borrow().iter() {
+        for (index, change) in self.changes.borrow().iter().rev() {
             let mut widgets = self.widgets.borrow_mut();
 
             match change {

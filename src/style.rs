@@ -39,15 +39,11 @@ impl Style {
         }
     }
 
-    pub fn background(&self, default_colors: &Colors) -> Color {
+    pub fn background(&self) -> Option<Color> {
         if self.reverse {
-            self.colors
-                .foreground
-                .unwrap_or_else(|| default_colors.foreground.unwrap())
+            self.colors.foreground
         } else {
-            self.colors
-                .background
-                .unwrap_or_else(|| default_colors.background.unwrap())
+            self.colors.background
         }
     }
 

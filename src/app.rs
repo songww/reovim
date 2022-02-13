@@ -1,25 +1,21 @@
 use std::cell::{Cell, RefCell};
-use std::sync::RwLock;
-use std::{rc::Rc, sync::atomic};
+use std::rc::Rc;
+use std::sync::{atomic, RwLock};
 
-use gdk::prelude::FontFamilyExt;
 use gtk::prelude::{
-    BoxExt, DrawingAreaExt, GtkWindowExt, OrientableExt, WidgetExt, WidgetExtManual,
+    BoxExt, DrawingAreaExt, DrawingAreaExtManual, EventControllerExt, GtkWindowExt, OrientableExt,
+    WidgetExt,
 };
 use once_cell::sync::OnceCell;
 use pango::FontDescription;
-use relm4::factory::positions::FixedPosition;
 use relm4::{send, AppUpdate, Model, RelmApp, Sender, WidgetPlus, Widgets};
 use rustc_hash::FxHashMap;
 
-use crate::vimview;
+use crate::vimview::{self, VimGrid};
 use crate::{
     bridge::{self, RedrawEvent, UiCommand},
     style, Opts,
 };
-
-// 最下层的grid
-const DEFAULT_WINDOW: u64 = 0;
 
 #[derive(Clone, Debug)]
 pub enum AppMessage {
@@ -34,10 +30,11 @@ impl From<UiCommand> for AppMessage {
 }
 
 #[derive(Debug, Default)]
-pub struct Relation {
-    id: u64,
+pub struct GridWindow {
+    // window number
+    winid: u64,
     // default grid
-    default_grid: u64,
+    //default_grid: u64,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -56,6 +53,18 @@ impl FontMetrics {
             linespace: 0.,
             lineheight: 0.,
         }
+    }
+
+    pub fn charwidth(&self) -> f64 {
+        self.charwidth
+    }
+
+    pub fn linespace(&self) -> f64 {
+        self.linespace
+    }
+
+    pub fn lineheight(&self) -> f64 {
+        self.lineheight
     }
 }
 
@@ -76,16 +85,22 @@ pub struct AppModel {
     pub pctx: OnceCell<Rc<pango::Context>>,
 
     pub hldefs: Rc<RwLock<vimview::HighlightDefinitions>>,
+    pub background_changed: Rc<atomic::AtomicBool>,
 
-    pub vwindows: crate::factory::FactoryMap<vimview::VimWindow>,
-    // relations about grid and window.
-    pub relationships: FxHashMap<u64, Relation>,
+    pub vgrids: crate::factory::FactoryMap<vimview::VimGrid>,
+    // relations about grid with window.
+    pub relationships: FxHashMap<u64, GridWindow>,
 
     pub rt: tokio::runtime::Runtime,
 }
 
 impl AppModel {
     pub fn new(opts: Opts) -> AppModel {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_time()
+            .enable_io()
+            .build()
+            .unwrap();
         AppModel {
             title: opts.title.clone(),
             default_width: opts.width,
@@ -102,45 +117,39 @@ impl AppModel {
             pctx: OnceCell::new(),
 
             hldefs: Rc::new(RwLock::new(vimview::HighlightDefinitions::new())),
+            background_changed: Rc::new(false.into()),
 
-            vwindows: crate::factory::FactoryMap::new(),
+            vgrids: crate::factory::FactoryMap::new(),
             relationships: FxHashMap::default(),
 
             opts,
 
-            rt: tokio::runtime::Builder::new_multi_thread()
-                .enable_time()
-                .enable_io()
-                .build()
-                .unwrap(),
+            rt,
         }
     }
 
+    /*
     /// (width, height)
     fn size_required(&self, cols: u64, rows: u64) -> (u64, u64) {
         let factors = self.font_metrics.get();
         (
             (cols as f64 * factors.charwidth) as u64,
-            (rows as f64 * factors.lineheight) as u64,
+            (rows as f64 * (factors.lineheight)) as u64, //  + factors.linespace
         )
     }
+    */
 
     pub fn compute(&self) {
-        // const SINGLE_WIDTH_CHARS: &'static str = concat!(
-        //     "! \" # $ % & ' ( ) * + , - . / ",
-        //     "0 1 2 3 4 5 6 7 8 9 ",
-        //     ": ; < = > ? @ ",
-        //     "A B C D E F G H I J K L M N O P Q R S T U V W X Y Z ",
-        //     "[ \\ ] ^ _ ` ",
-        //     "a b c d e f g h i j k l m n o p q r s t u v w x y z ",
-        //     "{ | } ~ ",
-        // );
-        // let pctx = pango::Context::new();
-        // if let Some(ref desc) = self.font_description {
-        //     log::warn!(" --> update font desc {}", desc.to_str());
-        //     pctx.set_font_description(desc);
-        // }
-        let desc = unsafe { &*self.font_description.as_ref().as_ptr() };
+        const SINGLE_WIDTH_CHARS: &'static str = concat!(
+            "! \" # $ % & ' ( ) * + , - . / ",
+            "0 1 2 3 4 5 6 7 8 9 ",
+            ": ; < = > ? @ ",
+            "A B C D E F G H I J K L M N O P Q R S T U V W X Y Z ",
+            "[ \\ ] ^ _ ` ",
+            "a b c d e f g h i j k l m n o p q r s t u v w x y z ",
+            "{ | } ~ \n",
+        );
+        let desc = self.font_description.borrow();
         log::debug!(
             "font desc {} {} {} {}pt",
             desc.family().unwrap(),
@@ -148,70 +157,18 @@ impl AppModel {
             desc.style(),
             desc.size() / pango::SCALE,
         );
-        self.pctx
-            .get()
-            .unwrap()
-            .set_font_description(unsafe { &*self.font_description.as_ref().as_ptr() });
-        // let layout = pango::Layout::new(&self.pctx.get().unwrap());
-        // layout.set_font_description(Some(unsafe { &*self.font_description.as_ref().as_ptr() }));
-        // layout.set_text(SINGLE_WIDTH_CHARS);
-        // log::warn!("--> size {:?}", layout.size());
-        // log::warn!("--> extents {:?}", layout.extents());
-        // log::warn!("--> pixel size {:?}", layout.pixel_size());
-        // log::warn!("--> pixel extents {:?}", layout.pixel_extents());
-        // let (_, h) = layout.size();
-        // log::warn!("--> pos {:?}", layout.index_to_pos(0));
-        // log::warn!("--> x {:?}", layout.index_to_line_x(0, true));
-        // let pos = layout.index_to_pos(0);
-        // self.lineheight = pos.height() as f64 / pango::SCALE as f64;
-        // if let Some(linespace) = self.linespace {
-        //     self.lineheight += linespace as f64;
-        // }
-        // self.charwidth = pos.width() as f64 / pango::SCALE as f64;
-        let metrics = self
-            .pctx
-            .get()
-            .unwrap()
-            .metrics(
-                Some(unsafe { &*self.font_description.as_ref().as_ptr() }),
-                None,
-            )
-            .unwrap();
+        let pctx = self.pctx.get().unwrap();
+        pctx.set_font_description(&desc);
+        let layout = pango::Layout::new(pctx);
+        let metrics = pctx.metrics(Some(&desc), None).unwrap();
+        layout.set_text(SINGLE_WIDTH_CHARS);
+        let lineheight = layout.line(1).unwrap().height();
         let mut font_metrics = self.font_metrics.get();
-        font_metrics.lineheight = metrics.height() as f64 / pango::SCALE as f64;
+        font_metrics.lineheight = lineheight as f64 / pango::SCALE as f64;
         font_metrics.charwidth = metrics.approximate_digit_width() as f64 / pango::SCALE as f64;
         log::info!("line-height {:?}", font_metrics.lineheight);
         log::info!("char-width {:?}", font_metrics.charwidth);
         self.font_metrics.replace(font_metrics);
-        /*
-        let s = unsafe { String::from_utf8_unchecked(vec!['1' as u8; cols]) };
-        let text = vec![s; rows].join("\n");
-        let layout = pango::Layout::new(unsafe { self.pctx.get_unchecked() });
-        layout.set_markup(&text);
-        log::info!(
-            "font desc {}",
-            self.pctx
-                .get()
-                .unwrap()
-                .font_description()
-                .unwrap()
-                .to_str()
-        );
-        log::info!("line height {}", layout.line(0).unwrap().height());
-        log::info!("baseline {}", layout.baseline());
-        log::info!("line count {}", layout.line_count());
-        log::info!("size {:?}", layout.size());
-        log::info!("extents {:?}", layout.extents());
-        log::info!("pixel size {:?}", layout.pixel_size());
-        log::info!(
-            "last size {} {:?}",
-            text.len() as i32 - 1,
-            layout.index_to_pos(1)
-        );
-        log::info!("last size {:?}", layout.index_to_pos(text.len() as i32));
-        // layout.pixel_size()
-        (cols as _, rows as _)
-        */
     }
 }
 
@@ -264,9 +221,6 @@ impl AppUpdate for AppModel {
                                     &guifont.replace(":h", " "),
                                 );
 
-                                // self.pctx.get().unwrap().set_font_description(&desc);
-                                // unsafe { self.pctx.get_unchecked() }.set_font_description(&desc);
-
                                 self.guifont.replace(guifont);
                                 self.font_description.replace(desc);
 
@@ -299,6 +253,8 @@ impl AppUpdate for AppModel {
                         }
                     },
                     RedrawEvent::DefaultColorsSet { colors } => {
+                        self.background_changed
+                            .store(true, atomic::Ordering::Relaxed);
                         self.hldefs.write().unwrap().set_defaults(colors);
                     }
                     RedrawEvent::HighlightAttributesDefine { id, style } => {
@@ -306,17 +262,13 @@ impl AppUpdate for AppModel {
                     }
                     RedrawEvent::Clear { grid } => {
                         log::info!("clearing {}", grid);
-                        if let Some(win) = self.relationships.get(&grid) {
-                            let window = self.vwindows.get_mut(win.id).unwrap();
-                            //if win.is_base {
-                            //    log::warn!("clearing base {}", grid);
-                            //    window.clear();
-                            //    // unimplemented!("clearing base grid {}.", grid);
-                            //} else {
-                            log::warn!("cleared {}", grid);
-                            window.get_mut(grid).unwrap().textbuf().borrow().clear();
-                            //}
-                        };
+                        // if let Some(win) = self.relationships.get(&grid) {
+                        //     let window = self.vwindows.get_mut(win.id).unwrap();
+                        //     window.get_mut(grid).unwrap().textbuf().borrow().clear();
+                        //     //}
+                        // };
+                        log::info!("cleared grid {}", grid);
+                        self.vgrids.get_mut(grid).map(|grid| grid.clear());
                     }
                     RedrawEvent::GridLine {
                         grid,
@@ -325,105 +277,67 @@ impl AppUpdate for AppModel {
                         cells,
                     } => {
                         // log::info!("grid line {}", grid);
-                        if let Some(win) = self.relationships.get(&grid) {
-                            let cells: Vec<_> = cells
-                                .into_iter()
-                                .map(|cell| vimview::TextCell {
-                                    text: cell.text,
-                                    hldef: cell.hldef,
-                                    repeat: cell.repeat,
-                                    double_width: cell.double_width,
-                                })
-                                .collect();
+                        let winid = self
+                            .relationships
+                            .get(&grid)
+                            .map(|rel| rel.winid)
+                            .unwrap_or(0);
+                        let cells: Vec<_> = cells
+                            .into_iter()
+                            .map(|cell| vimview::TextCell {
+                                text: cell.text,
+                                hldef: cell.hldef,
+                                repeat: cell.repeat,
+                                double_width: cell.double_width,
+                            })
+                            .collect();
 
-                            log::info!(
-                                "grid line {}/{} - {} cells at {}x{}",
-                                grid,
-                                win.id,
-                                cells.len(),
-                                row,
-                                column_start
-                            );
+                        log::info!(
+                            "grid line {}/{} - {} cells at {}x{}",
+                            grid,
+                            winid,
+                            cells.len(),
+                            row,
+                            column_start
+                        );
 
-                            let relations = self
-                                .vwindows
-                                .iter()
-                                .map(|(k, win)| win.grids().iter().map(|(grid, _)| (*grid, *k)))
-                                .flatten()
-                                .collect::<Vec<_>>();
-
-                            self.vwindows
-                                .get_mut(win.id)
-                                .unwrap()
-                                .get_mut(grid)
-                                .expect(&format!("grid {} dose not belongs window {}, somethings wrong: {:?}\n{:?}", grid, win.id, &self.relationships, &relations))
-                                .textbuf()
-                                .borrow()
-                                .set_cells(row as _, column_start as _, &cells);
-                        } else {
-                            log::error!("grid {} dose not exists.", grid);
-                        };
+                        let grids: Vec<_> = self.vgrids.iter().map(|(k, v)| *k).collect();
+                        self.vgrids
+                            .get_mut(grid)
+                            .expect(&format!(
+                                "grid {} not found, valid grids {:?}",
+                                grid, &grids
+                            ))
+                            .textbuf()
+                            .borrow()
+                            .set_cells(row as _, column_start as _, &cells);
                     }
                     RedrawEvent::Resize {
                         grid,
                         width,
                         height,
                     } => {
-                        let rect = gdk::Rectangle::new(0, 0, width as _, height as _);
-                        if !self.relationships.contains_key(&grid) {
-                            let default_grid = if let Some(win) = self.vwindows.get(DEFAULT_WINDOW)
-                            {
-                                win.grid
-                            } else {
-                                let pos = FixedPosition { x: 0., y: 0. };
-                                let size = (width, height);
-                                let win = vimview::VimWindow::new(
-                                    DEFAULT_WINDOW,
-                                    grid,
-                                    pos,
-                                    size,
-                                    self.hldefs.clone(),
-                                    self.font_description.clone(),
-                                );
-                                self.vwindows.insert(DEFAULT_WINDOW, win);
-                                grid
-                            };
-                            self.relationships.insert(
-                                grid,
-                                Relation {
-                                    id: DEFAULT_WINDOW,
-                                    default_grid,
-                                },
-                            );
-                        }
-                        let rel = self.relationships.get(&grid).unwrap();
-                        log::info!(
-                            "resize grid {} to {}({})x{}({})",
-                            grid,
-                            rect.width(),
-                            width,
-                            rect.height(),
-                            height
-                        );
-                        if rel.id != DEFAULT_WINDOW {
-                            assert!(self
-                                .vwindows
-                                .get_mut(DEFAULT_WINDOW)
-                                .unwrap()
-                                .get(grid)
-                                .is_none());
-                        }
-                        let window = self.vwindows.get_mut(rel.id).unwrap();
-                        let exists = window.get(grid).is_some();
+                        let exists = self.vgrids.get(grid).is_some();
                         if exists {
-                            window
+                            self.vgrids
                                 .get_mut(grid)
                                 .unwrap()
                                 .resize(width as _, height as _);
                         } else {
-                            // let rect = gdk::Rectangle::new(0, 0, width as _, height as _);
-                            log::info!("Add grid {} to window {} at left top.", grid, rel.id);
-                            window.add(grid, width as _, height as _, self.hldefs.clone());
+                            log::info!("Add grid {} to default window at left top.", grid);
+                            self.vgrids.insert(
+                                grid,
+                                VimGrid::new(
+                                    grid,
+                                    0,
+                                    (0., 0.).into(),
+                                    (width, height).into(),
+                                    self.hldefs.clone(),
+                                    self.font_metrics.clone(),
+                                    self.font_description.clone(),
+                                ),
+                            );
+                            self.relationships.insert(grid, GridWindow { winid: 0 });
                         };
                     }
 
@@ -437,74 +351,54 @@ impl AppUpdate for AppModel {
                     } => {
                         let winid = self.rt.block_on(window.get_number()).unwrap();
                         log::info!("window pos number: {}", winid);
-                        let window = winid as u64;
+                        let winid = winid as u64;
 
-                        let x = start_column as f64;
-                        let y = start_row as f64;
-                        let pos = FixedPosition { x, y };
-                        let size = (width, height);
-                        // let rect = gdk::Rectangle::new(x, y, width as i32, height as i32);
-                        if !self.relationships.contains_key(&grid) {
-                            let default_grid = if let Some(win) = self.vwindows.get(window) {
-                                win.grid
-                            } else {
-                                let win = vimview::VimWindow::new(
-                                    window,
-                                    grid,
-                                    pos,
-                                    size,
-                                    self.hldefs.clone(),
-                                    self.font_description.clone(),
-                                );
-                                self.vwindows.insert(window, win);
-                                grid
-                            };
-                            self.relationships.insert(
+                        let font_metrics = self.font_metrics.get();
+                        let x = (start_column) as f64 * font_metrics.charwidth;
+                        let y =
+                            (start_row) as f64 * (font_metrics.lineheight + font_metrics.linespace); //;
+
+                        if self.vgrids.get(grid).is_none() {
+                            // dose not exists, create
+                            self.vgrids.insert(
                                 grid,
-                                Relation {
-                                    id: window,
-                                    default_grid,
-                                },
+                                VimGrid::new(
+                                    grid,
+                                    winid,
+                                    (x.floor(), y.floor()).into(),
+                                    (width, height).into(),
+                                    self.hldefs.clone(),
+                                    self.font_metrics.clone(),
+                                    self.font_description.clone(),
+                                ),
                             );
-                        }
-                        let rel = self.relationships.get_mut(&grid).unwrap();
-                        assert_eq!(rel.id, window);
-                        // log::info!(
-                        //     "grid {} pos to {}({})x{}({})",
-                        //     grid,
-                        //     rect.width(),
-                        //     width,
-                        //     rect.height(),
-                        //     height
-                        // );
-                        let window = self.vwindows.get_mut(window).unwrap();
-                        let exists = window.get(grid).is_some();
-                        if exists {
-                            let gridview = window.get_mut(grid).unwrap();
-                            gridview.resize(width as _, height as _);
-                        } else {
+                            self.relationships.insert(grid, GridWindow { winid });
                             log::info!(
-                                "Add grid {} to window {}({}) at {}x{}.",
+                                "Add grid {} to window {} at {}x{} with {}x{}.",
                                 grid,
                                 winid,
-                                rel.id,
+                                x,
+                                y,
                                 height,
                                 width
                             );
-                            window.add(grid, width as _, height as _, self.hldefs.clone());
-                        };
-                        let font_metrics = self.font_metrics.get();
-                        window.set_pos(
-                            start_column as f64 * font_metrics.lineheight,
-                            start_row as f64 * font_metrics.charwidth,
-                        );
-                        let gridview = window.get_mut(grid).unwrap();
-                        gridview.set_pos(
-                            start_column as f64 * font_metrics.lineheight,
-                            start_row as f64 * font_metrics.charwidth,
-                        );
-                        gridview.show();
-                        window.show();
+                        } else {
+                            let vgrid = self.vgrids.get_mut(grid).unwrap();
+                            vgrid.resize(width as _, height as _);
+                            vgrid.set_pos(x.floor(), y.floor());
+                            log::info!(
+                                "Move grid {} of window {} at {}x{} with {}x{}.",
+                                grid,
+                                winid,
+                                x,
+                                y,
+                                height,
+                                width
+                            );
+                            // make sure grid belongs right window.
+                            self.relationships.get_mut(&grid).unwrap().winid = winid;
+                            vgrid.show();
+                        }
                         log::info!(
                             "window {} position grid {} row-start({}) col-start({}) width({}) height({})",
                             winid, grid, start_row, start_column, width, height,
@@ -519,15 +413,6 @@ impl AppUpdate for AppModel {
                         current_column,
                         line_count,
                     } => {
-                        // self.rt.block_on(async {
-                        //     log::info!("viewport window height: {:?}", window.get_height().await);
-                        //     log::info!("viewport window width: {:?}", window.get_width().await);
-                        //     log::info!(
-                        //         "viewport window postion: {:?}",
-                        //         window.get_position().await
-                        //     );
-                        // });
-
                         let number = self.rt.block_on(window.get_number());
                         let winid = match number {
                             Ok(number) => number,
@@ -541,127 +426,72 @@ impl AppUpdate for AppModel {
                             }
                         };
 
+                        let (x, y) = self.rt.block_on(window.get_position()).unwrap();
+                        let (x, y) = (x as f64, y as f64);
+                        async fn allocated(
+                            window: nvim::Window<crate::bridge::Tx>,
+                        ) -> Result<(i64, i64), Box<nvim::error::CallError>>
+                        {
+                            Ok((window.get_width().await?, window.get_height().await?))
+                        }
+                        let (width, height): (i64, i64) =
+                            self.rt.block_on(allocated(window)).unwrap();
+                        let (width, height) = (width as usize, height as usize);
+
                         log::info!(
                             "window {} viewport grid {} viewport: top({}) bottom({}) highlight-line({}) highlight-column({}) with {} lines",
                              winid, grid, top_line, bottom_line, current_line, current_column, line_count,
                         );
 
-                        let window = winid as u64;
+                        let winid = winid as u64;
 
-                        // let x = start_column as i32;
-                        // let y = start_row as i32;
-                        // let rect = gdk::Rectangle::new(0, 0, 1, 1);
-                        if !self.relationships.contains_key(&grid) {
-                            let default_grid = if let Some(win) = self.vwindows.get(window) {
-                                win.grid
-                            } else {
-                                let pos = FixedPosition {
-                                    x: 0.,
-                                    y: top_line as _,
-                                };
-                                let size = (80, line_count as _);
-                                let win = vimview::VimWindow::new(
-                                    window,
-                                    grid,
-                                    pos,
-                                    size,
-                                    self.hldefs.clone(),
-                                    self.font_description.clone(),
-                                );
-                                self.vwindows.insert(window, win);
-                                grid
-                            };
-                            self.relationships.insert(
+                        if self.vgrids.get(grid).is_none() {
+                            // dose not exists, create
+                            self.vgrids.insert(
                                 grid,
-                                Relation {
-                                    id: window,
-                                    default_grid,
-                                },
+                                VimGrid::new(
+                                    grid,
+                                    winid,
+                                    (x, y).into(),
+                                    (width, height).into(),
+                                    self.hldefs.clone(),
+                                    self.font_metrics.clone(),
+                                    self.font_description.clone(),
+                                ),
                             );
-                        }
-                        let rel = self.relationships.get(&grid).unwrap();
-                        assert_eq!(rel.id, window);
-                        // log::info!(
-                        //     "grid {} pos to {}({})x{}({})",
-                        //     grid,
-                        //     rect.width(),
-                        //     width,
-                        //     rect.height(),
-                        //     height
-                        // );
-                        let window = self.vwindows.get_mut(window).unwrap();
-                        let exists = window.get(grid).is_some();
-                        if !exists {
+                            self.relationships.insert(grid, GridWindow { winid });
                             log::info!(
-                                "Add grid {} to window {}({}) at left top.",
+                                "Add grid {} to window {} at {}x{}.",
                                 grid,
                                 winid,
-                                rel.id
+                                height,
+                                width
                             );
-                            window.add(grid, 1, 1, self.hldefs.clone());
-                        };
-                        // let font_metrics = self.font_metrics.get();
-                        // window.set_pos(
-                        //     start_column as f64 * font_metrics.lineheight,
-                        //     start_row as f64 * font_metrics.charwidth,
-                        // );
-                        let gridview = window.get_mut(grid).unwrap();
-                        // gridview.set_pos(
-                        //     start_column as f64 * font_metrics.lineheight,
-                        //     start_row as f64 * font_metrics.charwidth,
-                        // );
-                        gridview.show();
-                        window.show();
+                        } else {
+                            let vgrid = self.vgrids.get_mut(grid).unwrap();
+                            // vgrid.resize(width as _, height as _);
+                            // vgrid.set_pos(x, y);
+                            vgrid.show();
+                            // make sure grid belongs right window.
+                            self.relationships.get_mut(&grid).unwrap().winid = winid;
+                        }
                     }
                     RedrawEvent::WindowHide { grid } => {
                         log::info!("hide {}", grid);
-                        if let Some(win) = self.relationships.get(&grid) {
-                            if win.default_grid == grid {
-                                let window = self.vwindows.get_mut(win.id).unwrap();
-                                window.hide();
-                            } else {
-                                self.vwindows
-                                    .get_mut(win.id)
-                                    .unwrap()
-                                    .get_mut(grid)
-                                    .unwrap()
-                                    .hide();
-                            }
-                        }
+                        self.vgrids.get_mut(grid).unwrap().hide();
                     }
                     RedrawEvent::WindowClose { grid } => {
-                        if let Some(win) = self.relationships.get(&grid) {
-                            if win.default_grid == grid {
-                                log::info!("closing window {} by {}", win.id, grid);
-                                self.vwindows.remove(win.id);
-                            } else {
-                                log::info!("closing grid {} of window {}", grid, win.id);
-                                self.vwindows.get_mut(win.id).unwrap().remove(grid);
-                            }
-                        }
                         log::info!("removing relations {}", grid);
                         self.relationships.remove(&grid);
+                        self.vgrids.remove(grid);
                     }
                     RedrawEvent::Destroy { grid } => {
-                        if let Some(win) = self.relationships.get(&grid) {
-                            if win.default_grid == grid {
-                                log::info!("destroying window {} by {}", win.id, grid);
-                                self.vwindows.remove(win.id);
-                            } else {
-                                log::info!("destroying grid {} of window {}", grid, win.id);
-                                self.vwindows.get_mut(win.id).unwrap().remove(grid);
-                            }
-                        }
                         log::info!("destroying relations {}", grid);
                         self.relationships.remove(&grid);
+                        self.vgrids.remove(grid);
                     }
                     RedrawEvent::Flush => {
-                        self.vwindows.iter_mut().for_each(|(_, win)| {
-                            // TODO
-                            // win.quueu_allocate();
-                            // win.quueu_resize();
-                            win.queue_draw();
-                        });
+                        // TODO
                     }
                     _ => {}
                 }
@@ -696,87 +526,159 @@ impl Widgets<AppModel, ()> for AppWidgets {
                     set_child: da = Some(&gtk::DrawingArea) {
                         set_hexpand: true,
                         set_vexpand: true,
-                        connect_resize[tx = tx, metrics = model.font_metrics.clone()] => move |da, width, height| {
-                            log::info!("resizing width: {}, height: {}", width, height);
-                            // let metrics = da.pango_context().metrics(unsafe { &*font_desc.as_ptr() }.into(), None).unwrap();
-                            // log::info!("resizing metrics line-height {} char-width {}", metrics.height(), metrics.approximate_digit_width());
+                        connect_resize[sender = sender.clone(), metrics = model.font_metrics.clone()] => move |da, width, height| {
+                            log::info!("da resizing width: {}, height: {}", width, height);
                             let metrics = metrics.get();
-                            let rows = da.height() as f64 / metrics.lineheight;
+                            let rows = da.height() as f64 / (metrics.lineheight + metrics.linespace); //  + metrics.linespace
                             let cols = da.width() as f64 / metrics.charwidth;
-                            log::info!("rows: {} cols: {}", rows, cols);
-                            tx.send((rows.ceil() as u64, cols.ceil() as u64)).unwrap();
+                            log::info!("da resizing rows: {} cols: {}", rows, cols);
+                            sender
+                                .send(
+                                    UiCommand::Resize {
+                                        width: cols as _,
+                                        height: rows as _,
+                                    }
+                                    .into(),
+                                )
+                                .unwrap();
                         },
-                        // add_tick_callback[sender = sender.clone(), resized = Rc::clone(&resized), font_metrics = model.font_metrics.clone()] => move |da, _clock| {
-                        //     // calculate easing use clock
-                        //     let val = resized.compare_exchange(true,
-                        //         false,
-                        //         atomic::Ordering::Acquire,
-                        //         atomic::Ordering::Relaxed
-                        //     );
-                        //     if let Ok(true) = val {
-                        //         // log::info!("content height: {} widget height: {}", da.content_height(), da.height());
-                        //         let font_metrics = font_metrics.get();
-                        //         if font_metrics.lineheight == 0. || font_metrics.charwidth == 0. {
-                        //             return glib::source::Continue(true)
-                        //         }
-                        //         let rows = da.height() as f64 / font_metrics.lineheight;
-                        //         let cols = da.width() as f64 / font_metrics.charwidth;
-                        //         log::info!("rows: {} cols: {}", rows, cols);
-                        //         sender.send(UiCommand::Resize{ width: cols as _, height: rows as _ }.into()).unwrap();
-                        //     }
-                        //     glib::source::Continue(true)
-                        // }
+                        set_draw_func[hldefs = model.hldefs.clone()] => move |da, cr, _, _| {
+                            if let Some(background) = hldefs.read().unwrap().defaults().and_then(|defaults| defaults.background) {
+                                cr.rectangle(0., 0., da.width() as _, da.height() as _);
+                                cr.set_source_rgba(
+                                    background.red() as _,
+                                    background.green() as _,
+                                    background.blue() as _,
+                                    1.,
+                                );
+                                cr.paint().unwrap();
+                            }
+                        }
                     },
                     add_overlay: windows_container = &gtk::Fixed {
                         set_widget_name: "windows-container",
-                        factory!(model.vwindows),
+                        factory!(model.vgrids),
                     },
                     add_overlay: windows_float_container = &gtk::Fixed {
                         set_widget_name: "float-windows-container",
+                        set_visible: false,
                     },
                     add_overlay: message_windows_container = &gtk::Fixed {
                         set_widget_name: "message-windows-container",
+                        set_visible: false,
                     },
                 }
             },
-            connect_close_request(sender) => move |_| {
+            connect_close_request[sender = sender.clone()] => move |_| {
                 sender.send(AppMessage::UiCommand(UiCommand::Quit)).ok();
                 gtk::Inhibit(false)
             },
         }
     }
 
-    fn pre_init() {
-        let (tx, mut rx) = tokio::sync::watch::channel((0, 0));
-        {
-            let sender = sender.clone();
-            model.rt.spawn(async move {
-                loop {
-                    tokio::time::sleep(tokio::time::Duration::from_millis(65)).await;
-                    if let Ok(true) = rx.has_changed() {
-                        let (rows, cols) = *rx.borrow_and_update();
-                        log::info!("resizing to {}x{}", rows, cols);
-                        sender
-                            .send(
-                                UiCommand::Resize {
-                                    width: cols as _,
-                                    height: rows as _,
-                                }
-                                .into(),
-                            )
-                            .unwrap();
-                        log::info!("resizing sent");
-                    }
-                }
-            });
-        }
+    fn post_init() {
+        model.pctx.set(vbox.pango_context().into()).ok();
+        model.compute();
+
+        let grid = 1;
+        let click_listener = gtk::GestureClick::builder()
+            .button(0)
+            .exclusive(false)
+            .touch_only(false)
+            .n_points(1)
+            .name("click-listener")
+            .build();
+        click_listener.connect_pressed(
+            glib::clone!(@strong sender, @strong grid => move |c, n_press, x, y| {
+                log::info!("{:?} pressed {} times at {}x{}", c.name(), n_press, x, y);
+                sender.send(
+                    UiCommand::MouseButton {
+                        action: "press".to_string(),
+                        grid_id: grid,
+                        position: (x as u32, y as u32)
+                    }.into()
+                ).expect("Failed to send mouse press event");
+            }),
+        );
+        click_listener.connect_released(
+            glib::clone!(@strong sender, @strong grid => move |c, n_press, x, y| {
+                log::info!("{:?} released {} times at {}x{}", c.name(), n_press, x, y);
+                sender.send(
+                    UiCommand::MouseButton {
+                        action: "release".to_string(),
+                        grid_id: grid,
+                        position: (x as u32, y as u32)
+                    }.into()
+                ).expect("Failed to send mouse event");
+            }),
+        );
+        windows_container.add_controller(&click_listener);
+        /*
+        let on_click = gtk::GestureClick::new();
+        on_click.set_name("vim-window-onclick-listener");
+        on_click.connect_pressed(glib::clone!(@strong sender => move |c, n_press, x, y| {
+            log::debug!("{:?} pressed {} times at {}x{}", c.name(), n_press, x, y);
+            sender.send(
+                UiCommand::MouseButton {
+                    action: "press".to_string(),
+                    grid_id: grid,
+                    position: (x as u32, y as u32)
+                }.into()
+            ).expect("Failed to send mouse press event");
+        }));
+        on_click.connect_released(glib::clone!(@strong sender => move |c, n_press, x, y| {
+            log::debug!("{:?} released {} times at {}x{}", c.name(), n_press, x, y);
+            sender.send(
+                UiCommand::MouseButton {
+                    action: "release".to_string(),
+                    grid_id: grid,
+                    position: (x as u32, y as u32)
+                }.into()
+            ).expect("Failed to send mouse event");
+        }));
+        overlay.add_controller(&on_click);
+        */
+        // on_click.connect_stopped(cloned!(sender => move |c| {
+        //     log::debug!("Click({}) stopped", c.name().unwrap());
+        //     // sender.send(AppMsg::Message(format!("Click({}) stopped", c.name().unwrap()))).unwrap();
+        // }));
+        // on_click.connect_unpaired_release(cloned!(sender => move |c, n_press, x, y, events| {
+        //     // sender.send(AppMsg::Message(format!("Click({:?}) unpaired release {} times at {}x{} {:?}", c.group(), n_press, x, y, events))).unwrap();
+        //     log::debug!("Click({:?}) unpaired release {} times at {}x{} {:?}", c.group(), n_press, x, y, events);
+        // }));
+
+        let on_scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::all());
+        on_scroll.set_name("scroller");
+        on_scroll.connect_decelerate(glib::clone!(@strong sender => move |_, x, y| {
+            log::debug!("scroll decelerate x: {}, y: {}", x, y);
+            // UiCommand::Scroll { direction:  }
+            // sender.send(AppMsg::Message(format!("scroll decelerate x: {}, y: {}", x, y))).unwrap();
+        }));
+        on_scroll.connect_scroll(glib::clone!(@strong sender => move |_, x, y| {
+            log::debug!("scroll x: {}, y: {}", x, y);
+            // sender.send(AppMsg::Message(format!("scroll x: {}, y: {}", x, y))).unwrap();
+            // sender.send(UiCommand::Scroll { grid_id: grid_id,  }).unwrap();
+            gtk::Inhibit(false)
+        }));
+        on_scroll.connect_scroll_begin(glib::clone!(@strong sender => move |_| {
+            log::debug!("scroll begin");
+            // sender.send(AppMsg::Message(format!("scroll begin"))).unwrap();
+        }));
+        on_scroll.connect_scroll_end(glib::clone!(@strong sender => move |_| {
+            log::debug!("scroll end");
+            // sender.send(AppMsg::Message(format!("scroll end"))).unwrap();
+        }));
+        overlay.add_controller(&on_scroll);
     }
 
-    fn post_init() {
-        let pctx = vbox.pango_context();
-        model.pctx.set(pctx.into()).ok();
-        model.compute();
-        // log::info!("metrics after init: {:?}", model.font_metrics.get());
-        // TODO: change window size (px) to match vim's viewport (cols and rows).
+    fn pre_view() {
+        if let Ok(true) = model.background_changed.compare_exchange(
+            true,
+            false,
+            atomic::Ordering::Acquire,
+            atomic::Ordering::Relaxed,
+        ) {
+            self.da.queue_draw();
+        }
     }
 }

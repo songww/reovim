@@ -169,7 +169,7 @@ pub async fn start_neovim_runtime(
     .expect("Could not locate or start neovim process");
 
     if nvim.get_api_info().await.is_err() {
-        error!("Cannot get neovim api info, either neovide is launched with an unknown command line option or neovim version not supported!");
+        error!("Cannot get neovim api info, either rv is launched with an unknown command line option or neovim version not supported!");
         std::process::exit(-1);
     }
 
@@ -191,12 +191,12 @@ pub async fn start_neovim_runtime(
     match nvim.command_output("echo has('nvim-0.6')").await.as_deref() {
         Ok("1") => {} // This is just a guard
         _ => {
-            error!("Neovide requires nvim version 0.4 or higher. Download the latest version here https://github.com/neovim/neovim/wiki/Installing-Neovim");
+            error!("rv requires nvim version 0.6 or higher. Download the latest version here https://github.com/neovim/neovim/wiki/Installing-Neovim");
             std::process::exit(0);
         }
     }
 
-    nvim.set_var("neovide", Value::Boolean(true))
+    nvim.set_var("rv", Value::Boolean(true))
         .await
         .expect("Could not communicate with neovim process");
 
@@ -210,10 +210,10 @@ pub async fn start_neovim_runtime(
     }
 
     nvim.set_client_info(
-        "neovide",
+        "rv",
         vec![
             (Value::from("major"), Value::from(0u64)),
-            (Value::from("minor"), Value::from(6u64)),
+            (Value::from("minor"), Value::from(1u64)),
         ],
         "ui",
         vec![],
@@ -222,7 +222,7 @@ pub async fn start_neovim_runtime(
     .await
     .ok();
 
-    let neovide_channel: u64 = nvim
+    let rv_channel: u64 = nvim
         .list_chans()
         .await
         .ok()
@@ -233,16 +233,13 @@ pub async fn start_neovim_runtime(
                     id,
                     client: Some(ClientInfo { name, .. }),
                     ..
-                } if name == "neovide" => Some(*id),
+                } if name == "rv" => Some(*id),
                 _ => None,
             })
         })
         .unwrap_or(0);
 
-    info!(
-        "Neovide registered to nvim with channel id {}",
-        neovide_channel
-    );
+    info!("rv registered to nvim with channel id {}", rv_channel);
 
     nvim.set_option("lazyredraw", Value::Boolean(false))
         .await

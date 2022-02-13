@@ -1,5 +1,4 @@
 use glib::subclass::prelude::*;
-use rustc_hash::FxHashMap;
 
 use crate::style;
 
@@ -11,10 +10,26 @@ mod imp {
     use glib::prelude::*;
     use glib::subclass::prelude::*;
 
-    #[derive(Clone, Debug, Default)]
+    #[derive(Debug)]
     pub struct HighlightDefinitions {
         styles: RefCell<FxHashMap<u64, crate::style::Style>>,
         defaults: Cell<Option<crate::style::Colors>>,
+    }
+
+    impl Default for HighlightDefinitions {
+        fn default() -> Self {
+            let mut styles = FxHashMap::default();
+            let defaults = crate::style::Colors {
+                background: crate::color::Color::BLACK.into(),
+                foreground: crate::color::Color::WHITE.into(),
+                special: crate::color::Color::WHITE.into(),
+            };
+            styles.insert(0, crate::style::Style::new(defaults));
+            HighlightDefinitions {
+                styles: RefCell::new(styles),
+                defaults: Some(defaults).into(),
+            }
+        }
     }
 
     #[glib::object_subclass]
@@ -27,16 +42,14 @@ mod imp {
     impl ObjectImpl for HighlightDefinitions {}
 
     impl HighlightDefinitions {
-        pub fn get(&self, k: u64) -> &crate::style::Style {
+        pub fn get(&self, k: u64) -> Option<&crate::style::Style> {
             // SAFETY: already locked by user.
             let styles = unsafe { &*self.styles.as_ptr() };
-            styles
-                .get(&k)
-                .unwrap_or_else(|| styles.get(&0).expect("DefaultHighlights not set yet."))
+            styles.get(&k)
+            // .unwrap_or_else(|| styles.get(&0).expect("DefaultHighlights not set yet."))
         }
         pub fn set(&self, k: u64, style: crate::style::Style) {
-            let styles = unsafe { &mut *self.styles.as_ptr() };
-            styles.insert(k, style);
+            self.styles.borrow_mut().insert(k, style);
         }
 
         pub fn defaults(&self) -> Option<&crate::style::Colors> {
@@ -46,9 +59,7 @@ mod imp {
         pub fn set_defaults(&self, defaults: crate::style::Colors) {
             self.defaults.replace(Some(defaults));
             let styles = unsafe { &mut *self.styles.as_ptr() };
-            styles
-                .entry(0)
-                .or_insert_with(|| crate::style::Style::new(defaults));
+            styles.insert(0, crate::style::Style::new(defaults));
         }
     }
 }
@@ -77,7 +88,7 @@ impl HighlightDefinitions {
         imp::HighlightDefinitions::from_instance(self)
     }
 
-    pub fn get(&self, k: u64) -> &style::Style {
+    pub fn get(&self, k: u64) -> Option<&style::Style> {
         self.imp().get(k)
     }
 

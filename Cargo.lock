@@ -143,6 +143,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "contracts"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c9424f2ca1e42776615720e5746eed6efa19866fdbaac2923ab51c294ac4d1f2"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "convert_case"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1161,6 +1172,7 @@ dependencies = [
  "tokio",
  "tokio-util 0.7.0",
  "tracker",
+ "vector-map",
  "which",
 ]
 
@@ -1397,6 +1409,16 @@ name = "unicode-xid"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ccb82d61f80a663efe1f787a51b16b5a51e3314d6ac365b08639f52387b33f3"
+
+[[package]]
+name = "vector-map"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "550f72ae94a45c0e2139188709e6c4179f0b5ff9bdaa435239ad19048b0cd68c"
+dependencies = [
+ "contracts",
+ "rand",
+]
 
 [[package]]
 name = "version-compare"

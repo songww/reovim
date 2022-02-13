@@ -11,7 +11,7 @@ use std::{
 
 pub use highlights::HighlightDefinitions;
 pub use textbuf::{TextCell, TextLine};
-pub use window::{VimWindow, VimWindowView, VimWindowWidgets};
+pub use window::{VimGrid, VimGridWidgets};
 
 #[derive(Clone, Debug)]
 pub struct TextBuf(Rc<RefCell<textbuf::TextBuf>>);
