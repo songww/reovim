@@ -440,7 +440,7 @@ fn parse_mode_info_set(mode_info_set_arguments: Vec<Value>) -> Result<RedrawEven
                     mode_info.blinkoff = Some(parse_u64(value)?);
                 }
                 "attr_id" => {
-                    mode_info.style_id = Some(parse_u64(value)?);
+                    mode_info.style = Some(parse_u64(value)?);
                 }
                 _ => {}
             }

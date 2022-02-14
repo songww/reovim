@@ -1,11 +1,13 @@
 mod imp {
     use core::f32;
-    use std::cell::{Cell, Ref};
+    use std::cell::{Cell, Ref, RefCell};
     use std::rc::Rc;
     use std::sync::RwLock;
 
     use gtk::{gdk::prelude::*, graphene::Rect, pango, prelude::*, subclass::prelude::*};
     use once_cell::sync::OnceCell;
+
+    use crate::cursor::Cursor;
 
     use super::super::highlights::HighlightDefinitions;
     use super::super::TextBuf;
@@ -16,6 +18,7 @@ mod imp {
         width: Cell<u64>,
         height: Cell<u64>,
         textbuf: Cell<TextBuf>,
+        cursor: RefCell<Option<Cursor>>,
         hldefs: OnceCell<Rc<RwLock<HighlightDefinitions>>>,
         metrics: OnceCell<Rc<Cell<crate::app::FontMetrics>>>,
     }
@@ -41,6 +44,7 @@ mod imp {
                 id: 0.into(),
                 width: 0.into(),
                 height: 0.into(),
+                cursor: None.into(),
                 hldefs: OnceCell::new(), // Rc::new(RwLock::new(HighlightDefinitions::new()))),
                 metrics: OnceCell::new(),
                 textbuf: TextBuf::default().into(),
@@ -152,15 +156,15 @@ mod imp {
             let hldefs = self.hldefs.get().unwrap().read().unwrap();
 
             let layout = pango::Layout::new(&pctx);
-            let linespace = self.metrics.get().unwrap().get().linespace();
+            let metrics = self.metrics.get().unwrap().get();
+            let linespace = metrics.linespace();
             if linespace > 0. {
                 layout.set_spacing(linespace as _);
             }
             layout.set_font_description(Some(&font_desc));
             self.textbuf().layout(&layout, &hldefs);
-            // let (w, h) = layout.size();
-            // let (w, h) = (w as f32 / SCALE, h as f32 / SCALE);
             let (w, h) = layout.pixel_size();
+            /*
             log::info!(
                 "snapshoting grid {} size required {}x{}",
                 self.id.get(),
@@ -174,7 +178,6 @@ mod imp {
                 layout.line(1).unwrap().height() as f32 / SCALE
             );
 
-            /*
                         if let Some(background) = hldefs.defaults().and_then(|defaults| defaults.background) {
                             let style_context = widget.style_context();
                             style_context.save();
@@ -200,9 +203,62 @@ mod imp {
             let rect = Rect::new(0., 0., w as _, h as _);
             let cr = snapshot.append_cairo(&rect);
 
+            if let Some(ref cursor) = *self.cursor.borrow() {
+                let (rows, cols) = cursor.pos;
+                let layoutline = layout.line_readonly(rows as _).unwrap();
+                let xpos = layoutline.index_to_x(cols as _, false);
+                // let right = layoutline.index_to_x(cols as _, true);
+                let rect = layout.index_to_pos(layoutline.start_index() + cols as i32);
+                // log::error!(
+                //     "cursor pos starts {} width {} at {}",
+                //     ,
+                //     (right - left) as f32 / SCALE,
+                //     left,
+                // );
+                log::error!(
+                    "cursor pos line index {} x to index {}",
+                    layoutline.start_index() + cols as i32,
+                    layoutline
+                        .x_to_index((cols as f64 * metrics.charwidth() * SCALE as f64).ceil() as i32)
+                        .index
+                );
+                let index = layoutline
+                    .x_to_index((cols as f64 * metrics.charwidth() * SCALE as f64).ceil() as i32)
+                    .index;
+                let rect = layout.index_to_pos(index);
+                // let index = (rows * (self.width.get() + 2)) + cols;
+                // let rect = layout.index_to_pos(index as _);
+                log::error!(
+                    "cursor pos {}x{} with {}x{}",
+                    rect.x(),
+                    rect.y(),
+                    rect.width(),
+                    rect.height()
+                );
+                let (cursor_width, cursor_height) =
+                    cursor.size(rect.width() as _, rect.height() as _);
+                let guard = self.hldefs.get().unwrap().read().unwrap();
+                let default_colors = guard.defaults().unwrap();
+                let color = cursor.background(default_colors);
+                // let text = self.textbuf().at(rows, cols);
+                let bounds = Rect::new(
+                    rect.x() as f32 / SCALE,
+                    rect.y() as f32 / SCALE,
+                    cursor_width as f32 / SCALE,
+                    cursor_height as f32 / SCALE,
+                );
+                log::error!(
+                    "Drawing cursor color {} bounds {:?}",
+                    color.to_str(),
+                    bounds
+                );
+                snapshot.append_color(&color, &bounds);
+            }
+
             pangocairo::update_context(&cr, &pctx);
             pangocairo::update_layout(&cr, &layout);
             pangocairo::show_layout(&cr, &layout);
+
             // log::info!("apply layout");
             self.parent_snapshot(widget, snapshot);
             // log::info!("parent snapshot");
@@ -252,6 +308,10 @@ mod imp {
             self.height.replace(height);
         }
 
+        pub(super) fn set_cursor(&self, cursor: Option<Cursor>) {
+            self.cursor.replace(cursor);
+        }
+
         pub(super) fn set_font_metrics(&self, metrics: Rc<Cell<crate::app::FontMetrics>>) {
             self.metrics
                 .set(metrics)
@@ -277,6 +337,8 @@ use glib::subclass::prelude::*;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 
+use crate::cursor::Cursor;
+
 use super::{HighlightDefinitions, TextBuf};
 
 glib::wrapper! {
@@ -301,6 +363,10 @@ impl VimGridView {
 
     pub fn set_textbuf(&self, textbuf: TextBuf) {
         self.imp().set_textbuf(textbuf);
+    }
+
+    pub fn set_cursor(&self, cursor: Option<Cursor>) {
+        self.imp().set_cursor(cursor);
     }
 
     pub fn set_font_description(&self, desc: &pango::FontDescription) {

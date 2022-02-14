@@ -12,6 +12,7 @@ use pango::FontDescription;
 use relm4::{send, AppUpdate, Model, RelmApp, Sender, WidgetPlus, Widgets};
 use rustc_hash::FxHashMap;
 
+use crate::cursor::Cursor;
 use crate::keys::{self, ToInput};
 use crate::vimview::{self, VimGrid};
 use crate::{
@@ -85,6 +86,9 @@ pub struct AppModel {
     pub font_description: Rc<RefCell<pango::FontDescription>>,
     pub font_changed: Rc<atomic::AtomicBool>,
 
+    pub cursor: Cell<Option<Cursor>>,
+    pub cursor_at: Option<u64>,
+
     pub pctx: OnceCell<Rc<pango::Context>>,
 
     pub hldefs: Rc<RwLock<vimview::HighlightDefinitions>>,
@@ -119,6 +123,9 @@ impl AppModel {
             font_metrics: Rc::new(FontMetrics::new().into()),
             font_description: Rc::new(RefCell::new(FontDescription::from_string("monospace 17"))),
             font_changed: Rc::new(false.into()),
+
+            cursor: Cell::new(Some(Cursor::new())),
+            cursor_at: None,
 
             pctx: OnceCell::new(),
 
@@ -555,6 +562,22 @@ impl AppUpdate for AppModel {
                     RedrawEvent::Flush => {
                         self.flush.store(true, atomic::Ordering::Relaxed);
                         self.vgrids.flush();
+                    }
+                    RedrawEvent::CursorGoto { grid, row, column } => {
+                        let cursor_at = self.cursor_at.replace(grid);
+                        if let Some(cursor_at) = cursor_at {
+                            if cursor_at != grid {
+                                let cursor = self.vgrids.get_mut(cursor_at).unwrap().take_cursor();
+                                self.vgrids.get_mut(grid).unwrap().set_cursor(cursor);
+                            }
+                        } else {
+                            self.vgrids
+                                .get_mut(grid)
+                                .map(|vgrid| vgrid.set_cursor(self.cursor.take().unwrap()));
+                        };
+                        self.vgrids
+                            .get_mut(grid)
+                            .map(|vgrid| vgrid.cursor_mut().set_pos(row, column));
                     }
                     _ => {
                         log::error!("Unhandled RedrawEvent {:?}", event);

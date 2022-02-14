@@ -11,6 +11,9 @@ use relm4::*;
 
 use crate::app;
 use crate::bridge::{MouseAction, MouseButton, UiCommand};
+use crate::cursor::Cursor;
+use crate::pos::Position;
+use crate::rect::Rectangle;
 
 use super::grid::VimGridView;
 use super::TextBuf;
@@ -27,66 +30,13 @@ pub struct VimGrid {
     height: usize,
     hldefs: HighlightDefinitions,
     flush: Rc<atomic::AtomicBool>,
+    cursor: Option<Cursor>,
     metrics: Rc<Cell<app::FontMetrics>>,
     font_description: Rc<RefCell<pango::FontDescription>>,
 
     textbuf: TextBuf,
 
     visible: bool,
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Position {
-    pub x: f64,
-    pub y: f64,
-}
-
-impl Position {
-    pub fn new(x: f64, y: f64) -> Position {
-        Position { x, y }
-    }
-}
-
-impl Into<FixedPosition> for Position {
-    fn into(self) -> FixedPosition {
-        FixedPosition {
-            x: self.x,
-            y: self.y,
-        }
-    }
-}
-
-impl From<(f64, f64)> for Position {
-    fn from((x, y): (f64, f64)) -> Self {
-        Position { x, y }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Rectangle {
-    pub width: usize,
-    pub height: usize,
-}
-
-impl Rectangle {
-    fn new(width: usize, height: usize) -> Rectangle {
-        Rectangle { width, height }
-    }
-}
-
-impl From<(usize, usize)> for Rectangle {
-    fn from((width, height): (usize, usize)) -> Self {
-        Rectangle { width, height }
-    }
-}
-
-impl From<(u64, u64)> for Rectangle {
-    fn from((width, height): (u64, u64)) -> Self {
-        Rectangle {
-            width: width as usize,
-            height: height as usize,
-        }
-    }
 }
 
 impl VimGrid {
@@ -109,6 +59,7 @@ impl VimGrid {
             height: rect.height as _,
             move_to: None.into(),
             hldefs: hldefs.clone(),
+            cursor: None.into(),
             flush,
             metrics,
             textbuf,
@@ -130,6 +81,24 @@ impl VimGrid {
 
     pub fn clear(&self) {
         self.textbuf().borrow().clear();
+    }
+
+    pub fn set_cursor(&mut self, cursor: Cursor) {
+        self.cursor.replace(cursor);
+    }
+
+    pub fn take_cursor(&mut self) -> Cursor {
+        self.cursor.take().unwrap()
+    }
+
+    pub fn cursor(&self) -> &Cursor {
+        self.cursor.as_ref().unwrap()
+        // unsafe { &*self.cursor.as_ptr() }.as_ref().unwrap()
+    }
+
+    pub fn cursor_mut(&mut self) -> &mut Cursor {
+        // unsafe { &mut *self.cursor.as_ptr() }.as_mut().unwrap()
+        self.cursor.as_mut().unwrap()
     }
 
     // content go up, view go down, eat head of rows.
@@ -249,13 +218,12 @@ impl factory::FactoryPrototype for VimGrid {
                 log::info!("grid {} mouse pressed {} times at {}x{} -> {}x{}", grid, n_press, x, y, cols, rows);
                 let modifier = c.current_event_state().to_string();
                 log::info!("grid {} click button {} current_button {} modifier {}", grid, c.button(), c.current_button(), modifier);
-                // sender.send(
-                //     UiCommand::MouseButton {
-                //         action: "press".to_string(),
-                //         grid_id: grid,
-                //         position: (cols.floor() as u32, rows.floor() as u32)
-                //     }.into()
-                // ).expect("Failed to send mouse press event");
+                let btn = match c.current_button() {
+                    1 => MouseButton::Left,
+                    2 => MouseButton::Middle,
+                    3 => MouseButton::Right,
+                    _ => { return; }
+                };
             }),
         );
         click_listener.connect_released(
@@ -269,7 +237,6 @@ impl factory::FactoryPrototype for VimGrid {
                 log::info!("grid {} mouse released {} times at {}x{} -> {}x{}", grid, n_press, x, y, cols, rows);
                 let modifier = c.current_event_state().to_string();
                 log::info!("grid {} click button {} current_button {} modifier {}", grid, c.button(), c.current_button(), modifier);
-                // let lock = click_locker.lock().unwrap();
                 let btn = match c.current_button() {
                     1 => MouseButton::Left,
                     2 => MouseButton::Middle,
@@ -294,10 +261,11 @@ impl factory::FactoryPrototype for VimGrid {
                         position: (cols.floor() as u32, rows.floor() as u32)
                     }.into()
                 ).expect("Failed to send mouse event");
-                // log::trace!("locking click-listener {}", *lock);
             }),
         );
         view.add_controller(&click_listener);
+
+        view.set_cursor(self.cursor.clone());
 
         VimGridWidgets { view }
     }
@@ -321,6 +289,7 @@ impl factory::FactoryPrototype for VimGrid {
         let view = &widgets.view;
 
         view.set_visible(self.visible);
+        view.set_cursor(self.cursor.clone());
         view.set_font_description(&self.font_description.borrow());
 
         let p_width = view.property::<u64>("width") as usize;
@@ -346,7 +315,7 @@ impl factory::FactoryPrototype for VimGrid {
         // ) {
         view.queue_allocate();
         view.queue_resize();
-        view.queue_draw();
+        // view.queue_draw();
         // }
     }
 

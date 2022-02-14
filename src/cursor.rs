@@ -1,7 +1,9 @@
+use graphene::Rect;
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
 use crate::color::Color;
+use crate::rect::Rectangle;
 use crate::style::{Colors, Style};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -25,7 +27,7 @@ impl CursorShape {
 #[derive(Default, Debug, Clone, PartialEq)]
 pub struct CursorMode {
     pub shape: Option<CursorShape>,
-    pub style_id: Option<u64>,
+    pub style: Option<u64>,
     pub cell_percentage: Option<f32>,
     pub blinkwait: Option<u64>,
     pub blinkon: Option<u64>,
@@ -34,8 +36,8 @@ pub struct CursorMode {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Cursor {
-    pub grid_position: (u64, u64),
-    pub grid_id: u64,
+    pub pos: (u64, u64),
+    pub grid: u64,
     pub shape: CursorShape,
     pub cell_percentage: Option<f32>,
     pub blinkwait: Option<u64>,
@@ -50,8 +52,8 @@ pub struct Cursor {
 impl Cursor {
     pub fn new() -> Cursor {
         Cursor {
-            grid_position: (0, 0),
-            grid_id: 0,
+            pos: (0, 0).into(),
+            grid: 0,
             shape: CursorShape::Block,
             style: None,
             cell_percentage: None,
@@ -61,6 +63,15 @@ impl Cursor {
             enabled: true,
             double_width: false,
             character: " ".to_string(),
+        }
+    }
+
+    pub fn size(&self, width: f32, height: f32) -> (f32, f32) {
+        let percentage = self.cell_percentage.unwrap_or(100.) / 100.;
+        match self.shape {
+            CursorShape::Block => (width, height),
+            CursorShape::Vertical => (width * percentage, height),
+            CursorShape::Horizontal => (width, height * percentage),
         }
     }
 
@@ -86,10 +97,14 @@ impl Cursor {
         }
     }
 
+    pub fn set_pos(&mut self, row: u64, col: u64) {
+        self.pos = (row, col);
+    }
+
     pub fn change_mode(&mut self, cursor_mode: &CursorMode, styles: &FxHashMap<u64, Arc<Style>>) {
         let CursorMode {
             shape,
-            style_id,
+            style,
             cell_percentage,
             blinkwait,
             blinkon,
@@ -100,8 +115,8 @@ impl Cursor {
             self.shape = shape.clone();
         }
 
-        if let Some(style_id) = style_id {
-            self.style = styles.get(style_id).cloned();
+        if let Some(style) = style {
+            self.style = styles.get(style).cloned();
         }
 
         self.cell_percentage = *cell_percentage;
@@ -198,7 +213,7 @@ mod tests {
     fn test_change_mode() {
         let cursor_mode = CursorMode {
             shape: Some(CursorShape::Horizontal),
-            style_id: Some(1),
+            style: Some(1),
             cell_percentage: Some(100.0),
             blinkwait: Some(1),
             blinkon: Some(1),
@@ -219,7 +234,7 @@ mod tests {
 
         let cursor_mode_with_none = CursorMode {
             shape: None,
-            style_id: None,
+            style: None,
             cell_percentage: None,
             blinkwait: None,
             blinkon: None,

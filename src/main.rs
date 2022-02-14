@@ -19,6 +19,8 @@ mod elements;
 mod factory;
 mod keys;
 mod messager;
+mod pos;
+mod rect;
 mod style;
 mod vimview;
 
