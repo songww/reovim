@@ -19,31 +19,8 @@ use crate::{ConnectionMode, Opts};
 pub use events::*;
 use handler::NeovimHandler;
 pub use tx::Tx;
-pub use ui_commands::UiCommand;
+pub use ui_commands::{MouseAction, MouseButton, UiCommand};
 
-#[cfg(windows)]
-fn set_windows_creation_flags(cmd: &mut Command) {
-    cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-}
-
-#[cfg(windows)]
-fn platform_build_nvim_cmd(bin: &str) -> Option<Command> {
-    if SETTINGS.get::<CmdLineSettings>().wsl {
-        let mut cmd = Command::new("wsl");
-        cmd.args(&[
-            bin.trim(),
-            "-c",
-            "let \\$PATH=system(\"\\$SHELL -lic 'echo \\$PATH' 2>/dev/null\")",
-        ]);
-        Some(cmd)
-    } else if Path::new(&bin).exists() {
-        Some(Command::new(bin))
-    } else {
-        None
-    }
-}
-
-#[cfg(unix)]
 fn platform_build_nvim_cmd(bin: &str) -> Option<Command> {
     if Path::new(&bin).exists() {
         Some(Command::new(bin))
@@ -62,30 +39,7 @@ fn build_nvim_cmd(bin: Option<&str>) -> Command {
         }
     }
     */
-    #[cfg(windows)]
-    if SETTINGS.get::<CmdLineSettings>().wsl {
-        if let Ok(output) = std::process::Command::new("wsl")
-            .args(&["$SHELL", "-lic", "which nvim"])
-            .output()
-        {
-            if output.status.success() {
-                let path = String::from_utf8(output.stdout).unwrap();
-                let mut cmd = Command::new("wsl");
-                cmd.args(&[
-                    path.trim(),
-                    "-c",
-                    "let \\$PATH=system(\"\\$SHELL -lic 'echo \\$PATH' 2>/dev/null\")",
-                ]);
-                return cmd;
-            } else {
-                error!("nvim not found in WSL path");
-                std::process::exit(1);
-            }
-        } else {
-            error!("wsl which nvim failed");
-            std::process::exit(1);
-        }
-    }
+
     if let Some(bin) = bin {
         if let Some(cmd) = platform_build_nvim_cmd(bin) {
             cmd
@@ -113,26 +67,6 @@ fn build_nvim_cmd(bin: Option<&str>) -> Command {
     }
 }
 
-#[cfg(windows)]
-pub fn build_neovide_command(channel: u64, num_args: u64, command: &str, event: &str) -> String {
-    let nargs: String = if num_args > 1 {
-        "+".to_string()
-    } else {
-        num_args.to_string()
-    };
-    if num_args == 0 {
-        return format!(
-            "command! -nargs={} -complete=expression {} call rpcnotify({}, 'neovide.{}')",
-            nargs, command, channel, event
-        );
-    } else {
-        return format!(
-            "command! -nargs={} -complete=expression {} call rpcnotify({}, 'neovide.{}', <args>)",
-            nargs, command, channel, event
-        );
-    };
-}
-
 pub fn create_nvim_command(opts: &Opts) -> Command {
     let mut cmd = build_nvim_cmd(opts.nvim_path.as_deref());
 
@@ -145,9 +79,6 @@ pub fn create_nvim_command(opts: &Opts) -> Command {
 
     #[cfg(debug_assertions)]
     cmd.stderr(Stdio::inherit());
-
-    #[cfg(windows)]
-    set_windows_creation_flags(&mut cmd);
 
     cmd
 }

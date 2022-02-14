@@ -1,6 +1,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::sync::{atomic, RwLock};
+use std::sync::{atomic, Mutex, RwLock};
+use std::usize;
 
 use glib::subclass::prelude::*;
 use gtk::prelude::*;
@@ -9,7 +10,7 @@ use relm4::factory::positions::FixedPosition;
 use relm4::*;
 
 use crate::app;
-use crate::bridge::UiCommand;
+use crate::bridge::{MouseAction, MouseButton, UiCommand};
 
 use super::grid::VimGridView;
 use super::TextBuf;
@@ -131,6 +132,56 @@ impl VimGrid {
         self.textbuf().borrow().clear();
     }
 
+    // content go up, view go down, eat head of rows.
+    pub fn up(
+        &mut self,
+        // top: usize,
+        // bottom: usize,
+        // left: usize,
+        // right: usize,
+        rows: usize,
+        // cols: usize,
+    ) {
+        // log::error!(
+        //     "Scroll Region Text Up top {} bottom {} left {} right {} rows {} cols {}",
+        //     top,
+        //     bottom,
+        //     left,
+        //     right,
+        //     rows,
+        //     cols
+        // );
+        log::error!("scroll-region {} rows moved up.", rows);
+        log::error!(
+            "Origin Region {:?} {}x{}",
+            self.pos,
+            self.width,
+            self.height
+        );
+        self.textbuf().borrow_mut().up(rows);
+    }
+
+    // content go down, view go up, eat tail of rows.
+    pub fn down(&mut self, rows: usize) {
+        // log::error!(
+        //     "Scroll Region Text Down top {} bottom {} left {} right {} rows {} cols {}",
+        //     top,
+        //     bottom,
+        //     left,
+        //     right,
+        //     rows,
+        //     cols
+        // );
+        log::error!("scroll-region {} rows moved down.", rows);
+        log::error!(
+            "Origin Region {:?} {}x{}",
+            self.pos,
+            self.width,
+            self.height
+        );
+        self.textbuf().borrow_mut().down(rows);
+    }
+
     pub fn resize(&mut self, width: usize, height: usize) {
         self.width = width;
         self.height = height;
@@ -178,6 +229,8 @@ impl factory::FactoryPrototype for VimGrid {
             }
         }
 
+        let click_locker = Mutex::new(true);
+
         let click_listener = gtk::GestureClick::builder()
             .button(0)
             .exclusive(false)
@@ -186,37 +239,62 @@ impl factory::FactoryPrototype for VimGrid {
             .name("click-listener")
             .build();
         click_listener.connect_pressed(
-            glib::clone!(@strong sender, @strong grid, @strong self.metrics as metrics => move |_, n_press, x, y| {
+            glib::clone!(@strong sender, @strong self.metrics as metrics => move |c, n_press, x, y| {
+                let grid = 1;
                 let metrics = metrics.get();
                 let charwidth = metrics.charwidth();
                 let lineheight = metrics.lineheight() + metrics.linespace();
                 let cols = x as f64 / charwidth;
                 let rows = y as f64 / lineheight;
                 log::info!("grid {} mouse pressed {} times at {}x{} -> {}x{}", grid, n_press, x, y, cols, rows);
-                sender.send(
-                    UiCommand::MouseButton {
-                        action: "press".to_string(),
-                        grid_id: grid,
-                        position: (cols.floor() as u32, rows.floor() as u32)
-                    }.into()
-                ).expect("Failed to send mouse press event");
+                let modifier = c.current_event_state().to_string();
+                log::info!("grid {} click button {} current_button {} modifier {}", grid, c.button(), c.current_button(), modifier);
+                // sender.send(
+                //     UiCommand::MouseButton {
+                //         action: "press".to_string(),
+                //         grid_id: grid,
+                //         position: (cols.floor() as u32, rows.floor() as u32)
+                //     }.into()
+                // ).expect("Failed to send mouse press event");
             }),
         );
         click_listener.connect_released(
-            glib::clone!(@strong sender, @strong grid, @strong self.metrics as metrics => move |_, n_press, x, y| {
+            glib::clone!(@strong sender, @strong self.metrics as metrics => move |c, n_press, x, y| {
+                let grid = 1;
                 let metrics = metrics.get();
                 let charwidth = metrics.charwidth();
                 let lineheight = metrics.lineheight() + metrics.linespace();
                 let cols = x as f64 / charwidth;
                 let rows = y as f64 / lineheight;
                 log::info!("grid {} mouse released {} times at {}x{} -> {}x{}", grid, n_press, x, y, cols, rows);
+                let modifier = c.current_event_state().to_string();
+                log::info!("grid {} click button {} current_button {} modifier {}", grid, c.button(), c.current_button(), modifier);
+                // let lock = click_locker.lock().unwrap();
+                let btn = match c.current_button() {
+                    1 => MouseButton::Left,
+                    2 => MouseButton::Middle,
+                    3 => MouseButton::Right,
+                    _ => { return; }
+                };
                 sender.send(
                     UiCommand::MouseButton {
-                        action: "release".to_string(),
+                        action: MouseAction::Press,
+                        button: btn,
+                        modifier: c.current_event_state(),
+                        grid_id: grid,
+                        position: (cols.floor() as u32, rows.floor() as u32)
+                    }.into()
+                ).expect("Failed to send mouse press event");
+                sender.send(
+                    UiCommand::MouseButton {
+                        action: MouseAction::Release,
+                        button: btn,
+                        modifier: c.current_event_state(),
                         grid_id: grid,
                         position: (cols.floor() as u32, rows.floor() as u32)
                     }.into()
                 ).expect("Failed to send mouse event");
+                // log::trace!("locking click-listener {}", *lock);
             }),
         );
         view.add_controller(&click_listener);

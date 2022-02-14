@@ -37,25 +37,45 @@ mod imp {
             }
         }
 
-        /*
-        fn resize(&mut self, rows: usize, cols: usize) {
-            if self.rows == rows && self.cols == cols {
-                return;
-            }
-            log::warn!(
-                "_TextBuf resize to {}x{} from {}x{}",
-                cols,
-                rows,
-                self.cols,
-                self.rows
-            );
-            self.rows = rows;
-            self.cols = cols;
-        }
-        */
-
         fn clear(&mut self) {
             self.cells = _TextBuf::make(self.rows, self.cols);
+        }
+
+        fn set_cells(&mut self, row: usize, col: usize, cells: &[super::TextCell]) {
+            let nrows = self.rows;
+            let ncols = self.cols;
+            let row = &mut self.cells[row];
+            let mut expands = Vec::with_capacity(row.len());
+            for cell in cells.iter() {
+                for _ in 0..cell.repeat.unwrap_or(1) {
+                    expands.push(cell.clone());
+                }
+            }
+            let col_to = col + expands.len();
+            log::info!(
+                "textbuf {}x{} setting {} cells from {} to {}",
+                ncols,
+                nrows,
+                expands.len(),
+                col,
+                col_to
+            );
+            // log::info!("cells: {:?}", &expands);
+            row[col..col_to].swap_with_slice(&mut expands); //
+        }
+
+        /// drop head of {} rows. leave tail as empty.
+        fn up(&mut self, rows: usize) {
+            let mut cells = _TextBuf::make(self.rows, self.cols);
+            cells[..(self.rows - rows)].swap_with_slice(&mut self.cells[rows..]);
+            self.cells = cells;
+        }
+
+        /// drop tail of {} rows. leave head as empty.
+        fn down(&mut self, rows: usize) {
+            let mut cells = _TextBuf::make(self.rows, self.cols);
+            cells[rows..].swap_with_slice(&mut self.cells[..(self.rows - rows)]);
+            self.cells = cells;
         }
     }
 
@@ -78,27 +98,15 @@ mod imp {
     }
 
     impl TextBuf {
+        pub(super) fn up(&self, rows: usize) {
+            //
+            self.inner.write().unwrap().up(rows);
+        }
+        pub(super) fn down(&self, rows: usize) {
+            self.inner.write().unwrap().down(rows);
+        }
         pub(super) fn set_cells(&self, row: usize, col: usize, cells: &[super::TextCell]) {
-            let nrows = self.inner.read().unwrap().rows;
-            let ncols = self.inner.read().unwrap().cols;
-            let row = &mut self.inner.write().unwrap().cells[row];
-            let mut expands = Vec::with_capacity(row.len());
-            for cell in cells.iter() {
-                for _ in 0..cell.repeat.unwrap_or(1) {
-                    expands.push(cell.clone());
-                }
-            }
-            let col_to = col + expands.len();
-            log::info!(
-                "textbuf {}x{} setting {} cells from {} to {}",
-                ncols,
-                nrows,
-                expands.len(),
-                col,
-                col_to
-            );
-            // log::info!("cells: {:?}", &expands);
-            row[col..col_to].clone_from_slice(&expands);
+            self.inner.write().unwrap().set_cells(row, col, cells);
         }
 
         pub(super) fn clear(&self) {
@@ -214,6 +222,14 @@ impl TextBuf {
 
     pub fn set_cells(&self, row: usize, col: usize, cells: &[TextCell]) {
         self.imp().set_cells(row, col, cells);
+    }
+
+    pub fn up(&self, rows: usize) {
+        self.imp().up(rows);
+    }
+
+    pub fn down(&self, rows: usize) {
+        self.imp().down(rows);
     }
 
     pub(super) fn layout(&self, layout: &pango::Layout, hldefs: &HighlightDefinitions) {

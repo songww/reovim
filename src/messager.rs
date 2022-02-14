@@ -17,12 +17,12 @@ use crate::{
 pub struct VimMessager {
     // rt: Runtime,
     // bridge: Bridge,
-    sender: UnboundedSender<UiCommand>,
+    sender: LoggingTx<UiCommand>,
 }
 
 impl MessageHandler<crate::app::AppModel> for VimMessager {
     type Msg = RedrawEvent;
-    type Sender = UnboundedSender<UiCommand>;
+    type Sender = LoggingTx<UiCommand>;
 
     fn init(app_model: &crate::app::AppModel, parent_sender: Sender<AppMessage>) -> Self {
         let (sender, mut rx) = unbound::<RedrawEvent>();
@@ -45,7 +45,7 @@ impl MessageHandler<crate::app::AppModel> for VimMessager {
         ));
 
         VimMessager {
-            sender: ui_command_sender,
+            sender: LoggingTx::attach(ui_command_sender, "chan-ui-commands".to_string()),
         }
     }
 

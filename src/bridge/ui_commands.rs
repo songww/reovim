@@ -1,16 +1,91 @@
-use log::trace;
+use std::ops::Deref;
 
-#[cfg(windows)]
-use log::error;
+use log::trace;
 
 use nvim::Neovim;
 
-use crate::bridge::Tx;
+use crate::{bridge::Tx, keys::ToInput};
 
-#[cfg(windows)]
-use crate::windows_utils::{
-    register_rightclick_directory, register_rightclick_file, unregister_rightclick,
-};
+#[derive(Clone, Copy, Debug)]
+pub enum MouseAction {
+    Drag,
+    Press,
+    Release,
+    // For the wheel
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+impl AsRef<str> for MouseAction {
+    fn as_ref(&self) -> &str {
+        match self {
+            MouseAction::Drag => "drag",
+            MouseAction::Press => "press",
+            MouseAction::Release => "release",
+
+            MouseAction::Up => "up",
+            MouseAction::Down => "down",
+            MouseAction::Left => "left",
+            MouseAction::Right => "right",
+        }
+    }
+}
+
+impl Deref for MouseAction {
+    type Target = str;
+    fn deref(&self) -> &str {
+        match self {
+            MouseAction::Drag => "drag",
+            MouseAction::Press => "press",
+            MouseAction::Release => "release",
+
+            MouseAction::Up => "up",
+            MouseAction::Down => "down",
+            MouseAction::Left => "left",
+            MouseAction::Right => "right",
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum MouseButton {
+    Left,
+    Right,
+    Middle,
+}
+
+impl AsRef<str> for MouseButton {
+    fn as_ref(&self) -> &str {
+        match self {
+            MouseButton::Left => "left",
+            MouseButton::Right => "right",
+            MouseButton::Middle => "middle",
+        }
+    }
+}
+
+impl Deref for MouseButton {
+    type Target = str;
+    fn deref(&self) -> &Self::Target {
+        match self {
+            MouseButton::Left => "left",
+            MouseButton::Right => "right",
+            MouseButton::Middle => "middle",
+        }
+    }
+}
+
+impl ToString for MouseButton {
+    fn to_string(&self) -> String {
+        match self {
+            MouseButton::Left => "left".to_string(),
+            MouseButton::Right => "right".to_string(),
+            MouseButton::Middle => "middle".to_string(),
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum UiCommand {
@@ -21,7 +96,9 @@ pub enum UiCommand {
     },
     Keyboard(String),
     MouseButton {
-        action: String,
+        action: MouseAction,
+        button: MouseButton,
+        modifier: gdk::ModifierType,
         grid_id: u64,
         position: (u32, u32),
     },
@@ -37,10 +114,6 @@ pub enum UiCommand {
     FileDrop(String),
     FocusLost,
     FocusGained,
-    #[cfg(windows)]
-    RegisterRightClick,
-    #[cfg(windows)]
-    UnregisterRightClick,
 }
 
 impl UiCommand {
@@ -59,13 +132,15 @@ impl UiCommand {
             }
             UiCommand::MouseButton {
                 action,
+                button,
+                modifier,
                 grid_id,
                 position: (grid_x, grid_y),
             } => {
                 nvim.input_mouse(
-                    "left",
+                    &button,
                     &action,
-                    "",
+                    &modifier.to_input().unwrap(),
                     grid_id as i64,
                     grid_y as i64,
                     grid_x as i64,
@@ -114,32 +189,6 @@ impl UiCommand {
                 .expect("Focus Gained Failed"),
             UiCommand::FileDrop(path) => {
                 nvim.command(format!("e {}", path).as_str()).await.ok();
-            }
-            #[cfg(windows)]
-            UiCommand::RegisterRightClick => {
-                if unregister_rightclick() {
-                    let msg = "Could not unregister previous menu item. Possibly already registered or not running as Admin?";
-                    nvim.err_writeln(msg).await.ok();
-                    error!("{}", msg);
-                }
-                if !register_rightclick_directory() {
-                    let msg = "Could not register directory context menu item. Possibly already registered or not running as Admin?";
-                    nvim.err_writeln(msg).await.ok();
-                    error!("{}", msg);
-                }
-                if !register_rightclick_file() {
-                    let msg = "Could not register file context menu item. Possibly already registered or not running as Admin?";
-                    nvim.err_writeln(msg).await.ok();
-                    error!("{}", msg);
-                }
-            }
-            #[cfg(windows)]
-            UiCommand::UnregisterRightClick => {
-                if !unregister_rightclick() {
-                    let msg = "Could not remove context menu items. Possibly already removed or not running as Admin?";
-                    nvim.err_writeln(msg).await.ok();
-                    error!("{}", msg);
-                }
             }
         }
     }

@@ -4,14 +4,15 @@ use std::sync::{atomic, RwLock};
 
 use glib::ObjectExt;
 use gtk::prelude::{
-    BoxExt, DrawingAreaExt, DrawingAreaExtManual, EventControllerExt, GtkWindowExt, OrientableExt,
-    WidgetExt,
+    BoxExt, DrawingAreaExt, DrawingAreaExtManual, EventControllerExt, GtkWindowExt,
+    IMContextExtManual, OrientableExt, WidgetExt,
 };
 use once_cell::sync::OnceCell;
 use pango::FontDescription;
 use relm4::{send, AppUpdate, Model, RelmApp, Sender, WidgetPlus, Widgets};
 use rustc_hash::FxHashMap;
 
+use crate::keys::{self, ToInput};
 use crate::vimview::{self, VimGrid};
 use crate::{
     bridge::{self, RedrawEvent, UiCommand},
@@ -82,6 +83,7 @@ pub struct AppModel {
     pub show_tab_line: Option<u64>,
 
     pub font_description: Rc<RefCell<pango::FontDescription>>,
+    pub font_changed: Rc<atomic::AtomicBool>,
 
     pub pctx: OnceCell<Rc<pango::Context>>,
 
@@ -115,8 +117,8 @@ impl AppModel {
             show_tab_line: None,
 
             font_metrics: Rc::new(FontMetrics::new().into()),
-
             font_description: Rc::new(RefCell::new(FontDescription::from_string("monospace 17"))),
+            font_changed: Rc::new(false.into()),
 
             pctx: OnceCell::new(),
 
@@ -160,11 +162,17 @@ impl AppModel {
         layout.set_text(SINGLE_WIDTH_CHARS);
         let lineheight = layout.line(1).unwrap().height();
         let mut font_metrics = self.font_metrics.get();
-        font_metrics.lineheight = lineheight as f64 / pango::SCALE as f64;
-        font_metrics.charwidth = metrics.approximate_digit_width() as f64 / pango::SCALE as f64;
+        let lineheight = lineheight as f64 / pango::SCALE as f64;
+        let charwidth = metrics.approximate_digit_width() as f64 / pango::SCALE as f64;
+        if font_metrics.lineheight == lineheight && font_metrics.charwidth == charwidth {
+            return;
+        }
+        font_metrics.lineheight = lineheight;
+        font_metrics.charwidth = charwidth;
         log::info!("line-height {:?}", font_metrics.lineheight);
         log::info!("char-width {:?}", font_metrics.charwidth);
         self.font_metrics.replace(font_metrics);
+        self.font_changed.store(true, atomic::Ordering::Relaxed);
     }
 }
 
@@ -222,7 +230,7 @@ impl AppUpdate for AppModel {
 
                                 self.compute();
 
-                                self.flush.store(true, atomic::Ordering::Relaxed);
+                                // self.flush.store(true, atomic::Ordering::Relaxed);
                             }
                         }
                         bridge::GuiOption::GuiFontSet(guifontset) => {
@@ -303,6 +311,34 @@ impl AppUpdate for AppModel {
                             .textbuf()
                             .borrow()
                             .set_cells(row as _, column_start as _, &cells);
+                    }
+                    RedrawEvent::Scroll {
+                        grid,
+                        top,
+                        bottom,
+                        left,
+                        right,
+                        rows,
+                        columns,
+                    } => {
+                        let vgrid = self.vgrids.get_mut(grid).unwrap();
+                        if rows.is_positive() {
+                            vgrid.up(rows.abs() as _);
+                        } else if rows.is_negative() {
+                            //
+                            vgrid.down(rows.abs() as _);
+                        } else if columns.is_positive() {
+                            //
+                        } else if columns.is_negative() {
+                            //
+                        } else {
+                            // rows and columns are both zero.
+                            unimplemented!("Should not here.");
+                        }
+                        // self.vgrids
+                        //     .get_mut(grid)
+                        //     .unwrap()
+                        //     .up(top, bottom, left, right, rows, columns);
                     }
                     RedrawEvent::Resize {
                         grid,
@@ -397,6 +433,7 @@ impl AppUpdate for AppModel {
                             self.relationships.get_mut(&grid).unwrap().winid = winid;
                             vgrid.show();
                         }
+
                         log::info!(
                             "window {} position grid {} row-start({}) col-start({}) width({}) height({})",
                             winid, grid, start_row, start_column, width, height,
@@ -519,7 +556,9 @@ impl AppUpdate for AppModel {
                         self.flush.store(true, atomic::Ordering::Relaxed);
                         self.vgrids.flush();
                     }
-                    _ => {}
+                    _ => {
+                        log::error!("Unhandled RedrawEvent {:?}", event);
+                    }
                 }
             }
         }
@@ -606,119 +645,87 @@ impl Widgets<AppModel, ()> for AppWidgets {
         model.pctx.set(vbox.pango_context().into()).ok();
         model.compute();
 
-        /*
-        let click_listener = gtk::GestureClick::builder()
-            .button(0)
-            .exclusive(false)
-            .touch_only(false)
-            .n_points(1)
-            .name("click-listener")
-            .build();
-        click_listener.connect_pressed(
-            glib::clone!(@strong sender, @strong grid => move |c, n_press, x, y| {
-                log::info!("{:?} pressed {} times at {}x{}", c.name(), n_press, x, y);
-                sender.send(
-                    UiCommand::MouseButton {
-                        action: "press".to_string(),
-                        grid_id: grid,
-                        position: (x as u32, y as u32)
-                    }.into()
-                ).expect("Failed to send mouse press event");
-            }),
-        );
-        click_listener.connect_released(
-            glib::clone!(@strong sender, @strong grid => move |c, n_press, x, y| {
-                log::info!("{:?} released {} times at {}x{}", c.name(), n_press, x, y);
-                sender.send(
-                    UiCommand::MouseButton {
-                        action: "release".to_string(),
-                        grid_id: grid,
-                        position: (x as u32, y as u32)
-                    }.into()
-                ).expect("Failed to send mouse event");
-            }),
-        );
-        windows_container.add_controller(&click_listener);
-        let on_click = gtk::GestureClick::new();
-        on_click.set_name("vim-window-onclick-listener");
-        on_click.connect_pressed(glib::clone!(@strong sender => move |c, n_press, x, y| {
-            log::debug!("{:?} pressed {} times at {}x{}", c.name(), n_press, x, y);
-            sender.send(
-                UiCommand::MouseButton {
-                    action: "press".to_string(),
-                    grid_id: grid,
-                    position: (x as u32, y as u32)
-                }.into()
-            ).expect("Failed to send mouse press event");
-        }));
-        on_click.connect_released(glib::clone!(@strong sender => move |c, n_press, x, y| {
-            log::debug!("{:?} released {} times at {}x{}", c.name(), n_press, x, y);
-            sender.send(
-                UiCommand::MouseButton {
-                    action: "release".to_string(),
-                    grid_id: grid,
-                    position: (x as u32, y as u32)
-                }.into()
-            ).expect("Failed to send mouse event");
-        }));
-        overlay.add_controller(&on_click);
-        */
-        // on_click.connect_stopped(cloned!(sender => move |c| {
-        //     log::debug!("Click({}) stopped", c.name().unwrap());
-        //     // sender.send(AppMsg::Message(format!("Click({}) stopped", c.name().unwrap()))).unwrap();
-        // }));
-        // on_click.connect_unpaired_release(cloned!(sender => move |c, n_press, x, y, events| {
-        //     // sender.send(AppMsg::Message(format!("Click({:?}) unpaired release {} times at {}x{} {:?}", c.group(), n_press, x, y, events))).unwrap();
-        //     log::debug!("Click({:?}) unpaired release {} times at {}x{} {:?}", c.group(), n_press, x, y, events);
-        // }));
-
-        /*
-        listener.connect_decelerate(
-            glib::clone!(@strong sender, @strong model.focused as focused => move |_, x, y| {
-                let grid_id = focused.load(atomic::Ordering::Relaxed);
-                log::debug!("scroll decelerate x: {}, y: {}", x, y);
-                // sender.send(AppMsg::Message(format!("scroll decelerate x: {}, y: {}", x, y))).unwrap();
-            }),
-        );
-        listener.connect_scroll_begin(
-            glib::clone!(@strong sender, @strong model.focused as focused => move |_| {
-                let grid_id = focused.load(atomic::Ordering::Relaxed);
-                log::debug!("scroll begin");
-                // sender.send(AppMsg::Message(format!("scroll begin"))).unwrap();
-            }),
-        );
-        listener.connect_scroll_end(
-            glib::clone!(@strong sender, @strong model.focused as focused => move |_| {
-                let grid_id = focused.load(atomic::Ordering::Relaxed);
-                log::debug!("scroll end");
-                // sender.send(AppMsg::Message(format!("scroll end"))).unwrap();
-            }),
-        );
-        overlay.add_controller(&listener);
-        */
-
         let listener = gtk::EventControllerScroll::builder()
             .flags(gtk::EventControllerScrollFlags::all())
             .name("scroller-listener")
             .build();
         listener.connect_scroll(glib::clone!(@strong sender => move |c, x, y| {
-            let grid: u64 = if let Some(child) = c.widget().focus_child() {
-                child.property("id")
-            } else {
-                return gtk::Inhibit(false)
-            };
-            let direction = if y > 0. {
-                "down"
-            } else {
-                "up"
-            };
+            // FIXME: get grid id by neovim current buf.
+            let id = 1;
+            let direction = c.current_event().unwrap().downcast::<gdk::ScrollEvent>().unwrap().direction().to_string().to_lowercase();
+            // let direction = if y > 0. {
+            //     "down"
+            // } else {
+            //     "up"
+            // };
             // let grid_id = focused.load(atomic::Ordering::Relaxed);
-            let command = UiCommand::Scroll { direction: direction.into(), grid_id: grid, position: (0, 1) };
+            let command = UiCommand::Scroll { direction: direction.into(), grid_id: id, position: (0, 1) };
             sender.send(AppMessage::UiCommand(command)).unwrap();
-            log::debug!("scrolling grid {} x: {}, y: {}", grid, x, y);
+            log::error!("scrolling grid {} x: {}, y: {}", id, x, y);
             gtk::Inhibit(false)
         }));
+        listener.connect_decelerate(|c, vel_x, vel_y| {
+            // let id: u64 = c
+            //     .widget()
+            //     .dynamic_cast_ref::<VimGridView>()
+            //     .unwrap()
+            //     .property("id");
+            // log::error!("scrolling decelerate grid {} x:{} y:{}.", id, vel_x, vel_y);
+        });
+        listener.connect_scroll_begin(|c| {
+            // let id: u64 = c
+            //     .widget()
+            //     .dynamic_cast_ref::<VimGridView>()
+            //     .unwrap()
+            //     .property("id");
+            // log::error!("scrolling begin grid {}.", id);
+        });
+        listener.connect_scroll_end(|c| {
+            // let id: u64 = c
+            //     .widget()
+            //     .dynamic_cast_ref::<VimGridView>()
+            //     .unwrap()
+            //     .property("id");
+            // log::error!("scrolling end grid {}.", id);
+        });
         overlay.add_controller(&listener);
+
+        let listener = gtk::EventControllerFocus::builder()
+            .name("focas-listener")
+            .build();
+        listener.connect_enter(glib::clone!(@strong sender  => move |_| {
+            sender.send(UiCommand::FocusGained.into()).unwrap();
+        }));
+        listener.connect_leave(glib::clone!(@strong sender  => move |_| {
+            sender.send(UiCommand::FocusLost.into()).unwrap();
+        }));
+        overlay.add_controller(&listener);
+
+        let controller = gtk::EventControllerKey::builder()
+            .name("keyboard-listener")
+            .build();
+        controller.connect_key_pressed(
+            glib::clone!(@strong sender => move |c, keyval, _keycode, modifier| {
+                log::info!("keyboard pressed");
+                let event = c.current_event().unwrap();
+                if c.im_context().filter_keypress(&event) {
+                    return gtk::Inhibit(true)
+                }
+                if let Some(keyboard) = (&keyval, &modifier).to_input() {
+                    sender.send(UiCommand::Keyboard(keyboard).into()).unwrap();
+                    gtk::Inhibit(true)
+                } else {
+                    gtk::Inhibit(false)
+                }
+            }),
+        );
+        controller.connect_key_released(|_, keyval, _, modifier| {
+            log::info!(
+                "keyboard released, {}",
+                (&keyval, &modifier).to_input().unwrap()
+            );
+        });
+        overlay.add_controller(&controller);
     }
 
     fn pre_view() {
@@ -729,6 +736,26 @@ impl Widgets<AppModel, ()> for AppWidgets {
             atomic::Ordering::Relaxed,
         ) {
             self.da.queue_draw();
+        }
+        if let Ok(true) = model.font_changed.compare_exchange(
+            true,
+            false,
+            atomic::Ordering::Acquire,
+            atomic::Ordering::Relaxed,
+        ) {
+            let metrics = model.font_metrics.clone();
+            let metrics = metrics.get();
+            let rows = self.da.height() as f64 / (metrics.lineheight + metrics.linespace); //  + metrics.linespace
+            let cols = self.da.width() as f64 / metrics.charwidth;
+            sender
+                .send(
+                    UiCommand::Resize {
+                        width: cols as _,
+                        height: rows as _,
+                    }
+                    .into(),
+                )
+                .unwrap();
         }
     }
 }
