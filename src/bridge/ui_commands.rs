@@ -125,7 +125,11 @@ impl UiCommand {
             UiCommand::Resize { width, height } => nvim
                 .ui_try_resize(width.max(10) as i64, height.max(3) as i64)
                 .await
-                .expect("Resize failed"),
+                .expect(&format!(
+                    "Resize failed, trying resize to {}x{}",
+                    width.max(10) as i64,
+                    height.max(3) as i64
+                )),
             UiCommand::Keyboard(input_command) => {
                 trace!("Keyboard Input Sent: {}", input_command);
                 nvim.input(&input_command).await.expect("Input failed");

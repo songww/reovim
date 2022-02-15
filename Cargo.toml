@@ -27,13 +27,14 @@ clap = { version = "3", features = [ "derive" ] }
 chan = { version = "0.5", package = "crossbeam-channel" }
 nvim = { version = "0.4", package = "nvim-rs", features = [ "use_tokio" ] }
 
-glib = "0.15"
-pango = "0.15"
 pangocairo = "0.15"
 graphene-rs = "0.15"
-cairo = { version = "0.15", package = "cairo-rs" }
-gdk = { version = "0.4", package = "gdk4", features = [ "v4_4" ] }
-gtk = { version = "0.4", package = "gtk4", features = [ "v4_4" ] }
+glib = { version = "0.15", features = [ "v2_70" ] }
+pango = { version = "0.15", features = [ "v1_50" ] }
+# pango = { features = [ "v1_50" ], path = "/home/songww/workspace/github.com/gtk-rs-core/pango" }
+gdk = { version = "0.4", package = "gdk4", features = [ "v4_6" ] }
+gtk = { version = "0.4", package = "gtk4", features = [ "v4_6" ] }
+cairo = { version = "0.15", package = "cairo-rs", features = [ "v1_16", "png" ] }
 
 relm4 = {  version = "0.4", features = ["tokio-rt"] }
 relm-macros = { version = "0.4", package = "relm4-macros" }
@@ -44,3 +45,8 @@ tokio-util = { version = "0.7", features = ["compat"] }
 
 [profile.release]
 debug = true
+
+[patch.tuna]
+"pango" = { path = '/home/songww/workspace/github.com/gtk-rs-core/pango' }
+[patch.crates-io]
+"pango" = { path = '/home/songww/workspace/github.com/gtk-rs-core/pango' }

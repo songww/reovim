@@ -1,5 +1,6 @@
 #![feature(new_uninit)]
 #![feature(maybe_uninit_write_slice)]
+#![feature(round_char_boundary)]
 #[macro_use]
 extern crate derive_new;
 #[macro_use]

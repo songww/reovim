@@ -152,7 +152,7 @@ impl AppModel {
             "A B C D E F G H I J K L M N O P Q R S T U V W X Y Z ",
             "[ \\ ] ^ _ ` ",
             "a b c d e f g h i j k l m n o p q r s t u v w x y z ",
-            "{ | } ~ \n",
+            "{ | } ~ ",
         );
         let desc = self.font_description.borrow();
         log::debug!(
@@ -167,7 +167,7 @@ impl AppModel {
         let layout = pango::Layout::new(pctx);
         let metrics = pctx.metrics(Some(&desc), None).unwrap();
         layout.set_text(SINGLE_WIDTH_CHARS);
-        let lineheight = layout.line(1).unwrap().height();
+        let lineheight = layout.line(0).unwrap().height();
         let mut font_metrics = self.font_metrics.get();
         let lineheight = lineheight as f64 / pango::SCALE as f64;
         let charwidth = metrics.approximate_digit_width() as f64 / pango::SCALE as f64;
@@ -179,7 +179,6 @@ impl AppModel {
         log::info!("line-height {:?}", font_metrics.lineheight);
         log::info!("char-width {:?}", font_metrics.charwidth);
         self.font_metrics.replace(font_metrics);
-        self.font_changed.store(true, atomic::Ordering::Relaxed);
     }
 }
 
@@ -237,7 +236,7 @@ impl AppUpdate for AppModel {
 
                                 self.compute();
 
-                                // self.flush.store(true, atomic::Ordering::Relaxed);
+                                self.font_changed.store(true, atomic::Ordering::Relaxed);
                             }
                         }
                         bridge::GuiOption::GuiFontSet(guifontset) => {
@@ -766,10 +765,26 @@ impl Widgets<AppModel, ()> for AppWidgets {
             atomic::Ordering::Acquire,
             atomic::Ordering::Relaxed,
         ) {
+            log::error!(
+                "default font name: {}",
+                model.font_description.borrow().to_str()
+            );
+            self.overlay
+                .settings()
+                .set_gtk_font_name(Some(&model.font_description.borrow().to_str()));
             let metrics = model.font_metrics.clone();
             let metrics = metrics.get();
             let rows = self.da.height() as f64 / (metrics.lineheight + metrics.linespace); //  + metrics.linespace
             let cols = self.da.width() as f64 / metrics.charwidth;
+            // FIXME: WTF
+            log::error!(
+                "trying to resize to {}x{} original {}x{} {:?}",
+                rows,
+                cols,
+                self.da.width(),
+                self.da.height(),
+                metrics
+            );
             sender
                 .send(
                     UiCommand::Resize {

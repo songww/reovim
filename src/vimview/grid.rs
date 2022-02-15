@@ -4,7 +4,7 @@ mod imp {
     use std::rc::Rc;
     use std::sync::RwLock;
 
-    use gtk::{gdk::prelude::*, graphene::Rect, pango, prelude::*, subclass::prelude::*};
+    use gtk::{gdk::prelude::*, graphene::Rect, prelude::*, subclass::prelude::*};
     use once_cell::sync::OnceCell;
 
     use crate::cursor::Cursor;
@@ -132,15 +132,16 @@ mod imp {
 
     // Trait shared by all widgets
     impl WidgetImpl for VimGridView {
+        /*
         fn snapshot(&self, widget: &Self::Type, snapshot: &gtk::Snapshot) {
             const SCALE: f32 = pango::SCALE as f32;
             let pctx = widget.pango_context();
-            let font_desc = widget.pango_context().font_description().unwrap();
-            log::debug!(
-                "snapshot grid {} font description {}",
-                self.id.get(),
-                font_desc.to_str()
-            );
+            let font_desc = pctx.font_description().unwrap();
+            // log::debug!(
+            //     "snapshot grid {} font description {}",
+            //     self.id.get(),
+            //     font_desc.to_str()
+            // );
             log::info!(
                 "grid {} height {} width {} cols {} rows {}",
                 self.id.get(),
@@ -161,22 +162,24 @@ mod imp {
             if linespace > 0. {
                 layout.set_spacing(linespace as _);
             }
+            // layout.set_width(-1);
             layout.set_font_description(Some(&font_desc));
-            self.textbuf().layout(&layout, &hldefs);
+            let lineheight = metrics.lineheight() * pango::SCALE as f64;
+            self.textbuf().layout(lineheight as _, &layout, &hldefs);
             let (w, h) = layout.pixel_size();
-            /*
-            log::info!(
+            log::error!(
                 "snapshoting grid {} size required {}x{}",
                 self.id.get(),
                 width,
                 height
             );
-            log::info!("grid {} layout size {}x{}", self.id.get(), w, h);
-            log::info!(
+            log::error!("grid {} layout size {}x{}", self.id.get(), w, h);
+            log::error!(
                 "grid {} layout line-height: {}",
                 self.id.get(),
-                layout.line(1).unwrap().height() as f32 / SCALE
+                layout.line(0).unwrap().height() as f32 / SCALE
             );
+            /*
 
                         if let Some(background) = hldefs.defaults().and_then(|defaults| defaults.background) {
                             let style_context = widget.style_context();
@@ -205,6 +208,14 @@ mod imp {
 
             if let Some(ref cursor) = *self.cursor.borrow() {
                 let (rows, cols) = cursor.pos;
+
+                log::error!(
+                    "Drawing cursor at {}x{} {} lines exists {} lines required",
+                    cols,
+                    rows,
+                    layout.line_count(),
+                    self.textbuf().rows()
+                );
                 let layoutline = layout.line_readonly(rows as _).unwrap();
                 let xpos = layoutline.index_to_x(cols as _, false);
                 // let right = layoutline.index_to_x(cols as _, true);
@@ -256,12 +267,148 @@ mod imp {
             }
 
             pangocairo::update_context(&cr, &pctx);
+
             pangocairo::update_layout(&cr, &layout);
             pangocairo::show_layout(&cr, &layout);
 
             // log::info!("apply layout");
             self.parent_snapshot(widget, snapshot);
             // log::info!("parent snapshot");
+        }
+        */
+
+        fn snapshot(&self, widget: &Self::Type, snapshot: &gtk::Snapshot) {
+            self.parent_snapshot(widget, snapshot);
+            const SCALE: f64 = pango::SCALE as f64;
+            let pctx = widget.pango_context();
+            let font_desc = pctx.font_description().unwrap();
+            log::info!(
+                "grid {} height {} width {} cols {} rows {}",
+                self.id.get(),
+                self.height.get(),
+                self.width.get(),
+                self.textbuf().cols(),
+                self.textbuf().rows()
+            );
+            assert_eq!(self.height.get(), self.textbuf().rows() as u64);
+            assert_eq!(self.width.get(), self.textbuf().cols() as u64);
+            let (width, height) = self.size_required();
+
+            let hldefs = self.hldefs.get().unwrap().read().unwrap();
+
+            let metrics = self.metrics.get().unwrap().get();
+            let linespace = metrics.linespace();
+
+            let rect = Rect::new(0., 0., width as _, height as _);
+            let cr = snapshot.append_cairo(&rect);
+
+            pangocairo::update_context(&cr, &pctx);
+
+            let lineheight = metrics.lineheight() * SCALE;
+
+            let (texts, attrtable) = self.textbuf().for_itemize(&hldefs);
+            // attrs.insert({
+            //     log::error!("absolute line height set to {}", lineheight);
+            //     let mut attr = pango::AttrInt::new_line_height_absolute(lineheight as _);
+            //     attr.set_start_index(0);
+            //     attr.set_end_index(text.len() as _);
+            //     attr
+            // });
+            let mut y = 0.;
+            for (lno, text) in texts.iter().enumerate() {
+                cr.move_to(0., y);
+                y += (lineheight + linespace) / SCALE;
+                let attrs = attrtable.get(lno).unwrap();
+                let mut items = pango::itemize(&pctx, &text, 0, text.len() as _, &attrs, None);
+                assert_eq!(items[0].offset(), 0);
+                // println!(
+                //     "total {} items, {} chars, {} bytes, text len {}",
+                //     items.len(),
+                //     text.chars().count(),
+                //     text.bytes().len(),
+                //     text.len()
+                // );
+                for item in items.iter_mut() {
+                    let mut glyph_string = pango::GlyphString::new();
+                    // assert_eq!(idx, item.offset() as usize);
+                    let start_index = item.offset();
+                    let end_index = start_index + item.length();
+                    // println!(
+                    //     "getting text[{}:{}] floor boundary {} ceil boundary {}",
+                    //     start_index,
+                    //     end_index,
+                    //     text.floor_char_boundary(start_index as _),
+                    //     text.ceil_char_boundary(end_index as _)
+                    // );
+                    // let end_index = text.ceil_char_boundary(end_index as _) as _;
+                    let s = if let Some(s) = text.get(start_index as usize..end_index as usize) {
+                        s
+                    } else {
+                        continue;
+                    };
+                    // println!("context at {}x{}", x, y);
+                    pango::shape(s, item.analysis(), &mut glyph_string);
+
+                    let (_, rect) = glyph_string.extents(&item.analysis().font());
+                    let rect_height = rect.height() as f64 / SCALE;
+                    if rect_height > metrics.lineheight() {
+                        // let attrs = attrs
+                        //     .filter(|attr| {
+                        //         attr.start_index() <= start_index as u32
+                        //             && attr.end_index() >= end_index as u32
+                        //     })
+                        //     .unwrap_or_else(|| pango::AttrList::new());
+                        // let attributes = attrs.attributes();
+                        // if attributes.len() > 0 {
+                        //     println!(
+                        //         "{} {}-{} has {} attrs",
+                        //         lno,
+                        //         start_index,
+                        //         end_index,
+                        //         attributes.len()
+                        //     );
+                        // }
+                        let mut attr = pango::AttrFloat::new_line_height(
+                            metrics.lineheight() / rect_height * 0.8,
+                        );
+                        attr.set_start_index(start_index as _);
+                        attr.set_end_index(end_index as _);
+                        attrs.insert(attr);
+                    }
+                }
+                let layout = pango::Layout::new(&pctx);
+                layout.set_font_description(Some(&font_desc));
+                layout.set_text(&text);
+                layout.set_attributes(Some(&attrs));
+                pangocairo::update_layout(&cr, &layout);
+                pangocairo::update_context(&cr, &pctx);
+                pangocairo::show_layout(&cr, &layout);
+            }
+            log::info!("text to render:\n{}", texts.join("\n"));
+
+            if let Some(ref cursor) = *self.cursor.borrow() {
+                let (rows, cols) = cursor.pos;
+
+                let x = cols as f64 * metrics.charwidth();
+                let y = rows as f64 * (metrics.linespace() + metrics.lineheight());
+                let (cursor_width, cursor_height) = cursor.size(rect.width(), rect.height());
+                let guard = self.hldefs.get().unwrap().read().unwrap();
+                let default_colors = guard.defaults().unwrap();
+                let color = cursor.foreground(default_colors);
+                // let text = self.textbuf().at(rows, cols);
+                let bounds = Rect::new(
+                    (x) as f32,
+                    (y) as f32,
+                    (cursor_width) / SCALE as f32,
+                    (cursor_height) / SCALE as f32,
+                );
+                log::error!(
+                    "Drawing cursor color {} bounds {:?}",
+                    color.to_str(),
+                    bounds
+                );
+                snapshot.append_color(&color, &bounds);
+            }
         }
 
         fn measure(

@@ -3,6 +3,8 @@ use std::ops::{Deref, DerefMut};
 
 use gdk::prelude::FontExt;
 use glib::subclass::prelude::*;
+use rustc_hash::FxHashMap;
+use vector_map::VecMap;
 
 use crate::color::ColorExt;
 
@@ -176,7 +178,7 @@ mod imp {
     }
 
     impl<'a> Lines<'a> {
-        pub(super) fn line(&self, no: usize) -> Option<&super::TextLine> {
+        pub(super) fn get(&self, no: usize) -> Option<&super::TextLine> {
             self.guard.cells.get(no)
         }
     }
@@ -232,18 +234,38 @@ impl TextBuf {
         self.imp().down(rows);
     }
 
-    pub(super) fn layout(&self, layout: &pango::Layout, hldefs: &HighlightDefinitions) {
-        const U16MAX: f32 = u16::MAX as f32 + 1.;
+    pub(super) fn layout(
+        &self,
+        lineheight: i32,
+        layout: &pango::Layout,
+        hldefs: &HighlightDefinitions,
+    ) {
         let imp = self.imp();
         if imp.cols() == 0 || imp.rows() == 0 {
             return;
         }
+        const U16MAX: f32 = u16::MAX as f32 + 1.;
         let nchars = imp.cols() * imp.rows() + imp.rows();
         let mut text = String::with_capacity(nchars);
         let default_colors = hldefs.defaults().unwrap();
+        let font_desc = layout.font_description().unwrap();
+        let font_size = font_desc.size();
+        log::error!(
+            "layouting use font size {}/{} is absolute {}",
+            font_size,
+            font_size as f32 / pango::SCALE as f32,
+            font_desc.is_size_absolute()
+        );
         let attrs = pango::AttrList::new();
+        // attrs.insert({
+        //     let mut attr = pango::AttrInt::new_fallback(true);
+        //     attr.set_start_index(0);
+        //     attr.set_end_index(nchars as _);
+        //     attr
+        // });
         attrs.insert({
-            let mut attr = pango::AttrInt::new_fallback(true);
+            log::error!("absolute line height set to {}", lineheight);
+            let mut attr = pango::AttrInt::new_line_height_absolute(lineheight);
             attr.set_start_index(0);
             attr.set_end_index(nchars as _);
             attr
@@ -252,7 +274,7 @@ impl TextBuf {
         let rows = imp.rows();
         let lines = imp.lines();
         for lno in 0..rows {
-            let line_cells = lines.line(lno).unwrap();
+            let line_cells = lines.get(lno).unwrap();
             for cell in line_cells.iter() {
                 if cell.text.is_empty() {
                     continue;
@@ -300,12 +322,12 @@ impl TextBuf {
                     attrs.insert(attr);
                 }
                 // alpha color
-                let mut attr =
-                    pango::AttrInt::new_background_alpha(u16::MAX - (hldef.blend as u16).pow(2));
+                // let mut attr =
+                //     pango::AttrInt::new_background_alpha(u16::MAX - (hldef.blend as u16).pow(2));
                 // log::info!("blend {}", hldef.blend);
-                attr.set_start_index(start_index as _);
-                attr.set_end_index(end_index as _);
-                attrs.insert(attr);
+                // attr.set_start_index(start_index as _);
+                // attr.set_end_index(end_index as _);
+                // attrs.insert(attr);
                 if let Some(fg) = hldef.colors.foreground.or(default_colors.foreground) {
                     // log::info!(
                     //     "foreground #{:.2x}{:.2x}{:.2x}",
@@ -385,7 +407,136 @@ impl TextBuf {
         // );
         // log::info!("extents: {:?}", l.extents());
         // log::info!("pixel extents: {:?}", l.pixel_extents());
-        log::info!("text to render:\n{}", &text);
+        log::error!("text to render:\n{}", &text);
+    }
+
+    pub(super) fn for_itemize(&self, hldefs: &HighlightDefinitions) -> (Box<[String]>, AttrTable) {
+        let imp = self.imp();
+        let mut texts = Vec::with_capacity(imp.rows());
+        let mut attrtable = AttrTable::new();
+        if imp.cols() == 0 || imp.rows() == 0 {
+            return (texts.into_boxed_slice(), attrtable);
+        }
+        const U16MAX: f32 = u16::MAX as f32 + 1.;
+        let default_colors = hldefs.defaults().unwrap();
+
+        // attrs.insert({
+        //     let mut attr = pango::AttrInt::new_fallback(true);
+        //     attr.set_start_index(0);
+        //     attr.set_end_index(nchars as _);
+        //     attr
+        // });
+        let default_hldef = hldefs.get(0).unwrap();
+        let rows = imp.rows();
+        let lines = imp.lines();
+        for lno in 0..rows {
+            attrtable.insert(lno, pango::AttrList::new());
+            texts.push(String::with_capacity(imp.rows()));
+            let attrs = attrtable.get(lno).unwrap();
+            let line_cells = lines.get(lno).unwrap();
+            let text = texts.last_mut().unwrap();
+            for cell in line_cells.iter() {
+                if cell.text.is_empty() {
+                    continue;
+                }
+                let start_index = text.len();
+                text.push_str(&cell.text);
+                let end_index = text.len();
+                // attrtable.insert(lno, start_index, end_index, pango::AttrList::new());
+                let mut background = None;
+                let mut hldef = default_hldef;
+                if let Some(ref id) = cell.hldef {
+                    let style = hldefs.get(*id);
+                    if let Some(style) = style {
+                        background = style.background();
+                        hldef = style;
+                    }
+                }
+                if hldef.italic {
+                    let mut attr = pango::AttrInt::new_style(pango::Style::Italic);
+                    attr.set_start_index(start_index as _);
+                    attr.set_end_index(end_index as _);
+                    attrs.change(attr);
+                }
+                if hldef.bold {
+                    let mut attr = pango::AttrInt::new_weight(pango::Weight::Semibold);
+                    attr.set_start_index(start_index as _);
+                    attr.set_end_index(end_index as _);
+                    attrs.change(attr);
+                }
+                if hldef.strikethrough {
+                    let mut attr = pango::AttrInt::new_strikethrough(true);
+                    attr.set_start_index(start_index as _);
+                    attr.set_end_index(end_index as _);
+                    attrs.change(attr);
+                }
+                if hldef.underline {
+                    let mut attr = pango::AttrInt::new_underline(pango::Underline::Single);
+                    attr.set_start_index(start_index as _);
+                    attr.set_end_index(end_index as _);
+                    attrs.change(attr);
+                }
+                if hldef.undercurl {
+                    let mut attr = pango::AttrInt::new_underline(pango::Underline::Error);
+                    attr.set_start_index(start_index as _);
+                    attr.set_end_index(end_index as _);
+                    attrs.change(attr);
+                }
+                // alpha color
+                // blend is 0 - 100. Could be used by UIs to support
+                // blending floating windows to the background or to
+                // signal a transparent cursor.
+                // let blend = u16::MAX as u32 * hldef.blend as u32 / 100;
+                // let mut attr = pango::AttrInt::new_background_alpha(blend as u16);
+                // log::info!("blend {}", hldef.blend);
+                // attr.set_start_index(start_index as _);
+                // attr.set_end_index(end_index as _);
+                // attrs.insert(attr);
+                if let Some(fg) = hldef.colors.foreground.or(default_colors.foreground) {
+                    // log::info!(
+                    //     "foreground #{:.2x}{:.2x}{:.2x}",
+                    //     (fg.red() * U16MAX) as u16,
+                    //     (fg.green() * U16MAX) as u16,
+                    //     (fg.blue() * U16MAX) as u16
+                    // );
+                    let mut attr = pango::AttrColor::new_foreground(
+                        (fg.red() * U16MAX) as _,
+                        (fg.green() * U16MAX) as _,
+                        (fg.blue() * U16MAX) as _,
+                    );
+                    attr.set_start_index(start_index as _);
+                    attr.set_end_index(end_index as _);
+                    attrs.change(attr);
+                }
+                if let Some(bg) = background {
+                    // log::info!(
+                    //     "background #{:.2x}{:.2x}{:.2x}",
+                    //     (bg.red() * U16MAX) as u16,
+                    //     (bg.green() * U16MAX) as u16,
+                    //     (bg.blue() * U16MAX) as u16
+                    // );
+                    let mut attr = pango::AttrColor::new_background(
+                        (bg.red() * U16MAX) as _,
+                        (bg.green() * U16MAX) as _,
+                        (bg.blue() * U16MAX) as _,
+                    );
+                    attr.set_start_index(start_index as _);
+                    attr.set_end_index(end_index as _);
+                    attrs.change(attr);
+                }
+                if let Some(special) = hldef.colors.special.or(default_colors.special) {
+                    let mut attr = pango::AttrColor::new_underline_color(
+                        (special.red() * U16MAX) as _,
+                        (special.green() * U16MAX) as _,
+                        (special.blue() * U16MAX) as _,
+                    );
+                    attr.set_start_index(start_index as _);
+                    attr.set_end_index(end_index as _);
+                    attrs.change(attr);
+                }
+            }
+        }
+        (texts.into_boxed_slice(), attrtable)
     }
 }
 
@@ -460,5 +611,38 @@ impl Into<Box<[TextCell]>> for TextLine {
 impl TextLine {
     fn into_inner(self) -> Box<[TextCell]> {
         self.0
+    }
+}
+
+pub struct AttrTable {
+    // table: FxHashMap<(usize, usize, usize), pango::AttrList>,
+    table: VecMap<usize, pango::AttrList>,
+}
+
+impl AttrTable {
+    pub fn new() -> Self {
+        AttrTable {
+            table: VecMap::default(),
+        }
+    }
+
+    /// lno: line number.
+    pub fn get(
+        &self,
+        lno: usize,
+        // start_index: usize,
+        // end_index: usize,
+    ) -> Option<&pango::AttrList> {
+        self.table.get(&lno)
+    }
+
+    pub fn insert(
+        &mut self,
+        lno: usize,
+        // start_index: usize,
+        // end_index: usize,
+        attrs: pango::AttrList,
+    ) {
+        self.table.insert(lno, attrs);
     }
 }
