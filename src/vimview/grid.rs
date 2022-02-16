@@ -346,35 +346,75 @@ mod imp {
                     } else {
                         continue;
                     };
-                    // println!("context at {}x{}", x, y);
+                    if s.is_empty() {
+                        continue;
+                    }
+                    let nchars = s.chars().count();
+                    assert_eq!(nchars, 1);
+                    let char_ = s.chars().next().unwrap();
+                    if char_.is_control() || char_.is_whitespace() {
+                        continue;
+                    }
                     pango::shape(s, item.analysis(), &mut glyph_string);
 
-                    let (_, rect) = glyph_string.extents(&item.analysis().font());
-                    let rect_height = rect.height() as f64 / SCALE;
-                    if rect_height > metrics.lineheight() {
-                        // let attrs = attrs
-                        //     .filter(|attr| {
-                        //         attr.start_index() <= start_index as u32
-                        //             && attr.end_index() >= end_index as u32
-                        //     })
-                        //     .unwrap_or_else(|| pango::AttrList::new());
-                        // let attributes = attrs.attributes();
-                        // if attributes.len() > 0 {
-                        //     println!(
-                        //         "{} {}-{} has {} attrs",
-                        //         lno,
-                        //         start_index,
-                        //         end_index,
-                        //         attributes.len()
-                        //     );
-                        // }
-                        let mut attr = pango::AttrFloat::new_line_height(
-                            metrics.lineheight() / rect_height * 0.8,
-                        );
-                        attr.set_start_index(start_index as _);
-                        attr.set_end_index(end_index as _);
-                        attrs.insert(attr);
-                    }
+                    let (ink, logical) = glyph_string.extents(&item.analysis().font());
+                    // 需要占用几个cell
+                    let ncells = logical.width() as f64 / SCALE / metrics.charwidth();
+                    let ncells = ncells.round();
+                    let width_required = ncells * metrics.charwidth();
+                    let spacing = width_required * SCALE - logical.width() as f64;
+                    println!(
+                        "'{}' used {} cells logical width {} required width {} adding {} spaces",
+                        s,
+                        ncells,
+                        logical.width(),
+                        width_required * SCALE,
+                        spacing,
+                    );
+                    // if ink.height() >= logical.height() {
+                    //     let height = logical.height() as f64; // * SCALE;
+                    //     attrs.change({
+                    //         let mut attr =
+                    //             pango::AttrInt::new_line_height_absolute(height.ceil() as i32 / 4);
+                    //         attr.set_end_index(text.len() as _);
+                    //         attr.set_start_index(0);
+                    //         attr
+                    //     });
+                    // };
+                    // if logical.y() < ink.y() {
+                    //     let rise = ((logical.y() - ink.y()) as f64 / SCALE).ceil() as _;
+                    //     println!("applying rise {} for {}", rise, s);
+                    //     attrs.change({
+                    //         // let mut attr =
+                    //         //     pango::AttrInt::new_rise((logical.y() - ink.y()) - logical.y());
+                    //         let mut attr = pango::AttrInt::new_rise(rise);
+                    //         attr.set_end_index(end_index as _);
+                    //         attr.set_start_index(start_index as _);
+                    //         attr
+                    //     });
+                    //     let factor = ink.height() as f64 / logical.height() as f64;
+                    //     let size = (factor * lineheight * 0.9).ceil();
+                    //     println!(
+                    //         "applying new size {} ink {} logical {} -> {:?}",
+                    //         size,
+                    //         ink.y(),
+                    //         logical.y(),
+                    //         ink,
+                    //     );
+                    //     attrs.change({
+                    //         let mut attr = pango::AttrSize::new(size as i32);
+                    //         attr.set_end_index(end_index as _);
+                    //         attr.set_start_index(start_index as _);
+                    //         attr
+                    //     });
+                    // }
+                    attrs.change({
+                        // println!("applying letter-space {} for '{}'", spacing, s);
+                        let mut attr = pango::AttrInt::new_letter_spacing((spacing).round() as i32);
+                        attr.set_start_index(start_index as u32);
+                        attr.set_end_index(end_index as u32);
+                        attr
+                    });
                 }
                 let layout = pango::Layout::new(&pctx);
                 layout.set_font_description(Some(&font_desc));
@@ -389,9 +429,20 @@ mod imp {
             if let Some(ref cursor) = *self.cursor.borrow() {
                 let (rows, cols) = cursor.pos;
 
-                let x = cols as f64 * metrics.charwidth();
+                let lno = rows as usize;
+                let layout = pango::Layout::new(&pctx);
+                layout.set_font_description(Some(&font_desc));
+                layout.set_text(&texts[lno]);
+                layout.set_attributes(attrtable.get(lno));
+
                 let y = rows as f64 * (metrics.linespace() + metrics.lineheight());
-                let (cursor_width, cursor_height) = cursor.size(rect.width(), rect.height());
+                let x = cols as f64 * metrics.charwidth();
+                let (found, index, trailing) = layout.xy_to_index(x.ceil() as i32, 0);
+                println!("found {} is trailing {}", found, trailing);
+                let pos = layout.index_to_pos(index);
+
+                let (cursor_width, cursor_height) =
+                    cursor.size(pos.width() as f32, pos.height() as f32);
                 let guard = self.hldefs.get().unwrap().read().unwrap();
                 let default_colors = guard.defaults().unwrap();
                 let color = cursor.foreground(default_colors);

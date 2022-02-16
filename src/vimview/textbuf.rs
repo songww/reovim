@@ -456,31 +456,31 @@ impl TextBuf {
                     let mut attr = pango::AttrInt::new_style(pango::Style::Italic);
                     attr.set_start_index(start_index as _);
                     attr.set_end_index(end_index as _);
-                    attrs.change(attr);
+                    attrs.insert(attr);
                 }
                 if hldef.bold {
                     let mut attr = pango::AttrInt::new_weight(pango::Weight::Semibold);
                     attr.set_start_index(start_index as _);
                     attr.set_end_index(end_index as _);
-                    attrs.change(attr);
+                    attrs.insert(attr);
                 }
                 if hldef.strikethrough {
                     let mut attr = pango::AttrInt::new_strikethrough(true);
                     attr.set_start_index(start_index as _);
                     attr.set_end_index(end_index as _);
-                    attrs.change(attr);
+                    attrs.insert(attr);
                 }
                 if hldef.underline {
                     let mut attr = pango::AttrInt::new_underline(pango::Underline::Single);
                     attr.set_start_index(start_index as _);
                     attr.set_end_index(end_index as _);
-                    attrs.change(attr);
+                    attrs.insert(attr);
                 }
                 if hldef.undercurl {
                     let mut attr = pango::AttrInt::new_underline(pango::Underline::Error);
                     attr.set_start_index(start_index as _);
                     attr.set_end_index(end_index as _);
-                    attrs.change(attr);
+                    attrs.insert(attr);
                 }
                 // alpha color
                 // blend is 0 - 100. Could be used by UIs to support
@@ -506,7 +506,7 @@ impl TextBuf {
                     );
                     attr.set_start_index(start_index as _);
                     attr.set_end_index(end_index as _);
-                    attrs.change(attr);
+                    attrs.insert(attr);
                 }
                 if let Some(bg) = background {
                     // log::info!(
@@ -522,7 +522,7 @@ impl TextBuf {
                     );
                     attr.set_start_index(start_index as _);
                     attr.set_end_index(end_index as _);
-                    attrs.change(attr);
+                    attrs.insert(attr);
                 }
                 if let Some(special) = hldef.colors.special.or(default_colors.special) {
                     let mut attr = pango::AttrColor::new_underline_color(
@@ -532,7 +532,7 @@ impl TextBuf {
                     );
                     attr.set_start_index(start_index as _);
                     attr.set_end_index(end_index as _);
-                    attrs.change(attr);
+                    attrs.insert(attr);
                 }
             }
         }
