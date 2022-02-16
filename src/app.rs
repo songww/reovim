@@ -4,8 +4,8 @@ use std::sync::{atomic, RwLock};
 
 use glib::ObjectExt;
 use gtk::prelude::{
-    BoxExt, DrawingAreaExt, DrawingAreaExtManual, EventControllerExt, GtkWindowExt,
-    IMContextExtManual, OrientableExt, WidgetExt,
+    BoxExt, DrawingAreaExt, DrawingAreaExtManual, EventControllerExt, GtkWindowExt, IMContextExt,
+    IMContextExtManual, IMMulticontextExt, OrientableExt, WidgetExt,
 };
 use once_cell::sync::OnceCell;
 use pango::FontDescription;
@@ -179,7 +179,7 @@ impl AppModel {
         let lineheight = layout.line(0).unwrap().height();
         let mut font_metrics = self.font_metrics.get();
         let lineheight = lineheight as f64 / pango::SCALE as f64;
-        let charwidth = metrics.approximate_digit_width() as f64 / pango::SCALE as f64;
+        let charwidth = metrics.approximate_char_width() as f64 / pango::SCALE as f64;
         if font_metrics.lineheight == lineheight && font_metrics.charwidth == charwidth {
             return;
         }
@@ -652,6 +652,12 @@ impl Widgets<AppModel, ()> for AppWidgets {
                     set_child: da = Some(&gtk::DrawingArea) {
                         set_hexpand: true,
                         set_vexpand: true,
+                        set_focusable: true,
+                        set_sensitive: true,
+                        // set_can_focus: true,
+                        // set_can_target: true,
+                        // set_focus_on_click: true,
+                        set_overflow: gtk::Overflow::Hidden,
                         connect_resize[sender = sender.clone(), metrics = model.font_metrics.clone()] => move |da, width, height| {
                             log::info!("da resizing width: {}, height: {}", width, height);
                             let metrics = metrics.get();
@@ -695,6 +701,8 @@ impl Widgets<AppModel, ()> for AppWidgets {
                     },
                 }
             },
+            set_focus_widget: Some(&overlay),
+            set_default_widget: Some(&overlay),
             connect_close_request[sender = sender.clone()] => move |_| {
                 sender.send(AppMessage::UiCommand(UiCommand::Quit)).ok();
                 gtk::Inhibit(false)
@@ -752,40 +760,51 @@ impl Widgets<AppModel, ()> for AppWidgets {
         overlay.add_controller(&listener);
 
         let listener = gtk::EventControllerFocus::builder()
-            .name("focas-listener")
+            .name("focus-listener")
             .build();
         listener.connect_enter(glib::clone!(@strong sender  => move |_| {
+            log::error!("FocusGained");
             sender.send(UiCommand::FocusGained.into()).unwrap();
         }));
         listener.connect_leave(glib::clone!(@strong sender  => move |_| {
+            log::error!("FocusLost");
             sender.send(UiCommand::FocusLost.into()).unwrap();
         }));
         overlay.add_controller(&listener);
 
+        let im_context = gtk::IMMulticontext::new();
+        im_context.set_use_preedit(false);
+        im_context.set_client_widget(Some(&overlay));
+        im_context.set_input_purpose(gtk::InputPurpose::Terminal);
+        im_context.connect_commit(glib::clone!(@strong sender => move |ctx, text| {
+            // ctx
+            sender
+                .send(UiCommand::Keyboard(text.into()).into())
+                .unwrap();
+            log::error!("commit '{}' from ctx {}", text, ctx.context_id());
+        }));
         let controller = gtk::EventControllerKey::builder()
             .name("keyboard-listener")
             .build();
-        controller.connect_key_pressed(
-            glib::clone!(@strong sender => move |c, keyval, _keycode, modifier| {
-                log::info!("keyboard pressed");
-                let event = c.current_event().unwrap();
-                if c.im_context().filter_keypress(&event) {
-                    return gtk::Inhibit(true)
-                }
-                if let Some(keyboard) = (&keyval, &modifier).to_input() {
-                    sender.send(UiCommand::Keyboard(keyboard).into()).unwrap();
-                    gtk::Inhibit(true)
-                } else {
-                    gtk::Inhibit(false)
-                }
-            }),
-        );
-        controller.connect_key_released(|_, keyval, _, modifier| {
-            log::info!(
-                "keyboard released, {}",
-                (&keyval, &modifier).to_input().unwrap()
-            );
-        });
+        controller.set_im_context(&im_context);
+        // controller.connect_key_pressed(
+        //     glib::clone!(@strong sender => move |c, keyval, _keycode, modifier| {
+        //         log::error!("keyboard pressed ---------------> ");
+        //         let event = c.current_event().unwrap();
+        //         if !c.im_context().filter_keypress(&event) {
+        //             return gtk::Inhibit(true)
+        //         }
+        //         let keys = (keyval, modifier);
+        //         let keyboard = keys.to_input();
+        //         sender.send(UiCommand::Keyboard(keyboard.into_owned()).into()).unwrap();
+        //         gtk::Inhibit(true)
+        //     }),
+        // );
+        // controller.connect_key_released(|_, keyval, _, modifier| {
+        //     let keys = (keyval, modifier);
+        //     let keys = keys.to_input();
+        //     log::error!("keyboard released, {}", &keys);
+        // });
         overlay.add_controller(&controller);
     }
 

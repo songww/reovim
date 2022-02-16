@@ -12,6 +12,7 @@ use relm4::*;
 use crate::app;
 use crate::bridge::{MouseAction, MouseButton, UiCommand};
 use crate::cursor::Cursor;
+use crate::keys::ToInput;
 use crate::pos::Position;
 use crate::rect::Rectangle;
 
@@ -218,7 +219,7 @@ impl factory::FactoryPrototype for VimGrid {
                 log::info!("grid {} mouse pressed {} times at {}x{} -> {}x{}", grid, n_press, x, y, cols, rows);
                 let modifier = c.current_event_state().to_string();
                 log::info!("grid {} click button {} current_button {} modifier {}", grid, c.button(), c.current_button(), modifier);
-                let btn = match c.current_button() {
+                let _btn = match c.current_button() {
                     1 => MouseButton::Left,
                     2 => MouseButton::Middle,
                     3 => MouseButton::Right,
