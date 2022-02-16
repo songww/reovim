@@ -144,7 +144,7 @@ impl UiCommand {
                 nvim.input_mouse(
                     &button,
                     &action,
-                    &modifier.to_input().into_owned(),
+                    &modifier.to_input().unwrap().into_owned(),
                     grid_id as i64,
                     grid_y as i64,
                     grid_x as i64,

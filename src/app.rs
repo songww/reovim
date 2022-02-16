@@ -126,7 +126,7 @@ impl AppModel {
             show_tab_line: None,
 
             font_metrics: Rc::new(FontMetrics::new().into()),
-            font_description: Rc::new(RefCell::new(FontDescription::from_string("monospace 17"))),
+            font_description: Rc::new(RefCell::new(FontDescription::from_string("monospace 11"))),
             font_changed: Rc::new(false.into()),
 
             mode: EditorMode::Normal,
@@ -153,7 +153,7 @@ impl AppModel {
         }
     }
 
-    pub fn compute(&self) {
+    pub fn recompute(&self) {
         const SINGLE_WIDTH_CHARS: &'static str = concat!(
             "! \" # $ % & ' ( ) * + , - . / ",
             "0 1 2 3 4 5 6 7 8 9 ",
@@ -179,7 +179,7 @@ impl AppModel {
         let lineheight = layout.line(0).unwrap().height();
         let mut font_metrics = self.font_metrics.get();
         let lineheight = lineheight as f64 / pango::SCALE as f64;
-        let charwidth = metrics.approximate_char_width() as f64 / pango::SCALE as f64;
+        let charwidth = metrics.approximate_digit_width() as f64 / pango::SCALE as f64;
         if font_metrics.lineheight == lineheight && font_metrics.charwidth == charwidth {
             return;
         }
@@ -243,7 +243,7 @@ impl AppUpdate for AppModel {
                                 self.guifont.replace(guifont);
                                 self.font_description.replace(desc);
 
-                                self.compute();
+                                self.recompute();
 
                                 self.font_changed.store(true, atomic::Ordering::Relaxed);
                             }
@@ -612,10 +612,10 @@ impl AppUpdate for AppModel {
                         cursor.change_mode(cursor_mode, &style);
                     }
                     RedrawEvent::BusyStart => {
-                        log::debug!("Igonored BusyStart.");
+                        log::debug!("Ignored BusyStart.");
                     }
                     RedrawEvent::BusyStop => {
-                        log::debug!("Igonored BusyStop.");
+                        log::debug!("Ignored BusyStop.");
                     }
                     _ => {
                         log::error!("Unhandled RedrawEvent {:?}", event);
@@ -645,6 +645,11 @@ impl Widgets<AppModel, ()> for AppWidgets {
                 set_hexpand: true,
                 set_vexpand: true,
                 // set_margin_all: 5,
+                set_focusable: true,
+                set_sensitive: true,
+                set_can_focus: true,
+                set_can_target: false,
+                set_focus_on_click: false,
 
                 // set_child: Add tabline
 
@@ -654,9 +659,9 @@ impl Widgets<AppModel, ()> for AppWidgets {
                         set_vexpand: true,
                         set_focusable: true,
                         set_sensitive: true,
-                        // set_can_focus: true,
-                        // set_can_target: true,
-                        // set_focus_on_click: true,
+                        set_can_focus: true,
+                        set_can_target: false,
+                        set_focus_on_click: false,
                         set_overflow: gtk::Overflow::Hidden,
                         connect_resize[sender = sender.clone(), metrics = model.font_metrics.clone()] => move |da, width, height| {
                             log::info!("da resizing width: {}, height: {}", width, height);
@@ -687,17 +692,42 @@ impl Widgets<AppModel, ()> for AppWidgets {
                             }
                         }
                     },
-                    add_overlay: windows_container = &gtk::Fixed {
-                        set_widget_name: "windows-container",
+                    add_overlay: grids_container = &gtk::Fixed {
+                        set_widget_name: "grids-container",
+                        set_focusable: false,
+                        set_sensitive: false,
+                        set_can_focus: false,
+                        set_can_target: false,
+                        set_focus_on_click: false,
                         factory!(model.vgrids),
                     },
-                    add_overlay: windows_float_container = &gtk::Fixed {
-                        set_widget_name: "float-windows-container",
+                    add_overlay: float_win_container = &gtk::Fixed {
+                        set_widget_name: "float-win-container",
                         set_visible: false,
+                        set_focusable: false,
+                        set_sensitive: false,
+                        set_can_focus: false,
+                        set_can_target: false,
+                        set_focus_on_click: false,
                     },
-                    add_overlay: message_windows_container = &gtk::Fixed {
-                        set_widget_name: "message-windows-container",
+                    add_overlay: cursor_layer = &gtk::DrawingArea {
+                        set_widget_name: "vimview-cursor-layer",
+                        set_hexpand: true,
+                        set_vexpand: true,
+                        set_focusable: false,
+                        set_sensitive: false,
+                        set_can_focus: false,
+                        set_can_target: false,
+                        set_focus_on_click: false,
+                    },
+                    add_overlay: message_win_container = &gtk::Fixed {
+                        set_widget_name: "message-win-container",
                         set_visible: false,
+                        set_focusable: false,
+                        set_sensitive: false,
+                        set_can_focus: false,
+                        set_can_target: false,
+                        set_focus_on_click: false,
                     },
                 }
             },
@@ -712,7 +742,19 @@ impl Widgets<AppModel, ()> for AppWidgets {
 
     fn post_init() {
         model.pctx.set(vbox.pango_context().into()).ok();
-        model.compute();
+        model.recompute();
+
+        let im_context = gtk::IMMulticontext::new();
+        im_context.set_use_preedit(true);
+        // im_context.set_client_widget(Some(&overlay));
+        im_context.set_input_purpose(gtk::InputPurpose::Terminal);
+        im_context.set_cursor_location(&gdk::Rectangle::new(0, 0, 5, 10));
+        im_context.connect_commit(glib::clone!(@strong sender => move |ctx, text| {
+            log::error!("commit '{}' from ctx {}", text, ctx.context_id());
+            sender
+                .send(UiCommand::Keyboard(text.replace("<", "<lt>").into()).into())
+                .unwrap();
+        }));
 
         let listener = gtk::EventControllerScroll::builder()
             .flags(gtk::EventControllerScrollFlags::all())
@@ -759,53 +801,58 @@ impl Widgets<AppModel, ()> for AppWidgets {
         });
         overlay.add_controller(&listener);
 
-        let listener = gtk::EventControllerFocus::builder()
-            .name("focus-listener")
+        let focus_controller = gtk::EventControllerFocus::builder()
+            .name("vimview-focus-controller")
             .build();
-        listener.connect_enter(glib::clone!(@strong sender  => move |_| {
-            log::error!("FocusGained");
-            sender.send(UiCommand::FocusGained.into()).unwrap();
-        }));
-        listener.connect_leave(glib::clone!(@strong sender  => move |_| {
-            log::error!("FocusLost");
-            sender.send(UiCommand::FocusLost.into()).unwrap();
-        }));
-        overlay.add_controller(&listener);
+        focus_controller.connect_enter(
+            glib::clone!(@strong sender, @strong im_context => move |_| {
+                log::error!("FocusGained");
+                im_context.focus_in();
+                sender.send(UiCommand::FocusGained.into()).unwrap();
+            }),
+        );
+        focus_controller.connect_leave(
+            glib::clone!(@strong sender, @strong im_context  => move |_| {
+                log::error!("FocusLost");
+                im_context.focus_out();
+                sender.send(UiCommand::FocusLost.into()).unwrap();
+            }),
+        );
+        overlay.add_controller(&focus_controller);
 
-        let im_context = gtk::IMMulticontext::new();
-        im_context.set_use_preedit(false);
-        im_context.set_client_widget(Some(&overlay));
-        im_context.set_input_purpose(gtk::InputPurpose::Terminal);
-        im_context.connect_commit(glib::clone!(@strong sender => move |ctx, text| {
-            // ctx
-            sender
-                .send(UiCommand::Keyboard(text.into()).into())
-                .unwrap();
-            log::error!("commit '{}' from ctx {}", text, ctx.context_id());
-        }));
-        let controller = gtk::EventControllerKey::builder()
-            .name("keyboard-listener")
+        let key_controller = gtk::EventControllerKey::builder()
+            .name("vimview-key-controller")
             .build();
-        controller.set_im_context(&im_context);
-        // controller.connect_key_pressed(
-        //     glib::clone!(@strong sender => move |c, keyval, _keycode, modifier| {
-        //         log::error!("keyboard pressed ---------------> ");
-        //         let event = c.current_event().unwrap();
-        //         if !c.im_context().filter_keypress(&event) {
-        //             return gtk::Inhibit(true)
-        //         }
-        //         let keys = (keyval, modifier);
-        //         let keyboard = keys.to_input();
-        //         sender.send(UiCommand::Keyboard(keyboard.into_owned()).into()).unwrap();
-        //         gtk::Inhibit(true)
-        //     }),
-        // );
+        key_controller.set_im_context(&im_context);
+        // key_controller.set_propagation_phase(gtk::PropagationPhase::Target);
+        key_controller.connect_im_update(|c| c.im_context().reset());
+        key_controller.connect_key_pressed(
+            glib::clone!(@strong sender => move |c, keyval, _keycode, modifier| {
+                log::error!("keyboard pressed ---------------> ");
+                let event = c.current_event().unwrap();
+                // c.im_context().filter_key(true, &event.surface().unwrap(),&event.device().unwrap(), event.time(), keycode, modifier, c.group() as _);
+
+                if c.im_context().filter_keypress(&event) {
+                    log::error!("Ignored by imcontext");
+                    return gtk::Inhibit(true)
+                }
+                let keys = (keyval, modifier);
+                if let Some(keyboard) = keys.to_input() {
+                    log::error!("Accept input '{}'", &keyboard);
+                    sender.send(UiCommand::Keyboard(keyboard.into_owned()).into()).unwrap();
+                    gtk::Inhibit(true)
+                } else {
+                    log::error!("keyboard pressed unsupported key: {:?}", keyval.name());
+                    gtk::Inhibit(false)
+                }
+            }),
+        );
         // controller.connect_key_released(|_, keyval, _, modifier| {
         //     let keys = (keyval, modifier);
         //     let keys = keys.to_input();
         //     log::error!("keyboard released, {}", &keys);
         // });
-        overlay.add_controller(&controller);
+        overlay.add_controller(&key_controller);
     }
 
     fn pre_view() {
@@ -834,8 +881,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
             let metrics = metrics.get();
             let rows = self.da.height() as f64 / (metrics.lineheight + metrics.linespace); //  + metrics.linespace
             let cols = self.da.width() as f64 / metrics.charwidth;
-            // FIXME: WTF
-            log::error!(
+            log::debug!(
                 "trying to resize to {}x{} original {}x{} {:?}",
                 rows,
                 cols,

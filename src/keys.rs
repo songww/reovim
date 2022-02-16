@@ -13,7 +13,7 @@ impl From<(gdk::keys::Key, gdk::ModifierType)> for KeyEvent {
 use std::borrow::Cow;
 
 pub trait ToInput {
-    fn to_input(&self) -> Cow<'_, str>;
+    fn to_input(&self) -> Option<Cow<'_, str>>;
 }
 
 fn map_keyname(keyname: String) -> Cow<'static, str> {
@@ -78,7 +78,7 @@ fn map_keyname(keyname: String) -> Cow<'static, str> {
 }
 
 impl ToInput for gdk::ModifierType {
-    fn to_input(&self) -> Cow<'_, str> {
+    fn to_input(&self) -> Option<Cow<'_, str>> {
         let mut input = String::with_capacity(8);
 
         if self.contains(gdk::ModifierType::SHIFT_MASK) {
@@ -94,17 +94,17 @@ impl ToInput for gdk::ModifierType {
             input.push_str("M-");
         }
 
-        format!("{}", input).into()
+        Some(format!("{}", input).into())
     }
 }
 
 impl ToInput for (gdk::Key, gdk::ModifierType) {
-    fn to_input(&self) -> Cow<'_, str> {
-        let mut input = self.1.to_input().into_owned();
+    fn to_input(&self) -> Option<Cow<'_, str>> {
+        let mut input = self.1.to_input()?.into_owned();
 
         if self.1.is_empty() {
-            input.push(self.0.to_unicode().unwrap());
-            return input.into();
+            input.push(self.0.to_unicode()?);
+            return Some(input.into());
         }
 
         let keyname = self.0.name().unwrap();
@@ -115,6 +115,6 @@ impl ToInput for (gdk::Key, gdk::ModifierType) {
             input.push(self.0.to_unicode().unwrap());
         }
 
-        format!("<{}>", input).into()
+        Some(format!("<{}>", input).into())
     }
 }
