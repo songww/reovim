@@ -12,7 +12,8 @@ use pango::FontDescription;
 use relm4::{send, AppUpdate, Model, RelmApp, Sender, WidgetPlus, Widgets};
 use rustc_hash::FxHashMap;
 
-use crate::cursor::Cursor;
+use crate::bridge::EditorMode;
+use crate::cursor::{Cursor, CursorMode};
 use crate::keys::{self, ToInput};
 use crate::vimview::{self, VimGrid};
 use crate::{
@@ -86,8 +87,12 @@ pub struct AppModel {
     pub font_description: Rc<RefCell<pango::FontDescription>>,
     pub font_changed: Rc<atomic::AtomicBool>,
 
+    pub mode: EditorMode,
+
     pub cursor: Cell<Option<Cursor>>,
     pub cursor_at: Option<u64>,
+    pub cursor_mode: usize,
+    pub cursor_modes: Vec<CursorMode>,
 
     pub pctx: OnceCell<Rc<pango::Context>>,
 
@@ -124,8 +129,12 @@ impl AppModel {
             font_description: Rc::new(RefCell::new(FontDescription::from_string("monospace 17"))),
             font_changed: Rc::new(false.into()),
 
+            mode: EditorMode::Normal,
+
             cursor: Cell::new(Some(Cursor::new())),
             cursor_at: None,
+            cursor_mode: 0,
+            cursor_modes: Vec::new(),
 
             pctx: OnceCell::new(),
 
@@ -577,6 +586,36 @@ impl AppUpdate for AppModel {
                         self.vgrids
                             .get_mut(grid)
                             .map(|vgrid| vgrid.cursor_mut().set_pos(row, column));
+                    }
+                    RedrawEvent::ModeInfoSet { cursor_modes } => {
+                        self.cursor_modes = cursor_modes;
+
+                        let mode = &self.cursor_modes[self.cursor_mode];
+                        let style = self.hldefs.read().unwrap();
+                        let cursor = if let Some(cursor_at) = self.cursor_at {
+                            self.vgrids.get_mut(cursor_at).unwrap().cursor_mut()
+                        } else {
+                            self.cursor.get_mut().as_mut().unwrap()
+                        };
+                        cursor.change_mode(mode, &style);
+                    }
+                    RedrawEvent::ModeChange { mode, mode_index } => {
+                        self.mode = mode;
+                        self.cursor_mode = mode_index as _;
+                        let cursor_mode = &self.cursor_modes[self.cursor_mode];
+                        let style = self.hldefs.read().unwrap();
+                        let cursor = if let Some(cursor_at) = self.cursor_at {
+                            self.vgrids.get_mut(cursor_at).unwrap().cursor_mut()
+                        } else {
+                            self.cursor.get_mut().as_mut().unwrap()
+                        };
+                        cursor.change_mode(cursor_mode, &style);
+                    }
+                    RedrawEvent::BusyStart => {
+                        log::debug!("Igonored BusyStart.");
+                    }
+                    RedrawEvent::BusyStop => {
+                        log::debug!("Igonored BusyStop.");
                     }
                     _ => {
                         log::error!("Unhandled RedrawEvent {:?}", event);

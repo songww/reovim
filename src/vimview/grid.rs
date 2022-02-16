@@ -282,7 +282,7 @@ mod imp {
             const SCALE: f64 = pango::SCALE as f64;
             let pctx = widget.pango_context();
             let font_desc = pctx.font_description().unwrap();
-            log::info!(
+            log::debug!(
                 "grid {} height {} width {} cols {} rows {}",
                 self.id.get(),
                 self.height.get(),
@@ -363,7 +363,7 @@ mod imp {
                     let ncells = ncells.round();
                     let width_required = ncells * metrics.charwidth();
                     let spacing = width_required * SCALE - logical.width() as f64;
-                    println!(
+                    log::debug!(
                         "'{}' used {} cells logical width {} required width {} adding {} spaces",
                         s,
                         ncells,
@@ -371,6 +371,7 @@ mod imp {
                         width_required * SCALE,
                         spacing,
                     );
+                    // FIXME: Fix baseline for cjk font.
                     // if ink.height() >= logical.height() {
                     //     let height = logical.height() as f64; // * SCALE;
                     //     attrs.change({
@@ -424,29 +425,88 @@ mod imp {
                 pangocairo::update_context(&cr, &pctx);
                 pangocairo::show_layout(&cr, &layout);
             }
-            log::info!("text to render:\n{}", texts.join("\n"));
+            log::debug!("text to render:\n{}", texts.join("\n"));
 
             if let Some(ref cursor) = *self.cursor.borrow() {
                 let (rows, cols) = cursor.pos;
 
                 let lno = rows as usize;
-                let layout = pango::Layout::new(&pctx);
-                layout.set_font_description(Some(&font_desc));
-                layout.set_text(&texts[lno]);
-                layout.set_attributes(attrtable.get(lno));
 
+                let cell = self
+                    .textbuf()
+                    .cell(lno, cols as usize)
+                    .expect("cursor position dose not exists.");
+                let text = if cell.text.len() > 1 {
+                    cell.text.trim()
+                } else {
+                    &cell.text
+                };
+                let end_index = text.len() as u32;
                 let y = rows as f64 * (metrics.linespace() + metrics.lineheight());
                 let x = cols as f64 * metrics.charwidth();
-                let (found, index, trailing) = layout.xy_to_index(x.ceil() as i32, 0);
-                println!("found {} is trailing {}", found, trailing);
-                let pos = layout.index_to_pos(index);
 
+                let guard = self.hldefs.get().unwrap().read().unwrap();
+                let default_hldef = guard.get(0).unwrap();
+                let default_colors = guard.defaults().unwrap();
+                let mut hldef = default_hldef;
+                if let Some(ref id) = cell.hldef {
+                    let style = hldefs.get(*id);
+                    if let Some(style) = style {
+                        hldef = style;
+                    }
+                }
+                let attrs = pango::AttrList::new();
+                if hldef.italic {
+                    let mut attr = pango::AttrInt::new_style(pango::Style::Italic);
+                    attr.set_start_index(0);
+                    attr.set_end_index(end_index);
+                    attrs.insert(attr);
+                }
+                if hldef.bold {
+                    let mut attr = pango::AttrInt::new_weight(pango::Weight::Bold);
+                    attr.set_start_index(0);
+                    attr.set_end_index(end_index);
+                    attrs.insert(attr);
+                }
+                const U16MAX: f32 = u16::MAX as f32 + 1.;
+                // FIXME: bad color selection.
+                let background = cursor.foreground(default_colors);
+                let mut attr = pango::AttrColor::new_background(
+                    (background.red() * U16MAX) as _,
+                    (background.green() * U16MAX) as _,
+                    (background.blue() * U16MAX) as _,
+                );
+                attr.set_start_index(0);
+                attr.set_end_index(end_index);
+                attrs.insert(attr);
+                let mut attr =
+                    pango::AttrInt::new_background_alpha((background.alpha() * U16MAX) as u16);
+                attr.set_start_index(0);
+                attr.set_end_index(end_index);
+                attrs.insert(attr);
+                let foreground = cursor.background(default_colors);
+                let mut attr = pango::AttrColor::new_foreground(
+                    (foreground.red() * U16MAX) as _,
+                    (foreground.green() * U16MAX) as _,
+                    (foreground.blue() * U16MAX) as _,
+                );
+                attr.set_start_index(0);
+                attr.set_end_index(end_index);
+                attrs.insert(attr);
+                let mut attr =
+                    pango::AttrInt::new_foreground_alpha((foreground.alpha() * U16MAX) as u16);
+                attr.set_start_index(0);
+                attr.set_end_index(end_index);
+                attrs.insert(attr);
+
+                let cursor_layout = pango::Layout::new(&pctx);
+                // FIXME: Fix letter-spacing
+                cursor_layout.set_font_description(Some(&font_desc));
+                cursor_layout.set_text(&text);
+                cursor_layout.set_attributes(Some(&attrs));
+                let pos = cursor_layout.index_to_pos(0);
                 let (cursor_width, cursor_height) =
                     cursor.size(pos.width() as f32, pos.height() as f32);
-                let guard = self.hldefs.get().unwrap().read().unwrap();
-                let default_colors = guard.defaults().unwrap();
-                let color = cursor.foreground(default_colors);
-                // let text = self.textbuf().at(rows, cols);
                 let bounds = Rect::new(
                     (x) as f32,
                     (y) as f32,
@@ -454,11 +514,15 @@ mod imp {
                     (cursor_height) / SCALE as f32,
                 );
                 log::error!(
-                    "Drawing cursor color {} bounds {:?}",
-                    color.to_str(),
+                    "Drawing cursor<'{}'> color {} bounds {:?}",
+                    &text,
+                    background.to_str(),
                     bounds
                 );
-                snapshot.append_color(&color, &bounds);
+
+                cr.move_to(x, y);
+                pangocairo::update_layout(&cr, &cursor_layout);
+                pangocairo::show_layout(&cr, &cursor_layout)
             }
         }
 

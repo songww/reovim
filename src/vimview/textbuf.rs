@@ -107,8 +107,16 @@ mod imp {
         pub(super) fn down(&self, rows: usize) {
             self.inner.write().unwrap().down(rows);
         }
+
         pub(super) fn set_cells(&self, row: usize, col: usize, cells: &[super::TextCell]) {
             self.inner.write().unwrap().set_cells(row, col, cells);
+        }
+
+        pub fn cell(&self, row: usize, col: usize) -> Option<super::TextCell> {
+            self.lines()
+                .get(row)
+                .and_then(|line| line.get(col))
+                .cloned()
         }
 
         pub(super) fn clear(&self) {
@@ -224,6 +232,10 @@ impl TextBuf {
 
     pub fn set_cells(&self, row: usize, col: usize, cells: &[TextCell]) {
         self.imp().set_cells(row, col, cells);
+    }
+
+    pub fn cell(&self, row: usize, col: usize) -> Option<TextCell> {
+        self.imp().cell(row, col)
     }
 
     pub fn up(&self, rows: usize) {

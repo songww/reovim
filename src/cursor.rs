@@ -5,6 +5,7 @@ use std::sync::Arc;
 use crate::color::Color;
 use crate::rect::Rectangle;
 use crate::style::{Colors, Style};
+use crate::vimview::HighlightDefinitions;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum CursorShape {
@@ -43,7 +44,7 @@ pub struct Cursor {
     pub blinkwait: Option<u64>,
     pub blinkon: Option<u64>,
     pub blinkoff: Option<u64>,
-    pub style: Option<Arc<Style>>,
+    pub style: Option<Style>,
     pub enabled: bool,
     pub double_width: bool,
     pub character: String,
@@ -77,10 +78,13 @@ impl Cursor {
 
     pub fn foreground(&self, default_colors: &Colors) -> Color {
         if let Some(style) = &self.style {
-            style
+            let alpha = (100 - style.blend) as f32 / 100.;
+            let mut color = style
                 .colors
                 .foreground
-                .unwrap_or_else(|| default_colors.background.unwrap())
+                .unwrap_or_else(|| default_colors.background.unwrap());
+            color.set_alpha(alpha);
+            color
         } else {
             default_colors.background.unwrap()
         }
@@ -88,10 +92,13 @@ impl Cursor {
 
     pub fn background(&self, default_colors: &Colors) -> Color {
         if let Some(style) = &self.style {
-            style
+            let alpha = (100 - style.blend) as f32 / 100.;
+            let mut color = style
                 .colors
                 .background
-                .unwrap_or_else(|| default_colors.foreground.unwrap())
+                .unwrap_or_else(|| default_colors.foreground.unwrap());
+            color.set_alpha(alpha);
+            color
         } else {
             default_colors.foreground.unwrap()
         }
@@ -101,7 +108,7 @@ impl Cursor {
         self.pos = (row, col);
     }
 
-    pub fn change_mode(&mut self, cursor_mode: &CursorMode, styles: &FxHashMap<u64, Arc<Style>>) {
+    pub fn change_mode(&mut self, cursor_mode: &CursorMode, styles: &HighlightDefinitions) {
         let CursorMode {
             shape,
             style,
@@ -116,7 +123,7 @@ impl Cursor {
         }
 
         if let Some(style) = style {
-            self.style = styles.get(style).cloned();
+            self.style = styles.get(*style).cloned();
         }
 
         self.cell_percentage = *cell_percentage;
