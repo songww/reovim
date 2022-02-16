@@ -31,7 +31,6 @@ pangocairo = "0.15"
 graphene-rs = "0.15"
 glib = { version = "0.15", features = [ "v2_70" ] }
 pango = { version = "0.15", features = [ "v1_50" ] }
-# pango = { features = [ "v1_50" ], path = "/home/songww/workspace/github.com/gtk-rs-core/pango" }
 gdk = { version = "0.4", package = "gdk4", features = [ "v4_6" ] }
 gtk = { version = "0.4", package = "gtk4", features = [ "v4_6" ] }
 cairo = { version = "0.15", package = "cairo-rs", features = [ "v1_16", "png" ] }

@@ -745,12 +745,21 @@ impl Widgets<AppModel, ()> for AppWidgets {
         model.recompute();
 
         let im_context = gtk::IMMulticontext::new();
-        im_context.set_use_preedit(true);
-        // im_context.set_client_widget(Some(&overlay));
+        im_context.set_use_preedit(false);
+        im_context.set_client_widget(Some(&overlay));
         im_context.set_input_purpose(gtk::InputPurpose::Terminal);
         im_context.set_cursor_location(&gdk::Rectangle::new(0, 0, 5, 10));
+        im_context.connect_preedit_start(|_| {
+            log::debug!("preedit started.");
+        });
+        im_context.connect_preedit_end(|im_context| {
+            log::debug!("preedit done, '{}'", im_context.preedit_string().0);
+        });
+        im_context.connect_preedit_changed(|im_context| {
+            log::debug!("preedit changed, '{}'", im_context.preedit_string().0);
+        });
         im_context.connect_commit(glib::clone!(@strong sender => move |ctx, text| {
-            log::error!("commit '{}' from ctx {}", text, ctx.context_id());
+            log::debug!("im-context({}) commit '{}'", ctx.context_id(), text);
             sender
                 .send(UiCommand::Keyboard(text.replace("<", "<lt>").into()).into())
                 .unwrap();
@@ -825,7 +834,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
             .build();
         key_controller.set_im_context(&im_context);
         // key_controller.set_propagation_phase(gtk::PropagationPhase::Target);
-        key_controller.connect_im_update(|c| c.im_context().reset());
+        // key_controller.connect_im_update(|c| c.im_context().reset());
         key_controller.connect_key_pressed(
             glib::clone!(@strong sender => move |c, keyval, _keycode, modifier| {
                 log::error!("keyboard pressed ---------------> ");
