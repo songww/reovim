@@ -1,7 +1,3 @@
-
-
-
-
 use crate::color::Color;
 
 use crate::style::{Colors, Style};
@@ -78,12 +74,12 @@ impl Cursor {
 
     pub fn foreground(&self, default_colors: &Colors) -> Color {
         if let Some(style) = &self.style {
-            let alpha = (100 - style.blend) as f32 / 100.;
+            // let alpha = (100 - style.blend) as f32 / 100.;
             let mut color = style
                 .colors
                 .foreground
                 .unwrap_or_else(|| default_colors.background.unwrap());
-            color.set_alpha(alpha);
+            // color.set_alpha(alpha);
             color
         } else {
             default_colors.background.unwrap()
@@ -92,12 +88,12 @@ impl Cursor {
 
     pub fn background(&self, default_colors: &Colors) -> Color {
         if let Some(style) = &self.style {
-            let alpha = (100 - style.blend) as f32 / 100.;
+            // let alpha = (100 - style.blend) as f32 / 100.;
             let mut color = style
                 .colors
                 .background
                 .unwrap_or_else(|| default_colors.foreground.unwrap());
-            color.set_alpha(alpha);
+            // color.set_alpha(alpha);
             color
         } else {
             default_colors.foreground.unwrap()

@@ -136,7 +136,8 @@ mod imp {
     impl WidgetImpl for VimGridView {
         fn snapshot(&self, widget: &Self::Type, snapshot: &gtk::Snapshot) {
             self.parent_snapshot(widget, snapshot);
-            let pctx = widget.pango_context();
+            let textbuf = self.textbuf();
+            let pctx = textbuf.pango_context();
 
             let (width, height) = self.size_required();
 
@@ -162,10 +163,19 @@ mod imp {
             let cr = snapshot.append_cairo(&rect);
 
             pangocairo::update_context(&cr, &pctx);
+            pangocairo::context_set_font_options(&pctx, {
+                cairo::FontOptions::new()
+                    .ok()
+                    .map(|mut options| {
+                        options.set_antialias(cairo::Antialias::Gray);
+                        options.set_hint_style(cairo::HintStyle::Default);
+                        options
+                    })
+                    .as_ref()
+            });
 
             let mut y = 0.;
 
-            let textbuf = self.textbuf();
             let cols = textbuf.cols();
             let rows = textbuf.rows();
             let mut text = String::with_capacity(cols);
@@ -192,6 +202,14 @@ mod imp {
                 let layout = pango::Layout::new(&pctx);
                 layout.set_text(&text);
                 layout.set_attributes(Some(&attrs));
+                let desc = pctx.font_description();
+                layout.set_font_description(desc.as_ref());
+                // log::info!(
+                //     "{} line {} baseline {} stretch",
+                //     self.id.get(),
+                //     lineno,
+                //     layout.baseline(),
+                // );
                 pangocairo::update_layout(&cr, &layout);
                 pangocairo::show_layout(&cr, &layout);
                 log::debug!("{}", text);
@@ -204,15 +222,19 @@ mod imp {
 
                 let lineno = rows as usize;
 
-                let cell = self
-                    .textbuf()
-                    .cell(lineno, cols as usize)
-                    .expect("cursor position dose not exists.");
-                let text = if cell.text.len() > 1 {
-                    cell.text.trim()
-                } else {
-                    &cell.text
+                let cell = match self.textbuf().cell(lineno, cols as usize) {
+                    Some(cell) => cell,
+                    None => {
+                        log::error!(
+                            "cursor pos {}x{} of grid {} dose not exists.",
+                            cols,
+                            lineno,
+                            self.id.get()
+                        );
+                        return;
+                    }
                 };
+                let text = &cell.text;
                 let y = rows as f64 * metrics.height();
                 let x = cols as f64 * metrics.width();
 
@@ -242,7 +264,7 @@ mod imp {
                 }
                 const U16MAX: f32 = u16::MAX as f32 + 1.;
                 // FIXME: bad color selection.
-                let background = cursor.foreground(default_colors);
+                let background = cursor.background(default_colors);
                 let mut attr = pango::AttrColor::new_background(
                     (background.red() * U16MAX) as _,
                     (background.green() * U16MAX) as _,
@@ -256,7 +278,7 @@ mod imp {
                 attr.set_start_index(0);
                 attr.set_end_index(end_index);
                 attrs.insert(attr);
-                let foreground = cursor.background(default_colors);
+                let foreground = cursor.foreground(default_colors);
                 let mut attr = pango::AttrColor::new_foreground(
                     (foreground.red() * U16MAX) as _,
                     (foreground.green() * U16MAX) as _,
@@ -285,7 +307,7 @@ mod imp {
                     (cursor_width) / PANGO_SCALE,
                     (cursor_height) / PANGO_SCALE,
                 );
-                log::debug!(
+                log::info!(
                     "Drawing cursor<'{}'> color {} bounds {:?}",
                     &text,
                     background.to_str(),

@@ -2,7 +2,6 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{atomic, RwLock};
 
-
 use gtk::prelude::{
     BoxExt, DrawingAreaExt, DrawingAreaExtManual, EventControllerExt, GtkWindowExt, IMContextExt,
     IMContextExtManual, IMMulticontextExt, OrientableExt, WidgetExt,
@@ -14,11 +13,12 @@ use rustc_hash::FxHashMap;
 
 use crate::bridge::{EditorMode, MessageKind, WindowAnchor};
 use crate::cursor::{Cursor, CursorMode};
-use crate::keys::{ToInput};
+use crate::keys::ToInput;
 use crate::vimview::{self, VimGrid};
 use crate::{
     bridge::{self, RedrawEvent, UiCommand},
-    metrics::Metrics, Opts,
+    metrics::Metrics,
+    Opts,
 };
 
 #[derive(Clone, Debug)]
@@ -157,7 +157,9 @@ impl AppModel {
             "a b c d e f g h i j k l m n o p q r s t u v w x y z ",
             "{ | } ~ ",
         );
-        let desc = self.font_description.borrow();
+        let desc = self.font_description.borrow_mut();
+        // desc.set_weight(pango::Weight::Light);
+        // desc.set_stretch(pango::Stretch::Condensed);
         log::error!(
             "----------------------> font desc {} {} {} {}",
             desc.family().unwrap(),
@@ -249,6 +251,7 @@ impl AppUpdate for AppModel {
                                 let desc = pango::FontDescription::from_string(
                                     &guifont.replace(":h", " "),
                                 );
+                                // desc.set_stretch(pango::Stretch::ExtraExpanded);
 
                                 self.gtksettings.get().map(|settings| {
                                     settings.set_gtk_font_name(Some(&desc.to_str()));
@@ -892,8 +895,8 @@ impl Widgets<AppModel, ()> for AppWidgets {
         let mut options = cairo::FontOptions::new().ok();
         options.as_mut().map(|options| {
             options.set_antialias(cairo::Antialias::Subpixel);
-            options.set_hint_style(cairo::HintStyle::Full);
-            options.set_hint_metrics(cairo::HintMetrics::On);
+            options.set_hint_style(cairo::HintStyle::Default);
+            // options.set_hint_metrics(cairo::HintMetrics::On);
         });
         main_window.set_font_options(options.as_ref());
 

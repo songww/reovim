@@ -1,21 +1,17 @@
-use std::cell::{Cell};
+use std::cell::Cell;
 use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 use std::sync::RwLock;
-
 
 use glib::subclass::prelude::*;
 
 use vector_map::VecMap;
 
-
-
-
 use super::highlights::HighlightDefinitions;
 
 mod imp {
     use std::cell::Cell;
-    
+
     use std::rc::Rc;
     use std::sync::{RwLock, RwLockReadGuard};
 
@@ -88,6 +84,14 @@ mod imp {
         fn set_cells(&mut self, row: usize, col: usize, cells: &[crate::bridge::GridLineCell]) {
             let nrows = self.rows;
             let ncols = self.cols;
+            if nrows <= row {
+                log::error!(
+                    "set cells dest line {} dose not exists, total {} lines.",
+                    row,
+                    nrows
+                );
+                return;
+            }
             let line = &self.cells[row];
             let pctx = self.pctx.as_ref().unwrap();
             let hldefs = self.hldefs.as_ref().unwrap().read().unwrap();
@@ -102,6 +106,7 @@ mod imp {
                     double_width,
                 } = cell;
                 for _ in 0..repeat.unwrap_or(1) {
+                    // FIXME: invalid start_index
                     let end_index = start_index + text.len();
                     let attrs = Vec::new();
                     let mut cell = super::TextCell {
@@ -112,22 +117,48 @@ mod imp {
                         start_index,
                         end_index,
                     };
-                    cell.reset_attrs(&pctx, &hldefs, &metrics);
+                    cell.reset_attrs(pctx, &hldefs, &metrics);
+                    log::info!(
+                        "Setting cell {}x{} start_index {} end_index {}",
+                        row,
+                        col + expands.len(),
+                        start_index,
+                        end_index
+                    );
                     expands.push(cell);
                     start_index = end_index;
                 }
             }
             let col_to = col + expands.len();
+            // line.iter()
+            //     .enumerate()
+            //     .skip(col)
+            //     .take(expands.len())
+            //     .for_each(|(idx, cell)| {
+            //         log::info!(
+            //             "old cell {} start_index {} end_index {}",
+            //             idx,
+            //             cell.start_index,
+            //             cell.end_index
+            //         )
+            //     });
             log::info!(
-                "textbuf {}x{} setting {} cells from {} to {}",
+                "textbuf {}x{} setting line {} with {} cells from {} to {}",
                 ncols,
                 nrows,
+                row,
                 expands.len(),
                 col,
                 col_to
             );
             let line = &mut self.cells[row];
             line[col..col_to].swap_with_slice(&mut expands);
+            line.iter_mut().fold(0, |start_index, cell| {
+                cell.start_index = start_index;
+                cell.end_index = start_index + cell.text.len();
+                cell.reset_attrs(pctx, &hldefs, &metrics);
+                cell.end_index
+            });
         }
 
         /// drop head of {} rows. leave tail as empty.
@@ -142,6 +173,10 @@ mod imp {
             let mut cells = _TextBuf::make(self.rows, self.cols);
             cells[rows..].swap_with_slice(&mut self.cells[..(self.rows - rows)]);
             self.cells = cells;
+        }
+
+        fn pango_context(&self) -> pango::Context {
+            self.pctx.clone().unwrap()
         }
     }
 
@@ -192,6 +227,10 @@ mod imp {
             self.inner.write().unwrap().set_pango_context(pctx);
         }
 
+        pub(super) fn pango_context(&self) -> pango::Context {
+            self.inner.write().unwrap().pango_context()
+        }
+
         pub fn cell(&self, row: usize, col: usize) -> Option<super::TextCell> {
             self.lines()
                 .get(row)
@@ -200,6 +239,7 @@ mod imp {
         }
 
         pub(super) fn reset_cache(&self) {
+            log::warn!("textbuf rebuild cache");
             self.inner.write().unwrap().reset_cache();
         }
 
@@ -328,6 +368,10 @@ impl TextBuf {
         self.imp().set_pango_context(pctx);
     }
 
+    pub fn pango_context(&self) -> pango::Context {
+        self.imp().pango_context()
+    }
+
     pub fn cell(&self, row: usize, col: usize) -> Option<TextCell> {
         self.imp().cell(row, col)
     }
@@ -344,6 +388,7 @@ impl TextBuf {
         self.imp().reset_cache();
     }
 
+    /*
     pub(super) fn layout(
         &self,
         lineheight: i32,
@@ -648,6 +693,7 @@ impl TextBuf {
         }
         (texts.into_boxed_slice(), attrtable)
     }
+    */
 }
 
 #[derive(Clone, Debug)]
@@ -790,20 +836,65 @@ impl TextCell {
             pango::itemize(&pctx, &self.text, 0, self.text.len() as i32, &attrs, None).remove(0);
         let mut glyphs = pango::GlyphString::new();
         pango::shape(&self.text, item.analysis(), &mut glyphs);
-        let (_, logi) = glyphs.extents(&item.analysis().font());
+        let (ink, logi) = glyphs.extents(&item.analysis().font());
+        let double_charwidth = metrics.charwidth() * 2. * PANGO_SCALE;
+        let double_cell_width = metrics.width() * 2. * PANGO_SCALE;
         let (charwidth, width) = if self.double_width {
-            (
-                metrics.charwidth() * 2. * PANGO_SCALE,
-                metrics.width() * 2. * PANGO_SCALE,
-            )
+            (double_charwidth, double_cell_width)
         } else {
             (
                 metrics.charwidth() * PANGO_SCALE,
                 metrics.width() * PANGO_SCALE,
             )
         };
-        if logi.width() != charwidth.round() as i32 {
-            let mut attr = pango::AttrInt::new_letter_spacing(logi.width() - width.round() as i32);
+        let logiwidth = logi.width() as f64;
+        let inkwidth = ink.width() as f64;
+        // let charwidth = metrics.charwidth() * PANGO_SCALE;
+        if !self.double_width
+            && inkwidth > charwidth
+            && logiwidth >= metrics.charwidth() * 1.3 * PANGO_SCALE
+        {
+            let factor = if (inkwidth - charwidth) > 1. {
+                charwidth / inkwidth
+            } else {
+                inkwidth / charwidth
+            } * 1.2;
+            let mut attr = pango::AttrFloat::new_scale(factor);
+            attr.set_start_index(start_index);
+            attr.set_end_index(end_index);
+            attrs.insert(attr);
+            log::info!(
+                "applying size scale {} for '{}' {}-{}",
+                factor,
+                &self.text,
+                self.start_index,
+                self.end_index,
+            );
+            // let mut attr = pango::AttrInt::new_letter_spacing(
+            //     (-metrics.charwidth() * PANGO_SCALE * 0.2).round() as i32,
+            // );
+            // attr.set_start_index(start_index);
+            // attr.set_end_index(end_index);
+            // attrs.insert(attr);
+        } else if (logiwidth - charwidth).abs() > 1. {
+            let letter_spacing = width.round() as i32 - logi.width();
+
+            log::info!(
+                "letter '{}' logical width {} use {} cells absolute width {} absolute logical {}",
+                &self.text,
+                logi.width(),
+                if self.double_width { 2 } else { 1 },
+                width,
+                charwidth as i32 - logi.width()
+            );
+            log::info!(
+                "applying letter spacing {} for '{}' {}-{}",
+                letter_spacing,
+                &self.text,
+                self.start_index,
+                self.end_index,
+            );
+            let mut attr = pango::AttrInt::new_letter_spacing(letter_spacing);
             attr.set_start_index(start_index);
             attr.set_end_index(end_index);
             attrs.insert(attr);
@@ -868,38 +959,5 @@ impl Into<Box<[TextCell]>> for TextLine {
 impl TextLine {
     fn into_inner(self) -> Box<[TextCell]> {
         self.0
-    }
-}
-
-pub struct AttrTable {
-    // table: FxHashMap<(usize, usize, usize), pango::AttrList>,
-    table: VecMap<usize, pango::AttrList>,
-}
-
-impl AttrTable {
-    pub fn new() -> Self {
-        AttrTable {
-            table: VecMap::default(),
-        }
-    }
-
-    /// lno: line number.
-    pub fn get(
-        &self,
-        lno: usize,
-        // start_index: usize,
-        // end_index: usize,
-    ) -> Option<&pango::AttrList> {
-        self.table.get(&lno)
-    }
-
-    pub fn insert(
-        &mut self,
-        lno: usize,
-        // start_index: usize,
-        // end_index: usize,
-        attrs: pango::AttrList,
-    ) {
-        self.table.insert(lno, attrs);
     }
 }
