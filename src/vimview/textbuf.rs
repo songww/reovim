@@ -1,41 +1,60 @@
-use std::cell::RefCell;
+use std::cell::{Cell};
 use std::ops::{Deref, DerefMut};
+use std::rc::Rc;
+use std::sync::RwLock;
 
-use gdk::prelude::FontExt;
+
 use glib::subclass::prelude::*;
-use rustc_hash::FxHashMap;
+
 use vector_map::VecMap;
 
-use crate::color::ColorExt;
+
+
 
 use super::highlights::HighlightDefinitions;
 
 mod imp {
-    use std::marker::PhantomData;
+    use std::cell::Cell;
+    
+    use std::rc::Rc;
     use std::sync::{RwLock, RwLockReadGuard};
 
     use glib::prelude::*;
     use glib::subclass::prelude::*;
 
-    #[derive(Debug)]
+    use crate::vimview::HighlightDefinitions;
+
+    #[derive(Derivative)]
+    #[derivative(Debug)]
     pub struct _TextBuf {
-        pub(super) rows: usize,
-        pub(super) cols: usize,
-        pub(super) cells: Box<[super::TextLine]>,
+        rows: usize,
+        cols: usize,
+        cells: Box<[super::TextLine]>,
+        metrics: Option<Rc<Cell<crate::metrics::Metrics>>>,
+
+        #[derivative(Debug = "ignore")]
+        hldefs: Option<Rc<RwLock<HighlightDefinitions>>>,
+
+        #[derivative(Debug = "ignore")]
+        pctx: Option<pango::Context>,
     }
 
     impl Default for _TextBuf {
         fn default() -> Self {
-            _TextBuf::new(0, 0)
+            _TextBuf::new(1, 1)
         }
     }
 
     impl _TextBuf {
         fn new(rows: usize, cols: usize) -> _TextBuf {
+            let cells = _TextBuf::make(rows, cols);
             _TextBuf {
                 rows,
                 cols,
-                cells: _TextBuf::make(rows, cols),
+                cells,
+                pctx: None,
+                hldefs: None,
+                metrics: None,
             }
         }
 
@@ -43,14 +62,59 @@ mod imp {
             self.cells = _TextBuf::make(self.rows, self.cols);
         }
 
-        fn set_cells(&mut self, row: usize, col: usize, cells: &[super::TextCell]) {
+        fn reset_cache(&mut self) {
+            let pctx = self.pctx.as_ref().unwrap();
+            let hldefs = self.hldefs.as_ref().unwrap().read().unwrap();
+            let metrics = self.metrics.as_ref().unwrap().get();
+            self.cells.iter_mut().for_each(|line| {
+                line.iter_mut().for_each(|cell| {
+                    cell.reset_attrs(pctx, &hldefs, &metrics);
+                });
+            });
+        }
+
+        pub fn set_hldefs(&mut self, hldefs: Rc<RwLock<HighlightDefinitions>>) {
+            self.hldefs.replace(hldefs);
+        }
+
+        pub fn set_metrics(&mut self, metrics: Rc<Cell<crate::metrics::Metrics>>) {
+            self.metrics.replace(metrics);
+        }
+
+        pub fn set_pango_context(&mut self, pctx: pango::Context) {
+            self.pctx.replace(pctx);
+        }
+
+        fn set_cells(&mut self, row: usize, col: usize, cells: &[crate::bridge::GridLineCell]) {
             let nrows = self.rows;
             let ncols = self.cols;
-            let row = &mut self.cells[row];
-            let mut expands = Vec::with_capacity(row.len());
+            let line = &self.cells[row];
+            let pctx = self.pctx.as_ref().unwrap();
+            let hldefs = self.hldefs.as_ref().unwrap().read().unwrap();
+            let metrics = self.metrics.as_ref().unwrap().get();
+            let mut expands = Vec::with_capacity(line.len());
+            let mut start_index = line.get(col).map(|cell| cell.start_index).unwrap_or(0);
             for cell in cells.iter() {
-                for _ in 0..cell.repeat.unwrap_or(1) {
-                    expands.push(cell.clone());
+                let crate::bridge::GridLineCell {
+                    text,
+                    hldef,
+                    repeat,
+                    double_width,
+                } = cell;
+                for _ in 0..repeat.unwrap_or(1) {
+                    let end_index = start_index + text.len();
+                    let attrs = Vec::new();
+                    let mut cell = super::TextCell {
+                        text: text.to_string(),
+                        hldef: hldef.clone(),
+                        double_width: *double_width,
+                        attrs,
+                        start_index,
+                        end_index,
+                    };
+                    cell.reset_attrs(&pctx, &hldefs, &metrics);
+                    expands.push(cell);
+                    start_index = end_index;
                 }
             }
             let col_to = col + expands.len();
@@ -62,8 +126,8 @@ mod imp {
                 col,
                 col_to
             );
-            // log::info!("cells: {:?}", &expands);
-            row[col..col_to].swap_with_slice(&mut expands); //
+            let line = &mut self.cells[row];
+            line[col..col_to].swap_with_slice(&mut expands);
         }
 
         /// drop head of {} rows. leave tail as empty.
@@ -101,15 +165,31 @@ mod imp {
 
     impl TextBuf {
         pub(super) fn up(&self, rows: usize) {
-            //
             self.inner.write().unwrap().up(rows);
         }
         pub(super) fn down(&self, rows: usize) {
             self.inner.write().unwrap().down(rows);
         }
 
-        pub(super) fn set_cells(&self, row: usize, col: usize, cells: &[super::TextCell]) {
+        pub(super) fn set_cells(
+            &self,
+            row: usize,
+            col: usize,
+            cells: &[crate::bridge::GridLineCell],
+        ) {
             self.inner.write().unwrap().set_cells(row, col, cells);
+        }
+
+        pub(super) fn set_hldefs(&self, hldefs: Rc<RwLock<HighlightDefinitions>>) {
+            self.inner.write().unwrap().set_hldefs(hldefs);
+        }
+
+        pub(super) fn set_metrics(&self, metrics: Rc<Cell<crate::metrics::Metrics>>) {
+            self.inner.write().unwrap().set_metrics(metrics);
+        }
+
+        pub(super) fn set_pango_context(&self, pctx: pango::Context) {
+            self.inner.write().unwrap().set_pango_context(pctx);
         }
 
         pub fn cell(&self, row: usize, col: usize) -> Option<super::TextCell> {
@@ -117,6 +197,10 @@ mod imp {
                 .get(row)
                 .and_then(|line| line.get(col))
                 .cloned()
+        }
+
+        pub(super) fn reset_cache(&self) {
+            self.inner.write().unwrap().reset_cache();
         }
 
         pub(super) fn clear(&self) {
@@ -139,7 +223,6 @@ mod imp {
         pub(super) fn lines(&self) -> Lines {
             Lines {
                 guard: self.inner.read().unwrap(),
-                // at: 0,
             }
         }
     }
@@ -169,7 +252,16 @@ mod imp {
                 .into_iter()
                 .map(|tl| {
                     let mut tl = tl.into_inner().into_vec();
+                    let mut start_index = tl.last().map(|last| last.start_index).unwrap_or(0);
+                    let old_cols = tl.len();
                     tl.resize(cols, super::TextCell::default());
+                    if cols > old_cols {
+                        tl.iter_mut().skip(old_cols).for_each(|cell| {
+                            cell.start_index = start_index;
+                            cell.end_index = start_index + 1;
+                            start_index += 1;
+                        });
+                    }
                     super::TextLine(tl.into_boxed_slice())
                 })
                 .collect();
@@ -190,15 +282,6 @@ mod imp {
             self.guard.cells.get(no)
         }
     }
-
-    // impl<'a> Iterator for Lines<'a> {
-    //     type Item = &'a super::TextLine;
-    //     fn next(&mut self) -> Option<Self::Item> {
-    //         let at = self.at;
-    //         self.at += 1;
-    //         self.guard.cells.get(at)
-    //     }
-    // }
 }
 
 glib::wrapper! {
@@ -230,8 +313,19 @@ impl TextBuf {
         self.imp().cols()
     }
 
-    pub fn set_cells(&self, row: usize, col: usize, cells: &[TextCell]) {
+    pub fn set_cells(&self, row: usize, col: usize, cells: &[crate::bridge::GridLineCell]) {
         self.imp().set_cells(row, col, cells);
+    }
+
+    pub fn set_hldefs(&self, hldefs: Rc<RwLock<HighlightDefinitions>>) {
+        self.imp().set_hldefs(hldefs);
+    }
+    pub fn set_metrics(&self, metrics: Rc<Cell<crate::metrics::Metrics>>) {
+        self.imp().set_metrics(metrics);
+    }
+
+    pub fn set_pango_context(&self, pctx: pango::Context) {
+        self.imp().set_pango_context(pctx);
     }
 
     pub fn cell(&self, row: usize, col: usize) -> Option<TextCell> {
@@ -244,6 +338,10 @@ impl TextBuf {
 
     pub fn down(&self, rows: usize) {
         self.imp().down(rows);
+    }
+
+    pub fn reset_cache(&self) {
+        self.imp().reset_cache();
     }
 
     pub(super) fn layout(
@@ -556,8 +654,10 @@ impl TextBuf {
 pub struct TextCell {
     pub text: String,
     pub hldef: Option<u64>,
-    pub repeat: Option<u64>,
     pub double_width: bool,
+    pub attrs: Vec<pango::Attribute>,
+    pub start_index: usize,
+    pub end_index: usize,
 }
 
 impl Default for TextCell {
@@ -565,9 +665,150 @@ impl Default for TextCell {
         TextCell {
             text: String::from(" "),
             hldef: None,
-            repeat: None,
             double_width: false,
+            attrs: Vec::new(),
+            start_index: 0,
+            end_index: 0,
         }
+    }
+}
+
+impl TextCell {
+    fn reset_attrs(
+        &mut self,
+        pctx: &pango::Context,
+        hldefs: &HighlightDefinitions,
+        metrics: &crate::metrics::Metrics,
+    ) {
+        const U16MAX: f32 = u16::MAX as f32;
+        const PANGO_SCALE: f64 = pango::SCALE as f64;
+
+        self.attrs.clear();
+        let attrs = pango::AttrList::new();
+
+        if self.end_index == self.start_index {
+            return;
+        }
+
+        let start_index = self.start_index as u32;
+        let end_index = self.end_index as u32;
+        let default_hldef = hldefs.get(HighlightDefinitions::DEFAULT).unwrap();
+        let default_colors = hldefs.defaults().unwrap();
+        let mut background = None;
+        let mut hldef = default_hldef;
+        if let Some(ref id) = self.hldef {
+            let style = hldefs.get(*id);
+            if let Some(style) = style {
+                background = style.background();
+                hldef = style;
+            }
+        }
+        if hldef.italic {
+            let mut attr = pango::AttrInt::new_style(pango::Style::Italic);
+            attr.set_start_index(start_index);
+            attr.set_end_index(end_index);
+            attrs.insert(attr);
+        }
+        if hldef.bold {
+            let mut attr = pango::AttrInt::new_weight(pango::Weight::Semibold);
+            attr.set_start_index(start_index);
+            attr.set_end_index(end_index);
+            attrs.insert(attr);
+        }
+        if hldef.strikethrough {
+            let mut attr = pango::AttrInt::new_strikethrough(true);
+            attr.set_start_index(start_index);
+            attr.set_end_index(end_index);
+            attrs.insert(attr);
+        }
+        if hldef.underline {
+            let mut attr = pango::AttrInt::new_underline(pango::Underline::Single);
+            attr.set_start_index(start_index);
+            attr.set_end_index(end_index);
+            attrs.insert(attr);
+        }
+        if hldef.undercurl {
+            let mut attr = pango::AttrInt::new_underline(pango::Underline::Error);
+            attr.set_start_index(start_index);
+            attr.set_end_index(end_index);
+            attrs.insert(attr);
+        }
+        // alpha color
+        // blend is 0 - 100. Could be used by UIs to support
+        // blending floating windows to the background or to
+        // signal a transparent cursor.
+        // let blend = u16::MAX as u32 * hldef.blend as u32 / 100;
+        // let mut attr = pango::AttrInt::new_background_alpha(blend as u16);
+        // log::info!("blend {}", hldef.blend);
+        // attr.set_start_index(start_index as _);
+        // attr.set_end_index(end_index as _);
+        // attrs.insert(attr);
+        if let Some(fg) = hldef.colors.foreground.or(default_colors.foreground) {
+            // log::info!(
+            //     "foreground #{:.2x}{:.2x}{:.2x}",
+            //     (fg.red() * U16MAX) as u16,
+            //     (fg.green() * U16MAX) as u16,
+            //     (fg.blue() * U16MAX) as u16
+            // );
+            let mut attr = pango::AttrColor::new_foreground(
+                (fg.red() * U16MAX).round() as u16,
+                (fg.green() * U16MAX).round() as u16,
+                (fg.blue() * U16MAX).round() as u16,
+            );
+            attr.set_start_index(start_index);
+            attr.set_end_index(end_index);
+            attrs.insert(attr);
+        }
+        if let Some(bg) = background {
+            // log::info!(
+            //     "background #{:.2x}{:.2x}{:.2x}",
+            //     (bg.red() * U16MAX) as u16,
+            //     (bg.green() * U16MAX) as u16,
+            //     (bg.blue() * U16MAX) as u16
+            // );
+            let mut attr = pango::AttrColor::new_background(
+                (bg.red() * U16MAX).round() as u16,
+                (bg.green() * U16MAX).round() as u16,
+                (bg.blue() * U16MAX).round() as u16,
+            );
+            attr.set_start_index(start_index);
+            attr.set_end_index(end_index);
+            attrs.insert(attr);
+        }
+        if let Some(special) = hldef.colors.special.or(default_colors.special) {
+            let mut attr = pango::AttrColor::new_underline_color(
+                (special.red() * U16MAX).round() as u16,
+                (special.green() * U16MAX).round() as u16,
+                (special.blue() * U16MAX).round() as u16,
+            );
+            attr.set_start_index(start_index);
+            attr.set_end_index(end_index);
+            attrs.insert(attr);
+        }
+
+        let item =
+            pango::itemize(&pctx, &self.text, 0, self.text.len() as i32, &attrs, None).remove(0);
+        let mut glyphs = pango::GlyphString::new();
+        pango::shape(&self.text, item.analysis(), &mut glyphs);
+        let (_, logi) = glyphs.extents(&item.analysis().font());
+        let (charwidth, width) = if self.double_width {
+            (
+                metrics.charwidth() * 2. * PANGO_SCALE,
+                metrics.width() * 2. * PANGO_SCALE,
+            )
+        } else {
+            (
+                metrics.charwidth() * PANGO_SCALE,
+                metrics.width() * PANGO_SCALE,
+            )
+        };
+        if logi.width() != charwidth.round() as i32 {
+            let mut attr = pango::AttrInt::new_letter_spacing(logi.width() - width.round() as i32);
+            attr.set_start_index(start_index);
+            attr.set_end_index(end_index);
+            attrs.insert(attr);
+        }
+        self.attrs = attrs.attributes();
     }
 }
 
@@ -578,6 +819,10 @@ impl TextLine {
     fn new(cols: usize) -> TextLine {
         let mut line = Vec::with_capacity(cols);
         line.resize(cols, TextCell::default());
+        line.iter_mut().enumerate().for_each(|(start_index, cell)| {
+            cell.start_index = start_index;
+            cell.end_index = start_index + 1;
+        });
         Self(line.into_boxed_slice())
     }
 }

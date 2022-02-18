@@ -1,4 +1,4 @@
-use crate::color::{Color, ColorExt};
+use crate::color::{Color};
 
 #[derive(new, Copy, Clone, Debug, Default, PartialEq)]
 pub struct Colors {

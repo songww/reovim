@@ -1,9 +1,9 @@
-use graphene::Rect;
-use rustc_hash::FxHashMap;
-use std::sync::Arc;
+
+
+
 
 use crate::color::Color;
-use crate::rect::Rectangle;
+
 use crate::style::{Colors, Style};
 use crate::vimview::HighlightDefinitions;
 

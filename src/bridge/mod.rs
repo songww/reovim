@@ -182,11 +182,15 @@ pub async fn start_neovim_runtime(
     // let settings = SETTINGS.get::<CmdLineSettings>();
     // let geometry = settings.geometry;
     let mut options = UiAttachOptions::new();
-    options.set_rgb(true);
-    options.set_hlstate_external(true);
-    options.set_linegrid_external(true);
-    options.set_multigrid_external(true);
-    // options.set_termcolors_external(true);
+    options
+        .set_rgb(true)
+        .set_hlstate_external(true)
+        .set_linegrid_external(true)
+        // enable ex_multigrid
+        .set_multigrid_external(true)
+        // .set_cmdline_external(true) // auto enabled by ext_message
+        // enable ext_message
+        .set_messages_external(true);
     // nvim.ui_attach(geometry.width as i64, geometry.height as i64, &options)
     nvim.ui_attach(80, 24, &options)
         .await

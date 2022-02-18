@@ -1,6 +1,6 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::sync::{atomic, Mutex, RwLock};
+use std::sync::{atomic, RwLock};
 use std::usize;
 
 use glib::subclass::prelude::*;
@@ -12,7 +12,7 @@ use relm4::*;
 use crate::app;
 use crate::bridge::{MouseAction, MouseButton, UiCommand};
 use crate::cursor::Cursor;
-use crate::keys::ToInput;
+
 use crate::pos::Position;
 use crate::rect::Rectangle;
 
@@ -25,14 +25,16 @@ type HighlightDefinitions = Rc<RwLock<crate::vimview::HighlightDefinitions>>;
 pub struct VimGrid {
     win: u64,
     grid: u64,
-    move_to: Cell<Option<FixedPosition>>,
     pos: FixedPosition,
+    move_to: Cell<Option<FixedPosition>>,
     width: usize,
     height: usize,
+    is_float: bool,
+    focusable: bool,
     hldefs: HighlightDefinitions,
     flush: Rc<atomic::AtomicBool>,
     cursor: Option<Cursor>,
-    metrics: Rc<Cell<app::FontMetrics>>,
+    metrics: Rc<Cell<crate::metrics::Metrics>>,
     font_description: Rc<RefCell<pango::FontDescription>>,
 
     textbuf: TextBuf,
@@ -48,10 +50,12 @@ impl VimGrid {
         rect: Rectangle,
         flush: Rc<atomic::AtomicBool>,
         hldefs: HighlightDefinitions,
-        metrics: Rc<Cell<app::FontMetrics>>,
+        metrics: Rc<Cell<crate::metrics::Metrics>>,
         font_description: Rc<RefCell<pango::FontDescription>>,
     ) -> VimGrid {
         let textbuf = TextBuf::new(rect.height, rect.width);
+        textbuf.borrow().set_hldefs(hldefs.clone());
+        textbuf.borrow().set_metrics(metrics.clone());
         VimGrid {
             win: winid,
             grid: id,
@@ -61,6 +65,8 @@ impl VimGrid {
             move_to: None.into(),
             hldefs: hldefs.clone(),
             cursor: None.into(),
+            is_float: false,
+            focusable: true,
             flush,
             metrics,
             textbuf,
@@ -68,8 +74,29 @@ impl VimGrid {
             font_description,
         }
     }
+
     pub fn textbuf(&self) -> &TextBuf {
         &self.textbuf
+    }
+
+    pub fn height(&self) -> usize {
+        self.height
+    }
+
+    pub fn width(&self) -> usize {
+        self.width
+    }
+
+    pub fn pos(&self) -> &FixedPosition {
+        &self.pos
+    }
+
+    pub fn is_float(&self) -> bool {
+        self.is_float
+    }
+
+    pub fn focusable(&self) -> bool {
+        self.focusable
     }
 
     pub fn hide(&mut self) {
@@ -82,6 +109,10 @@ impl VimGrid {
 
     pub fn clear(&self) {
         self.textbuf().borrow().clear();
+    }
+
+    pub fn reset_cache(&mut self) {
+        self.textbuf().borrow().reset_cache();
     }
 
     pub fn set_cursor(&mut self, cursor: Cursor) {
@@ -121,8 +152,8 @@ impl VimGrid {
         //     rows,
         //     cols
         // );
-        log::error!("scroll-region {} rows moved up.", rows);
-        log::error!(
+        log::debug!("scroll-region {} rows moved up.", rows);
+        log::debug!(
             "Origin Region {:?} {}x{}",
             self.pos,
             self.width,
@@ -155,12 +186,24 @@ impl VimGrid {
     pub fn resize(&mut self, width: usize, height: usize) {
         self.width = width;
         self.height = height;
-        self.textbuf.borrow().resize(height, width);
+        self.textbuf().borrow().resize(height, width);
     }
 
     pub fn set_pos(&mut self, x: f64, y: f64) {
         self.pos = FixedPosition { x, y };
         self.move_to.replace(FixedPosition { x, y }.into());
+    }
+
+    pub fn set_is_float(&mut self, is_float: bool) {
+        self.is_float = is_float;
+    }
+
+    pub fn set_focusable(&mut self, focusable: bool) {
+        self.focusable = focusable;
+    }
+
+    pub fn set_pango_context(&self, pctx: pango::Context) {
+        self.textbuf().borrow().set_pango_context(pctx);
     }
 }
 
@@ -182,7 +225,7 @@ impl factory::FactoryPrototype for VimGrid {
                 set_widget_name: &format!("vim-grid-{}-{}", self.win, grid),
                 set_hldefs: self.hldefs.clone(),
                 set_textbuf:self.textbuf.clone(),
-                set_font_metrics: self.metrics.clone(),
+                set_metrics: self.metrics.clone(),
 
                 set_visible: self.visible,
                 set_can_focus: true,
@@ -199,7 +242,7 @@ impl factory::FactoryPrototype for VimGrid {
             }
         }
 
-        let click_locker = Mutex::new(true);
+        // self.set_pango_context(view.pango_context());
 
         let click_listener = gtk::GestureClick::builder()
             .button(0)
@@ -212,10 +255,10 @@ impl factory::FactoryPrototype for VimGrid {
             glib::clone!(@strong sender, @strong self.metrics as metrics => move |c, n_press, x, y| {
                 let grid = 1;
                 let metrics = metrics.get();
-                let charwidth = metrics.charwidth();
-                let lineheight = metrics.lineheight() + metrics.linespace();
-                let cols = x as f64 / charwidth;
-                let rows = y as f64 / lineheight;
+                let width = metrics.width();
+                let height = metrics.height();
+                let cols = x as f64 / width;
+                let rows = y as f64 / height;
                 log::info!("grid {} mouse pressed {} times at {}x{} -> {}x{}", grid, n_press, x, y, cols, rows);
                 let modifier = c.current_event_state().to_string();
                 log::info!("grid {} click button {} current_button {} modifier {}", grid, c.button(), c.current_button(), modifier);
@@ -231,10 +274,10 @@ impl factory::FactoryPrototype for VimGrid {
             glib::clone!(@strong sender, @strong self.metrics as metrics => move |c, n_press, x, y| {
                 let grid = 1;
                 let metrics = metrics.get();
-                let charwidth = metrics.charwidth();
-                let lineheight = metrics.lineheight() + metrics.linespace();
-                let cols = x as f64 / charwidth;
-                let rows = y as f64 / lineheight;
+                let width = metrics.width();
+                let height = metrics.height();
+                let cols = x as f64 / width;
+                let rows = y as f64 / height;
                 log::info!("grid {} mouse released {} times at {}x{} -> {}x{}", grid, n_press, x, y, cols, rows);
                 let modifier = c.current_event_state().to_string();
                 log::info!("grid {} click button {} current_button {} modifier {}", grid, c.button(), c.current_button(), modifier);
@@ -299,6 +342,9 @@ impl factory::FactoryPrototype for VimGrid {
             view.resize(self.width as _, self.height as _);
         }
 
+        view.set_focusable(self.focusable);
+        view.set_is_float(self.is_float);
+
         if let Some(pos) = self.move_to.take() {
             gtk::prelude::FixedExt::move_(
                 &view.parent().unwrap().downcast::<gtk::Fixed>().unwrap(),
@@ -308,16 +354,8 @@ impl factory::FactoryPrototype for VimGrid {
             );
         }
 
-        // if let Ok(true) = self.flush.compare_exchange(
-        //     true,
-        //     false,
-        //     atomic::Ordering::Acquire,
-        //     atomic::Ordering::Relaxed,
-        // ) {
         view.queue_allocate();
         view.queue_resize();
-        // view.queue_draw();
-        // }
     }
 
     fn root_widget(widgets: &VimGridWidgets) -> &VimGridView {

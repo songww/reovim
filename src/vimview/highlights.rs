@@ -78,6 +78,8 @@ glib::wrapper! {
 }
 
 impl HighlightDefinitions {
+    pub const DEFAULT: u64 = 0;
+
     pub fn new() -> HighlightDefinitions {
         // let styles = FxHashMap::default();
         // HighlightDefinitions::default()

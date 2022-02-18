@@ -1,11 +1,10 @@
-use gtk::prelude::{BoxExt, ButtonExt, GtkWindowExt, OrientableExt};
+
 use relm4::{
-    send, AppUpdate, Components, MessageHandler, Model, RelmApp, RelmMsgHandler, Sender,
-    WidgetPlus, Widgets,
+    MessageHandler, Sender,
 };
 // use tokio::runtime::{Builder, Runtime};
 use tokio::sync::mpsc::{
-    channel, unbounded_channel as unbound, Sender as TokioSender, UnboundedSender,
+    unbounded_channel as unbound,
 };
 
 use crate::{

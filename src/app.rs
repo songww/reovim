@@ -2,23 +2,23 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{atomic, RwLock};
 
-use glib::ObjectExt;
+
 use gtk::prelude::{
     BoxExt, DrawingAreaExt, DrawingAreaExtManual, EventControllerExt, GtkWindowExt, IMContextExt,
     IMContextExtManual, IMMulticontextExt, OrientableExt, WidgetExt,
 };
 use once_cell::sync::OnceCell;
 use pango::FontDescription;
-use relm4::{send, AppUpdate, Model, RelmApp, Sender, WidgetPlus, Widgets};
+use relm4::{AppUpdate, Model, Sender, Widgets};
 use rustc_hash::FxHashMap;
 
-use crate::bridge::EditorMode;
+use crate::bridge::{EditorMode, MessageKind, WindowAnchor};
 use crate::cursor::{Cursor, CursorMode};
-use crate::keys::{self, ToInput};
+use crate::keys::{ToInput};
 use crate::vimview::{self, VimGrid};
 use crate::{
     bridge::{self, RedrawEvent, UiCommand},
-    style, Opts,
+    metrics::Metrics, Opts,
 };
 
 #[derive(Clone, Debug)]
@@ -41,35 +41,19 @@ pub struct GridWindow {
     //default_grid: u64,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
-pub struct FontMetrics {
-    charwidth: f64,
-
-    linespace: f64,
-    lineheight: f64,
+pub struct FloatWindow {
+    id: u64,
+    anchor: WindowAnchor,
+    anchor_grid: u64,
+    anchor_row: f64,
+    anchor_col: f64,
+    focusable: bool,
+    rank: Option<u64>,
 }
 
-impl FontMetrics {
-    fn new() -> FontMetrics {
-        FontMetrics {
-            charwidth: 0.,
-
-            linespace: 0.,
-            lineheight: 0.,
-        }
-    }
-
-    pub fn charwidth(&self) -> f64 {
-        self.charwidth
-    }
-
-    pub fn linespace(&self) -> f64 {
-        self.linespace
-    }
-
-    pub fn lineheight(&self) -> f64 {
-        self.lineheight
-    }
+pub struct Message {
+    kind: MessageKind,
+    content: Vec<(u64, String)>,
 }
 
 pub struct AppModel {
@@ -81,7 +65,7 @@ pub struct AppModel {
     pub guifont: Option<String>,
     pub guifontset: Option<String>,
     pub guifontwide: Option<String>,
-    pub font_metrics: Rc<Cell<FontMetrics>>,
+    pub metrics: Rc<Cell<Metrics>>,
     pub show_tab_line: Option<u64>,
 
     pub font_description: Rc<RefCell<pango::FontDescription>>,
@@ -89,12 +73,14 @@ pub struct AppModel {
 
     pub mode: EditorMode,
 
+    pub mouse_on: Rc<atomic::AtomicBool>,
     pub cursor: Cell<Option<Cursor>>,
     pub cursor_at: Option<u64>,
     pub cursor_mode: usize,
     pub cursor_modes: Vec<CursorMode>,
 
     pub pctx: OnceCell<Rc<pango::Context>>,
+    pub gtksettings: OnceCell<gtk::Settings>,
 
     pub hldefs: Rc<RwLock<vimview::HighlightDefinitions>>,
 
@@ -105,6 +91,9 @@ pub struct AppModel {
     pub vgrids: crate::factory::FactoryMap<vimview::VimGrid>,
     // relations about grid with window.
     pub relationships: FxHashMap<u64, GridWindow>,
+
+    // pub floatwindows: crate::factory::FactoryMap<FloatWindow>,
+    pub messages: Vec<Message>,
 
     pub rt: tokio::runtime::Runtime,
 }
@@ -125,18 +114,20 @@ impl AppModel {
             guifontwide: None,
             show_tab_line: None,
 
-            font_metrics: Rc::new(FontMetrics::new().into()),
+            metrics: Rc::new(Metrics::new().into()),
             font_description: Rc::new(RefCell::new(FontDescription::from_string("monospace 11"))),
             font_changed: Rc::new(false.into()),
 
             mode: EditorMode::Normal,
 
+            mouse_on: Rc::new(false.into()),
             cursor: Cell::new(Some(Cursor::new())),
             cursor_at: None,
             cursor_mode: 0,
             cursor_modes: Vec::new(),
 
             pctx: OnceCell::new(),
+            gtksettings: OnceCell::new(),
 
             hldefs: Rc::new(RwLock::new(vimview::HighlightDefinitions::new())),
 
@@ -147,6 +138,9 @@ impl AppModel {
             vgrids: crate::factory::FactoryMap::new(),
             relationships: FxHashMap::default(),
 
+            // floatwindows: crate::factory::FactoryMap::new(),
+            messages: Vec::new(),
+
             opts,
 
             rt,
@@ -155,17 +149,17 @@ impl AppModel {
 
     pub fn recompute(&self) {
         const SINGLE_WIDTH_CHARS: &'static str = concat!(
+            "ABC D E F G H I J K L M N O P Q R S T U V W X Y Z ",
             "! \" # $ % & ' ( ) * + , - . / ",
             "0 1 2 3 4 5 6 7 8 9 ",
             ": ; < = > ? @ ",
-            "A B C D E F G H I J K L M N O P Q R S T U V W X Y Z ",
             "[ \\ ] ^ _ ` ",
             "a b c d e f g h i j k l m n o p q r s t u v w x y z ",
             "{ | } ~ ",
         );
         let desc = self.font_description.borrow();
-        log::debug!(
-            "font desc {} {} {} {}pt",
+        log::error!(
+            "----------------------> font desc {} {} {} {}",
             desc.family().unwrap(),
             desc.weight(),
             desc.style(),
@@ -174,20 +168,36 @@ impl AppModel {
         let pctx = self.pctx.get().unwrap();
         pctx.set_font_description(&desc);
         let layout = pango::Layout::new(pctx);
-        let metrics = pctx.metrics(Some(&desc), None).unwrap();
+        let font_metrics = pctx.metrics(Some(&desc), None).unwrap();
         layout.set_text(SINGLE_WIDTH_CHARS);
-        let lineheight = layout.line(0).unwrap().height();
-        let mut font_metrics = self.font_metrics.get();
-        let lineheight = lineheight as f64 / pango::SCALE as f64;
-        let charwidth = metrics.approximate_digit_width() as f64 / pango::SCALE as f64;
-        if font_metrics.lineheight == lineheight && font_metrics.charwidth == charwidth {
+        let layoutline = layout.line_readonly(0).unwrap();
+        let charheight = layoutline.height();
+        // let charwidth1 = layoutline.index_to_x(0, false);
+        // let charwidth2 = layoutline.index_to_x(1, false);
+        // let charwidth3 = layoutline.index_to_x(2, false);
+        // log::error!("charwidth {} {} {}", charwidth1, charwidth2, charwidth3);
+        let item = pango::itemize(&pctx, "A", 0, 1, &pango::AttrList::new(), None)
+            .pop()
+            .unwrap();
+        let mut glyphs = pango::GlyphString::new();
+        pango::shape("A", item.analysis(), &mut glyphs);
+        let (_, rect) = glyphs.extents(&item.analysis().font());
+        let charwidth = rect.width() as f64 / pango::SCALE as f64;
+        let mut metrics = self.metrics.get();
+        let charheight = charheight as f64 / pango::SCALE as f64;
+        let width = font_metrics.approximate_digit_width() as f64 / pango::SCALE as f64;
+        if metrics.charheight() == charheight
+            && metrics.charwidth() == charwidth
+            && metrics.width() == width
+        {
             return;
         }
-        font_metrics.lineheight = lineheight;
-        font_metrics.charwidth = charwidth;
-        log::info!("line-height {:?}", font_metrics.lineheight);
-        log::info!("char-width {:?}", font_metrics.charwidth);
-        self.font_metrics.replace(font_metrics);
+        metrics.set_width(width);
+        metrics.set_charwidth(charwidth);
+        metrics.set_charheight(charheight);
+        log::error!("char-height {:?}", metrics.charheight());
+        log::error!("char-width {:?}", metrics.charwidth());
+        self.metrics.replace(metrics);
     }
 }
 
@@ -202,7 +212,7 @@ impl AppUpdate for AppModel {
         &mut self,
         message: AppMessage,
         components: &AppComponents,
-        sender: Sender<AppMessage>,
+        _sender: Sender<AppMessage>,
     ) -> bool {
         // log::info!("message at AppModel::update {:?}", message);
         match message {
@@ -235,17 +245,24 @@ impl AppUpdate for AppModel {
                         }
                         bridge::GuiOption::GuiFont(guifont) => {
                             if !guifont.trim().is_empty() {
-                                log::warn!("gui font: {}", &guifont);
+                                log::info!("gui font: {}", &guifont);
                                 let desc = pango::FontDescription::from_string(
                                     &guifont.replace(":h", " "),
                                 );
+
+                                self.gtksettings.get().map(|settings| {
+                                    settings.set_gtk_font_name(Some(&desc.to_str()));
+                                });
 
                                 self.guifont.replace(guifont);
                                 self.font_description.replace(desc);
 
                                 self.recompute();
-
                                 self.font_changed.store(true, atomic::Ordering::Relaxed);
+
+                                self.vgrids
+                                    .iter_mut()
+                                    .for_each(|(_, vgrid)| vgrid.reset_cache());
                             }
                         }
                         bridge::GuiOption::GuiFontSet(guifontset) => {
@@ -256,9 +273,9 @@ impl AppUpdate for AppModel {
                         }
                         bridge::GuiOption::LineSpace(linespace) => {
                             log::info!("line space: {}", linespace);
-                            let mut font_metrics = self.font_metrics.get();
-                            font_metrics.linespace = linespace as _;
-                            self.font_metrics.replace(font_metrics);
+                            let mut metrics = self.metrics.get();
+                            metrics.set_linespace(linespace as _);
+                            self.metrics.replace(metrics);
                         }
                         bridge::GuiOption::ShowTabLine(show_tab_line) => {
                             self.show_tab_line.replace(show_tab_line);
@@ -297,15 +314,15 @@ impl AppUpdate for AppModel {
                             .get(&grid)
                             .map(|rel| rel.winid)
                             .unwrap_or(0);
-                        let cells: Vec<_> = cells
-                            .into_iter()
-                            .map(|cell| vimview::TextCell {
-                                text: cell.text,
-                                hldef: cell.hldef,
-                                repeat: cell.repeat,
-                                double_width: cell.double_width,
-                            })
-                            .collect();
+                        // let cells: Vec<_> = cells
+                        //     .into_iter()
+                        //     .map(|cell| vimview::TextCell {
+                        //         text: cell.text,
+                        //         hldef: cell.hldef,
+                        //         repeat: cell.repeat,
+                        //         double_width: cell.double_width,
+                        //     })
+                        //     .collect();
 
                         log::info!(
                             "grid line {}/{} - {} cells at {}x{}",
@@ -329,10 +346,10 @@ impl AppUpdate for AppModel {
                     }
                     RedrawEvent::Scroll {
                         grid,
-                        top,
-                        bottom,
-                        left,
-                        right,
+                        top: _,
+                        bottom: _,
+                        left: _,
+                        right: _,
                         rows,
                         columns,
                     } => {
@@ -350,10 +367,6 @@ impl AppUpdate for AppModel {
                             // rows and columns are both zero.
                             unimplemented!("Should not here.");
                         }
-                        // self.vgrids
-                        //     .get_mut(grid)
-                        //     .unwrap()
-                        //     .up(top, bottom, left, right, rows, columns);
                     }
                     RedrawEvent::Resize {
                         grid,
@@ -370,19 +383,22 @@ impl AppUpdate for AppModel {
                                 .resize(width as _, height as _);
                         } else {
                             log::info!("Add grid {} to default window at left top.", grid);
-                            self.vgrids.insert(
+                            let vgrid = VimGrid::new(
                                 grid,
-                                VimGrid::new(
-                                    grid,
-                                    0,
-                                    (0., 0.).into(),
-                                    (width, height).into(),
-                                    self.flush.clone(),
-                                    self.hldefs.clone(),
-                                    self.font_metrics.clone(),
-                                    self.font_description.clone(),
-                                ),
+                                0,
+                                (0., 0.).into(),
+                                (width, height).into(),
+                                self.flush.clone(),
+                                self.hldefs.clone(),
+                                self.metrics.clone(),
+                                self.font_description.clone(),
                             );
+                            vgrid.set_pango_context({
+                                let mut pctx = pango::Context::new();
+                                pctx.clone_from(&self.pctx.get().unwrap());
+                                pctx
+                            });
+                            self.vgrids.insert(grid, vgrid);
                             self.relationships.insert(grid, GridWindow { winid: 0 });
                         };
                     }
@@ -401,26 +417,28 @@ impl AppUpdate for AppModel {
 
                         self.focused.store(grid, atomic::Ordering::Relaxed);
 
-                        let font_metrics = self.font_metrics.get();
-                        let x = (start_column) as f64 * font_metrics.charwidth;
-                        let y =
-                            (start_row) as f64 * (font_metrics.lineheight + font_metrics.linespace); //;
+                        let metrics = self.metrics.get();
+                        let x = start_column as f64 * metrics.width();
+                        let y = start_row as f64 * metrics.height(); //;
 
                         if self.vgrids.get(grid).is_none() {
                             // dose not exists, create
-                            self.vgrids.insert(
+                            let vgrid = VimGrid::new(
                                 grid,
-                                VimGrid::new(
-                                    grid,
-                                    winid,
-                                    (x.floor(), y.floor()).into(),
-                                    (width, height).into(),
-                                    self.flush.clone(),
-                                    self.hldefs.clone(),
-                                    self.font_metrics.clone(),
-                                    self.font_description.clone(),
-                                ),
+                                winid,
+                                (x.floor(), y.floor()).into(),
+                                (width, height).into(),
+                                self.flush.clone(),
+                                self.hldefs.clone(),
+                                self.metrics.clone(),
+                                self.font_description.clone(),
                             );
+                            vgrid.set_pango_context({
+                                let mut pctx = pango::Context::new();
+                                pctx.clone_from(&self.pctx.get().unwrap());
+                                pctx
+                            });
+                            self.vgrids.insert(grid, vgrid);
                             self.relationships.insert(grid, GridWindow { winid });
                             log::info!(
                                 "Add grid {} to window {} at {}x{} with {}x{}.",
@@ -476,19 +494,26 @@ impl AppUpdate for AppModel {
                             }
                         };
 
-                        // self.focused.store(grid, atomic::Ordering::Relaxed);
-
-                        let (x, y) = self.rt.block_on(window.get_position()).unwrap();
-                        let (x, y) = (x as f64, y as f64);
-                        async fn allocated(
-                            window: nvim::Window<crate::bridge::Tx>,
-                        ) -> Result<(i64, i64), Box<nvim::error::CallError>>
-                        {
-                            Ok((window.get_width().await?, window.get_height().await?))
+                        struct Rect {
+                            x: f64,
+                            y: f64,
+                            width: usize,
+                            height: usize,
                         }
-                        let (width, height): (i64, i64) =
-                            self.rt.block_on(allocated(window)).unwrap();
-                        let (width, height) = (width as usize, height as usize);
+                        type RectResult = Result<Rect, Box<nvim::error::CallError>>;
+                        async fn window_rectangle(
+                            window: &nvim::Window<crate::bridge::Tx>,
+                        ) -> RectResult {
+                            let (x, y) = window.get_position().await?;
+                            let width = window.get_width().await?;
+                            let height = window.get_height().await?;
+                            Ok(Rect {
+                                x: x as f64,
+                                y: y as f64,
+                                width: width as usize,
+                                height: height as usize,
+                            })
+                        }
 
                         log::info!(
                             "window {} viewport grid {} viewport: top({}) bottom({}) highlight-line({}) highlight-column({}) with {} lines",
@@ -499,26 +524,37 @@ impl AppUpdate for AppModel {
 
                         if self.vgrids.get(grid).is_none() {
                             // dose not exists, create
-                            self.vgrids.insert(
+                            let rect: Rect = match self.rt.block_on(window_rectangle(&window)) {
+                                Ok(rect) => rect,
+                                Err(err) => {
+                                    log::error!("vim window {} disappeared on handling WindowViewport event: {}", winid, err);
+                                    return true;
+                                }
+                            };
+
+                            let vgrid = VimGrid::new(
                                 grid,
-                                VimGrid::new(
-                                    grid,
-                                    winid,
-                                    (x, y).into(),
-                                    (width, height).into(),
-                                    self.flush.clone(),
-                                    self.hldefs.clone(),
-                                    self.font_metrics.clone(),
-                                    self.font_description.clone(),
-                                ),
+                                winid,
+                                (rect.x, rect.y).into(),
+                                (rect.width, rect.height).into(),
+                                self.flush.clone(),
+                                self.hldefs.clone(),
+                                self.metrics.clone(),
+                                self.font_description.clone(),
                             );
+                            vgrid.set_pango_context({
+                                let mut pctx = pango::Context::new();
+                                pctx.clone_from(&self.pctx.get().unwrap());
+                                pctx
+                            });
+                            self.vgrids.insert(grid, vgrid);
                             self.relationships.insert(grid, GridWindow { winid });
                             log::info!(
                                 "Add grid {} to window {} at {}x{}.",
                                 grid,
                                 winid,
-                                height,
-                                width
+                                rect.height,
+                                rect.width
                             );
                         } else {
                             let vgrid = self.vgrids.get_mut(grid).unwrap();
@@ -617,6 +653,104 @@ impl AppUpdate for AppModel {
                     RedrawEvent::BusyStop => {
                         log::debug!("Ignored BusyStop.");
                     }
+                    RedrawEvent::MouseOn => {
+                        self.mouse_on.store(true, atomic::Ordering::Relaxed);
+                    }
+                    RedrawEvent::MouseOff => {
+                        self.mouse_on.store(false, atomic::Ordering::Relaxed);
+                    }
+
+                    RedrawEvent::MessageShow {
+                        kind,
+                        content,
+                        replace_last,
+                    } => {
+                        log::error!("showing message {:?} {:?}", kind, content);
+                        if replace_last {
+                            if let Some(last) = self.messages.last_mut() {
+                                *last = Message { kind, content }
+                            } else {
+                                self.messages.push(Message { kind, content })
+                            }
+                        }
+                    }
+                    RedrawEvent::MessageShowMode { content } => {
+                        log::error!("message show mode: {:?}", content);
+                    }
+                    RedrawEvent::MessageRuler { content } => {
+                        log::error!("message ruler: {:?}", content);
+                    }
+                    RedrawEvent::MessageSetPosition {
+                        grid,
+                        row,
+                        scrolled,
+                        separator_character,
+                    } => {
+                        log::error!(
+                            "message set position: {} {} {} '{}'",
+                            grid,
+                            row,
+                            scrolled,
+                            separator_character
+                        );
+                    }
+                    RedrawEvent::MessageShowCommand { content } => {
+                        log::error!("message show command: {:?}", content);
+                    }
+                    RedrawEvent::MessageHistoryShow { entries } => {
+                        log::error!("message history: {:?}", entries);
+                    }
+                    RedrawEvent::MessageClear => {
+                        log::error!("message clear all");
+                        self.messages.clear();
+                    }
+
+                    RedrawEvent::WindowFloatPosition {
+                        grid,
+                        anchor,
+                        anchor_grid,
+                        anchor_row,
+                        anchor_column,
+                        focusable,
+                        sort_order: _,
+                    } => {
+                        log::debug!(
+                            "grid {} is float window exists in vgrids {} anchor {} {:?} pos {}x{} focusable {}",
+                            grid,
+                            self.vgrids.get(grid).is_some(),
+                            anchor_grid,
+                            anchor,
+                            anchor_column,
+                            anchor_row,
+                            focusable
+                        );
+                        let basepos = self.vgrids.get(anchor_grid).unwrap().pos();
+                        let (left, top) = (basepos.x, basepos.y);
+
+                        let vgrid = self.vgrids.get_mut(grid).unwrap();
+
+                        let (col, row) = match anchor {
+                            WindowAnchor::NorthWest => (anchor_column, anchor_row),
+                            WindowAnchor::NorthEast => {
+                                (anchor_column - vgrid.width() as f64, anchor_row)
+                            }
+                            WindowAnchor::SouthWest => {
+                                (anchor_column, anchor_row - vgrid.height() as f64)
+                            }
+                            WindowAnchor::SouthEast => (
+                                anchor_column - vgrid.width() as f64,
+                                anchor_row - vgrid.height() as f64,
+                            ),
+                        };
+
+                        let metrics = self.metrics.get();
+                        let x = col * metrics.width();
+                        let y = row * metrics.height();
+                        log::info!("moving float window {} to {}x{}", grid, col, row);
+                        vgrid.set_pos(left + x, top + y);
+                        vgrid.set_is_float(true);
+                        vgrid.set_focusable(focusable);
+                    }
                     _ => {
                         log::error!("Unhandled RedrawEvent {:?}", event);
                     }
@@ -644,30 +778,30 @@ impl Widgets<AppModel, ()> for AppWidgets {
                 set_spacing: 0,
                 set_hexpand: true,
                 set_vexpand: true,
-                // set_margin_all: 5,
                 set_focusable: true,
                 set_sensitive: true,
                 set_can_focus: true,
-                set_can_target: false,
-                set_focus_on_click: false,
+                set_can_target: true,
+                set_focus_on_click: true,
 
                 // set_child: Add tabline
 
                 append: overlay = &gtk::Overlay {
+                    set_focusable: true,
+                    set_sensitive: true,
+                    set_can_focus: true,
+                    set_can_target: true,
+                    set_focus_on_click: true,
                     set_child: da = Some(&gtk::DrawingArea) {
                         set_hexpand: true,
                         set_vexpand: true,
-                        set_focusable: true,
-                        set_sensitive: true,
-                        set_can_focus: true,
-                        set_can_target: false,
                         set_focus_on_click: false,
                         set_overflow: gtk::Overflow::Hidden,
-                        connect_resize[sender = sender.clone(), metrics = model.font_metrics.clone()] => move |da, width, height| {
+                        connect_resize[sender = sender.clone(), metrics = model.metrics.clone()] => move |da, width, height| {
                             log::info!("da resizing width: {}, height: {}", width, height);
                             let metrics = metrics.get();
-                            let rows = da.height() as f64 / (metrics.lineheight + metrics.linespace); //  + metrics.linespace
-                            let cols = da.width() as f64 / metrics.charwidth;
+                            let rows = da.height() as f64 / metrics.height(); //  + metrics.linespace
+                            let cols = da.width() as f64 / metrics.width();
                             log::info!("da resizing rows: {} cols: {}", rows, cols);
                             sender
                                 .send(
@@ -694,45 +828,31 @@ impl Widgets<AppModel, ()> for AppWidgets {
                     },
                     add_overlay: grids_container = &gtk::Fixed {
                         set_widget_name: "grids-container",
-                        set_focusable: false,
-                        set_sensitive: false,
-                        set_can_focus: false,
-                        set_can_target: false,
-                        set_focus_on_click: false,
+                        set_visible: true,
+                        set_focus_on_click: true,
                         factory!(model.vgrids),
                     },
                     add_overlay: float_win_container = &gtk::Fixed {
                         set_widget_name: "float-win-container",
                         set_visible: false,
-                        set_focusable: false,
-                        set_sensitive: false,
-                        set_can_focus: false,
-                        set_can_target: false,
-                        set_focus_on_click: false,
+                        set_hexpand: false,
+                        set_vexpand: false,
                     },
-                    add_overlay: cursor_layer = &gtk::DrawingArea {
-                        set_widget_name: "vimview-cursor-layer",
-                        set_hexpand: true,
-                        set_vexpand: true,
-                        set_focusable: false,
-                        set_sensitive: false,
-                        set_can_focus: false,
-                        set_can_target: false,
-                        set_focus_on_click: false,
-                    },
-                    add_overlay: message_win_container = &gtk::Fixed {
-                        set_widget_name: "message-win-container",
+                    add_overlay: cursor_drawing_area = &gtk::DrawingArea {
+                        set_widget_name: "cursor-drawing-area",
                         set_visible: false,
-                        set_focusable: false,
-                        set_sensitive: false,
-                        set_can_focus: false,
-                        set_can_target: false,
+                        set_hexpand: false,
+                        set_vexpand: false,
                         set_focus_on_click: false,
+                    },
+                    add_overlay: messages_container = &gtk::Grid {
+                        set_widget_name: "messages-container",
+                        set_visible: false,
+                        set_hexpand: false,
+                        set_vexpand: false,
                     },
                 }
             },
-            set_focus_widget: Some(&overlay),
-            set_default_widget: Some(&overlay),
             connect_close_request[sender = sender.clone()] => move |_| {
                 sender.send(AppMessage::UiCommand(UiCommand::Quit)).ok();
                 gtk::Inhibit(false)
@@ -742,6 +862,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
 
     fn post_init() {
         model.pctx.set(vbox.pango_context().into()).ok();
+        model.gtksettings.set(overlay.settings()).ok();
         model.recompute();
 
         let im_context = gtk::IMMulticontext::new();
@@ -765,26 +886,34 @@ impl Widgets<AppModel, ()> for AppWidgets {
                 .unwrap();
         }));
 
+        main_window.set_focus_widget(Some(&overlay));
+        main_window.set_default_widget(Some(&overlay));
+
+        let mut options = cairo::FontOptions::new().ok();
+        options.as_mut().map(|options| {
+            options.set_antialias(cairo::Antialias::Subpixel);
+            options.set_hint_style(cairo::HintStyle::Full);
+            options.set_hint_metrics(cairo::HintMetrics::On);
+        });
+        main_window.set_font_options(options.as_ref());
+
         let listener = gtk::EventControllerScroll::builder()
             .flags(gtk::EventControllerScrollFlags::all())
-            .name("scroller-listener")
+            .name("vimview-scrolling-listener")
             .build();
-        listener.connect_scroll(glib::clone!(@strong sender => move |c, x, y| {
+        listener.connect_scroll(glib::clone!(@strong sender, @strong model.mouse_on as mouse_on => move |c, x, y| {
+            if !mouse_on.load(atomic::Ordering::Relaxed) {
+                return gtk::Inhibit(false)
+            }
             // FIXME: get grid id by neovim current buf.
             let id = 1;
             let direction = c.current_event().unwrap().downcast::<gdk::ScrollEvent>().unwrap().direction().to_string().to_lowercase();
-            // let direction = if y > 0. {
-            //     "down"
-            // } else {
-            //     "up"
-            // };
-            // let grid_id = focused.load(atomic::Ordering::Relaxed);
             let command = UiCommand::Scroll { direction: direction.into(), grid_id: id, position: (0, 1) };
             sender.send(AppMessage::UiCommand(command)).unwrap();
             log::error!("scrolling grid {} x: {}, y: {}", id, x, y);
             gtk::Inhibit(false)
         }));
-        listener.connect_decelerate(|c, vel_x, vel_y| {
+        listener.connect_decelerate(|_c, _vel_x, _vel_y| {
             // let id: u64 = c
             //     .widget()
             //     .dynamic_cast_ref::<VimGridView>()
@@ -792,7 +921,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
             //     .property("id");
             // log::error!("scrolling decelerate grid {} x:{} y:{}.", id, vel_x, vel_y);
         });
-        listener.connect_scroll_begin(|c| {
+        listener.connect_scroll_begin(|_c| {
             // let id: u64 = c
             //     .widget()
             //     .dynamic_cast_ref::<VimGridView>()
@@ -800,7 +929,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
             //     .property("id");
             // log::error!("scrolling begin grid {}.", id);
         });
-        listener.connect_scroll_end(|c| {
+        listener.connect_scroll_end(|_c| {
             // let id: u64 = c
             //     .widget()
             //     .dynamic_cast_ref::<VimGridView>()
@@ -827,40 +956,31 @@ impl Widgets<AppModel, ()> for AppWidgets {
                 sender.send(UiCommand::FocusLost.into()).unwrap();
             }),
         );
-        overlay.add_controller(&focus_controller);
+        main_window.add_controller(&focus_controller);
 
         let key_controller = gtk::EventControllerKey::builder()
             .name("vimview-key-controller")
             .build();
         key_controller.set_im_context(&im_context);
-        // key_controller.set_propagation_phase(gtk::PropagationPhase::Target);
-        // key_controller.connect_im_update(|c| c.im_context().reset());
         key_controller.connect_key_pressed(
             glib::clone!(@strong sender => move |c, keyval, _keycode, modifier| {
-                log::error!("keyboard pressed ---------------> ");
                 let event = c.current_event().unwrap();
-                // c.im_context().filter_key(true, &event.surface().unwrap(),&event.device().unwrap(), event.time(), keycode, modifier, c.group() as _);
 
                 if c.im_context().filter_keypress(&event) {
-                    log::error!("Ignored by imcontext");
+                    log::debug!("keypress handled by im-context.");
                     return gtk::Inhibit(true)
                 }
-                let keys = (keyval, modifier);
-                if let Some(keyboard) = keys.to_input() {
-                    log::error!("Accept input '{}'", &keyboard);
-                    sender.send(UiCommand::Keyboard(keyboard.into_owned()).into()).unwrap();
+                let keypress = (keyval, modifier);
+                if let Some(keypress) = keypress.to_input() {
+                    log::debug!("keypress {} sent to neovim.", keypress);
+                    sender.send(UiCommand::Keyboard(keypress.into_owned()).into()).unwrap();
                     gtk::Inhibit(true)
                 } else {
-                    log::error!("keyboard pressed unsupported key: {:?}", keyval.name());
+                    log::debug!("keypress ignored: {:?}", keyval.name());
                     gtk::Inhibit(false)
                 }
             }),
         );
-        // controller.connect_key_released(|_, keyval, _, modifier| {
-        //     let keys = (keyval, modifier);
-        //     let keys = keys.to_input();
-        //     log::error!("keyboard released, {}", &keys);
-        // });
         overlay.add_controller(&key_controller);
     }
 
@@ -879,17 +999,13 @@ impl Widgets<AppModel, ()> for AppWidgets {
             atomic::Ordering::Acquire,
             atomic::Ordering::Relaxed,
         ) {
-            log::error!(
+            log::info!(
                 "default font name: {}",
                 model.font_description.borrow().to_str()
             );
-            self.overlay
-                .settings()
-                .set_gtk_font_name(Some(&model.font_description.borrow().to_str()));
-            let metrics = model.font_metrics.clone();
-            let metrics = metrics.get();
-            let rows = self.da.height() as f64 / (metrics.lineheight + metrics.linespace); //  + metrics.linespace
-            let cols = self.da.width() as f64 / metrics.charwidth;
+            let metrics = model.metrics.get();
+            let rows = self.da.height() as f64 / metrics.height();
+            let cols = self.da.width() as f64 / metrics.width();
             log::debug!(
                 "trying to resize to {}x{} original {}x{} {:?}",
                 rows,
@@ -908,5 +1024,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
                 )
                 .unwrap();
         }
+        // TODO:
+        // self.im_context.set_cursor_location(&gdk::Rectangle::new(0, 0, 5, 10));
     }
 }

@@ -6,10 +6,7 @@ extern crate derive_new;
 #[macro_use]
 extern crate derivative;
 
-use clap::{AppSettings, IntoApp, Parser};
-use gdk::prelude::*;
-use gtk::prelude::*;
-use once_cell::sync::OnceCell;
+use clap::{IntoApp, Parser};
 
 mod app;
 mod bridge;
@@ -20,6 +17,7 @@ mod elements;
 mod factory;
 mod keys;
 mod messager;
+mod metrics;
 mod pos;
 mod rect;
 mod style;
@@ -49,7 +47,6 @@ enum ConnectionMode {
 }
 
 #[derive(Parser, Clone, Debug, Default, PartialEq)]
-#[clap(setting(AppSettings::AllowMissingPositional))]
 pub struct Opts {
     /// Path to neovim binary
     #[clap(long = "nvim", value_name = "PATH")]
@@ -92,7 +89,7 @@ fn main() {
     let mut opts: Opts = Opts::parse();
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("error")).init();
     log::trace!("command line options: {:?}", opts);
-    let app = Opts::into_app();
+    let app = Opts::command().allow_missing_positional(true);
     let title = app.get_bin_name().unwrap_or("relmvim");
     opts.title = title.to_string();
     log::trace!("opts: {:?}", opts);

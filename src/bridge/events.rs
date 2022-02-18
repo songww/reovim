@@ -5,7 +5,7 @@ use std::fmt::Debug;
 use log::debug;
 use nvim::Value;
 
-use crate::color::{Color, ColorExt};
+use crate::color::{Color};
 use crate::cursor::{CursorMode, CursorShape};
 use crate::style::{Colors, Style};
 

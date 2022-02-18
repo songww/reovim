@@ -201,8 +201,9 @@ where
                         .view(index, &widgets.get(index).unwrap().widgets);
                 }
                 ChangeType::Remove => {
-                    let remove_widget = widgets.remove(index).unwrap();
-                    view.remove(&remove_widget.root);
+                    widgets
+                        .remove(index)
+                        .map(|widget| view.remove(&widget.root));
                 }
                 ChangeType::Recreate => {
                     let remove_widget = widgets.remove(index).unwrap();
