@@ -2,6 +2,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{atomic, RwLock};
 
+use gdk::prelude::FontMapExt;
 use gtk::prelude::{
     BoxExt, DrawingAreaExt, DrawingAreaExtManual, EventControllerExt, GtkWindowExt, IMContextExt,
     IMContextExtManual, IMMulticontextExt, OrientableExt, WidgetExt,
@@ -79,7 +80,7 @@ pub struct AppModel {
     pub cursor_mode: usize,
     pub cursor_modes: Vec<CursorMode>,
 
-    pub pctx: OnceCell<Rc<pango::Context>>,
+    pub pctx: Rc<pango::Context>,
     pub gtksettings: OnceCell<gtk::Settings>,
 
     pub hldefs: Rc<RwLock<vimview::HighlightDefinitions>>,
@@ -126,7 +127,11 @@ impl AppModel {
             cursor_mode: 0,
             cursor_modes: Vec::new(),
 
-            pctx: OnceCell::new(),
+            pctx: pangocairo::FontMap::default()
+                .unwrap()
+                .create_context()
+                .unwrap()
+                .into(),
             gtksettings: OnceCell::new(),
 
             hldefs: Rc::new(RwLock::new(vimview::HighlightDefinitions::new())),
@@ -167,10 +172,9 @@ impl AppModel {
             desc.style(),
             desc.size() / pango::SCALE,
         );
-        let pctx = self.pctx.get().unwrap();
-        pctx.set_font_description(&desc);
-        let layout = pango::Layout::new(pctx);
-        let font_metrics = pctx.metrics(Some(&desc), None).unwrap();
+        self.pctx.set_font_description(&desc);
+        let layout = pango::Layout::new(&self.pctx);
+        let font_metrics = self.pctx.metrics(Some(&desc), None).unwrap();
         layout.set_text(SINGLE_WIDTH_CHARS);
         let layoutline = layout.line_readonly(0).unwrap();
         let charheight = layoutline.height();
@@ -178,7 +182,7 @@ impl AppModel {
         // let charwidth2 = layoutline.index_to_x(1, false);
         // let charwidth3 = layoutline.index_to_x(2, false);
         // log::error!("charwidth {} {} {}", charwidth1, charwidth2, charwidth3);
-        let item = pango::itemize(&pctx, "A", 0, 1, &pango::AttrList::new(), None)
+        let item = pango::itemize(&self.pctx, "A", 0, 1, &pango::AttrList::new(), None)
             .pop()
             .unwrap();
         let mut glyphs = pango::GlyphString::new();
@@ -248,7 +252,7 @@ impl AppUpdate for AppModel {
                         bridge::GuiOption::GuiFont(guifont) => {
                             if !guifont.trim().is_empty() {
                                 log::info!("gui font: {}", &guifont);
-                                let desc = pango::FontDescription::from_string(
+                                let mut desc = pango::FontDescription::from_string(
                                     &guifont.replace(":h", " "),
                                 );
                                 // desc.set_stretch(pango::Stretch::ExtraExpanded);
@@ -396,11 +400,7 @@ impl AppUpdate for AppModel {
                                 self.metrics.clone(),
                                 self.font_description.clone(),
                             );
-                            vgrid.set_pango_context({
-                                let mut pctx = pango::Context::new();
-                                pctx.clone_from(&self.pctx.get().unwrap());
-                                pctx
-                            });
+                            vgrid.set_pango_context(self.pctx.clone());
                             self.vgrids.insert(grid, vgrid);
                             self.relationships.insert(grid, GridWindow { winid: 0 });
                         };
@@ -436,11 +436,7 @@ impl AppUpdate for AppModel {
                                 self.metrics.clone(),
                                 self.font_description.clone(),
                             );
-                            vgrid.set_pango_context({
-                                let mut pctx = pango::Context::new();
-                                pctx.clone_from(&self.pctx.get().unwrap());
-                                pctx
-                            });
+                            vgrid.set_pango_context(self.pctx.clone());
                             self.vgrids.insert(grid, vgrid);
                             self.relationships.insert(grid, GridWindow { winid });
                             log::info!(
@@ -545,11 +541,7 @@ impl AppUpdate for AppModel {
                                 self.metrics.clone(),
                                 self.font_description.clone(),
                             );
-                            vgrid.set_pango_context({
-                                let mut pctx = pango::Context::new();
-                                pctx.clone_from(&self.pctx.get().unwrap());
-                                pctx
-                            });
+                            vgrid.set_pango_context(self.pctx.clone());
                             self.vgrids.insert(grid, vgrid);
                             self.relationships.insert(grid, GridWindow { winid });
                             log::info!(
@@ -864,7 +856,6 @@ impl Widgets<AppModel, ()> for AppWidgets {
     }
 
     fn post_init() {
-        model.pctx.set(vbox.pango_context().into()).ok();
         model.gtksettings.set(overlay.settings()).ok();
         model.recompute();
 

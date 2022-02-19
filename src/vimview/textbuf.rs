@@ -32,7 +32,7 @@ mod imp {
         hldefs: Option<Rc<RwLock<HighlightDefinitions>>>,
 
         #[derivative(Debug = "ignore")]
-        pctx: Option<pango::Context>,
+        pctx: Option<Rc<pango::Context>>,
     }
 
     impl Default for _TextBuf {
@@ -77,7 +77,7 @@ mod imp {
             self.metrics.replace(metrics);
         }
 
-        pub fn set_pango_context(&mut self, pctx: pango::Context) {
+        pub fn set_pango_context(&mut self, pctx: Rc<pango::Context>) {
             self.pctx.replace(pctx);
         }
 
@@ -118,7 +118,7 @@ mod imp {
                         end_index,
                     };
                     cell.reset_attrs(pctx, &hldefs, &metrics);
-                    log::info!(
+                    log::debug!(
                         "Setting cell {}x{} start_index {} end_index {}",
                         row,
                         col + expands.len(),
@@ -142,7 +142,7 @@ mod imp {
             //             cell.end_index
             //         )
             //     });
-            log::info!(
+            log::debug!(
                 "textbuf {}x{} setting line {} with {} cells from {} to {}",
                 ncols,
                 nrows,
@@ -175,7 +175,7 @@ mod imp {
             self.cells = cells;
         }
 
-        fn pango_context(&self) -> pango::Context {
+        fn pango_context(&self) -> Rc<pango::Context> {
             self.pctx.clone().unwrap()
         }
     }
@@ -223,11 +223,11 @@ mod imp {
             self.inner.write().unwrap().set_metrics(metrics);
         }
 
-        pub(super) fn set_pango_context(&self, pctx: pango::Context) {
+        pub(super) fn set_pango_context(&self, pctx: Rc<pango::Context>) {
             self.inner.write().unwrap().set_pango_context(pctx);
         }
 
-        pub(super) fn pango_context(&self) -> pango::Context {
+        pub(super) fn pango_context(&self) -> Rc<pango::Context> {
             self.inner.write().unwrap().pango_context()
         }
 
@@ -364,11 +364,11 @@ impl TextBuf {
         self.imp().set_metrics(metrics);
     }
 
-    pub fn set_pango_context(&self, pctx: pango::Context) {
+    pub fn set_pango_context(&self, pctx: Rc<pango::Context>) {
         self.imp().set_pango_context(pctx);
     }
 
-    pub fn pango_context(&self) -> pango::Context {
+    pub fn pango_context(&self) -> Rc<pango::Context> {
         self.imp().pango_context()
     }
 
@@ -851,14 +851,14 @@ impl TextCell {
         let inkwidth = ink.width() as f64;
         // let charwidth = metrics.charwidth() * PANGO_SCALE;
         if !self.double_width
-            && inkwidth > charwidth
-            && logiwidth >= metrics.charwidth() * 1.3 * PANGO_SCALE
+            // && inkwidth > charwidth
+            && logiwidth >= metrics.charwidth() * 1.2 * PANGO_SCALE
         {
-            let factor = if (inkwidth - charwidth) > 1. {
-                charwidth / inkwidth
+            let factor = if (logiwidth - charwidth) > 1. {
+                charwidth / logiwidth
             } else {
-                inkwidth / charwidth
-            } * 1.2;
+                logiwidth / charwidth
+            };
             let mut attr = pango::AttrFloat::new_scale(factor);
             attr.set_start_index(start_index);
             attr.set_end_index(end_index);

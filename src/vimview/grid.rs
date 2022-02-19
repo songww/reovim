@@ -202,7 +202,10 @@ mod imp {
                 let layout = pango::Layout::new(&pctx);
                 layout.set_text(&text);
                 layout.set_attributes(Some(&attrs));
-                let desc = pctx.font_description();
+                let desc = pctx.font_description().map(|mut desc| {
+                    // desc.set_variations_static("wght=200,wdth=5");
+                    desc
+                });
                 layout.set_font_description(desc.as_ref());
                 // log::info!(
                 //     "{} line {} baseline {} stretch",

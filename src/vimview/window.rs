@@ -202,7 +202,7 @@ impl VimGrid {
         self.focusable = focusable;
     }
 
-    pub fn set_pango_context(&self, pctx: pango::Context) {
+    pub fn set_pango_context(&self, pctx: Rc<pango::Context>) {
         self.textbuf().borrow().set_pango_context(pctx);
     }
 }
