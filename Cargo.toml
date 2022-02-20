@@ -34,8 +34,9 @@ pango = { version = "0.15", features = [ "v1_50" ] }
 gdk = { version = "0.4", package = "gdk4", features = [ "v4_6" ] }
 gtk = { version = "0.4", package = "gtk4", features = [ "v4_6" ] }
 cairo = { version = "0.15", package = "cairo-rs", features = [ "v1_16", "png" ] }
+adw = { version = "0", package = "libadwaita" }
 
-relm4 = {  version = "0.4", features = ["tokio-rt"] }
+relm4 = {  version = "0.4", features = [ "tokio-rt", "libadwaita" ] }
 relm-macros = { version = "0.4", package = "relm4-macros" }
 relm-components = { version = "0.4", package = "relm4-components" }
 
@@ -49,3 +50,8 @@ debug = true
 "pango" = { path = '/home/songww/workspace/github.com/gtk-rs-core/pango' }
 [patch.crates-io]
 "pango" = { path = '/home/songww/workspace/github.com/gtk-rs-core/pango' }
+
+[workspace]
+members = [
+    "textview"
+]

@@ -1,0 +1,36 @@
+[package]
+name = "textview"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+
+[lib]
+crate-type = [ "dylib" ]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+log = "0.4"
+fragile = "1"
+once_cell = "1"
+thiserror = "1"
+
+[dependencies.cairo]
+git = "https://github.com/gtk-rs/gtk-rs-core.git"
+package = "cairo-rs"
+branch = "master"
+
+[dependencies.pango]
+git = "https://github.com/gtk-rs/gtk-rs-core.git"
+package = "pango"
+branch = "master"
+
+[dependencies.pangocairo]
+git = "https://github.com/gtk-rs/gtk-rs-core.git"
+package = "pangocairo"
+branch = "master"
+
+[dependencies.graphene]
+git = "https://github.com/gtk-rs/gtk-rs-core.git"
+package = "graphene-rs"
+branch = "master"

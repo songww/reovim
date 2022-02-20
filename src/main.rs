@@ -12,6 +12,7 @@ mod app;
 mod bridge;
 mod channel;
 mod color;
+mod components;
 mod cursor;
 mod elements;
 mod factory;

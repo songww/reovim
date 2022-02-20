@@ -9,6 +9,7 @@ use std::{
     rc::Rc,
 };
 
+pub use grid::VimGridView;
 pub use highlights::HighlightDefinitions;
 pub use textbuf::{TextCell, TextLine};
 pub use window::{VimGrid, VimGridWidgets};

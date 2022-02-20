@@ -11,6 +11,7 @@ pub struct Metrics {
     height: f64,
     /// by pango font metrics
     width: f64,
+    ascent: f64,
 }
 
 impl Metrics {
@@ -24,6 +25,7 @@ impl Metrics {
 
             width: 1.,
             height: 2.,
+            ascent: 0.,
         }
     }
 
@@ -66,5 +68,12 @@ impl Metrics {
 
     pub fn set_linespace(&mut self, linespace: f64) {
         self.linespace = linespace;
+    }
+
+    pub fn ascent(&self) -> f64 {
+        self.ascent
+    }
+    pub fn set_ascent(&mut self, ascent: f64) {
+        self.ascent = ascent;
     }
 }

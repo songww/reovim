@@ -832,6 +832,7 @@ impl TextCell {
             attrs.insert(attr);
         }
 
+        /*
         let item =
             pango::itemize(&pctx, &self.text, 0, self.text.len() as i32, &attrs, None).remove(0);
         let mut glyphs = pango::GlyphString::new();
@@ -852,13 +853,9 @@ impl TextCell {
         // let charwidth = metrics.charwidth() * PANGO_SCALE;
         if !self.double_width
             // && inkwidth > charwidth
-            && logiwidth >= metrics.charwidth() * 1.2 * PANGO_SCALE
+            && inkwidth >= charwidth
         {
-            let factor = if (logiwidth - charwidth) > 1. {
-                charwidth / logiwidth
-            } else {
-                logiwidth / charwidth
-            };
+            let factor = charwidth / inkwidth;
             let mut attr = pango::AttrFloat::new_scale(factor);
             attr.set_start_index(start_index);
             attr.set_end_index(end_index);
@@ -870,12 +867,12 @@ impl TextCell {
                 self.start_index,
                 self.end_index,
             );
-            // let mut attr = pango::AttrInt::new_letter_spacing(
-            //     (-metrics.charwidth() * PANGO_SCALE * 0.2).round() as i32,
-            // );
-            // attr.set_start_index(start_index);
-            // attr.set_end_index(end_index);
-            // attrs.insert(attr);
+            let mut attr = pango::AttrInt::new_letter_spacing(
+                (-metrics.charwidth() * PANGO_SCALE * 0.2).round() as i32,
+            );
+            attr.set_start_index(start_index);
+            attr.set_end_index(end_index);
+            attrs.insert(attr);
         } else if (logiwidth - charwidth).abs() > 1. {
             let letter_spacing = width.round() as i32 - logi.width();
 
@@ -899,6 +896,7 @@ impl TextCell {
             attr.set_end_index(end_index);
             attrs.insert(attr);
         }
+        */
         self.attrs = attrs.attributes();
     }
 }

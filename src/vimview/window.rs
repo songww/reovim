@@ -12,7 +12,6 @@ use relm4::*;
 use crate::app;
 use crate::bridge::{MouseAction, MouseButton, UiCommand};
 use crate::cursor::Cursor;
-
 use crate::pos::Position;
 use crate::rect::Rectangle;
 

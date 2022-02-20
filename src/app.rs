@@ -2,17 +2,22 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{atomic, RwLock};
 
+use adw::prelude::*;
 use gdk::prelude::FontMapExt;
 use gtk::prelude::{
-    BoxExt, DrawingAreaExt, DrawingAreaExtManual, EventControllerExt, GtkWindowExt, IMContextExt,
-    IMContextExtManual, IMMulticontextExt, OrientableExt, WidgetExt,
+    BoxExt, DrawingAreaExt, DrawingAreaExtManual, EditableExt, EditableExtManual,
+    EventControllerExt, FrameExt, GtkWindowExt, IMContextExt, IMContextExtManual,
+    IMMulticontextExt, OrientableExt, WidgetExt,
 };
 use once_cell::sync::OnceCell;
 use pango::FontDescription;
-use relm4::{AppUpdate, Model, Sender, Widgets};
+use relm4::*;
 use rustc_hash::FxHashMap;
 
 use crate::bridge::{EditorMode, MessageKind, WindowAnchor};
+use crate::components::{
+    VimCmdPrompt, VimCmdPromptWidgets, VimNotifactions, VimNotifactionsWidgets,
+};
 use crate::cursor::{Cursor, CursorMode};
 use crate::keys::ToInput;
 use crate::vimview::{self, VimGrid};
@@ -40,21 +45,6 @@ pub struct GridWindow {
     winid: u64,
     // default grid
     //default_grid: u64,
-}
-
-pub struct FloatWindow {
-    id: u64,
-    anchor: WindowAnchor,
-    anchor_grid: u64,
-    anchor_row: f64,
-    anchor_col: f64,
-    focusable: bool,
-    rank: Option<u64>,
-}
-
-pub struct Message {
-    kind: MessageKind,
-    content: Vec<(u64, String)>,
 }
 
 pub struct AppModel {
@@ -94,8 +84,6 @@ pub struct AppModel {
     pub relationships: FxHashMap<u64, GridWindow>,
 
     // pub floatwindows: crate::factory::FactoryMap<FloatWindow>,
-    pub messages: Vec<Message>,
-
     pub rt: tokio::runtime::Runtime,
 }
 
@@ -106,6 +94,7 @@ impl AppModel {
             .enable_io()
             .build()
             .unwrap();
+        let font_desc = FontDescription::from_string("monospace 11");
         AppModel {
             title: opts.title.clone(),
             default_width: opts.width,
@@ -114,10 +103,6 @@ impl AppModel {
             guifontset: None,
             guifontwide: None,
             show_tab_line: None,
-
-            metrics: Rc::new(Metrics::new().into()),
-            font_description: Rc::new(RefCell::new(FontDescription::from_string("monospace 11"))),
-            font_changed: Rc::new(false.into()),
 
             mode: EditorMode::Normal,
 
@@ -130,9 +115,27 @@ impl AppModel {
             pctx: pangocairo::FontMap::default()
                 .unwrap()
                 .create_context()
+                .map(|ctx| {
+                    ctx.set_round_glyph_positions(false);
+                    ctx.set_font_description(&font_desc);
+                    ctx.set_base_dir(pango::Direction::Ltr);
+                    ctx.set_language(&pango::Language::default());
+                    let mut options = cairo::FontOptions::new().ok();
+                    options.as_mut().map(|options| {
+                        options.set_antialias(cairo::Antialias::Subpixel);
+                        options.set_hint_style(cairo::HintStyle::Default);
+                        // options.set_hint_metrics(cairo::HintMetrics::On);
+                    });
+                    pangocairo::context_set_font_options(&ctx, options.as_ref());
+                    ctx
+                })
                 .unwrap()
                 .into(),
             gtksettings: OnceCell::new(),
+
+            metrics: Rc::new(Metrics::new().into()),
+            font_description: Rc::new(RefCell::new(font_desc)),
+            font_changed: Rc::new(false.into()),
 
             hldefs: Rc::new(RwLock::new(vimview::HighlightDefinitions::new())),
 
@@ -143,9 +146,6 @@ impl AppModel {
             vgrids: crate::factory::FactoryMap::new(),
             relationships: FxHashMap::default(),
 
-            // floatwindows: crate::factory::FactoryMap::new(),
-            messages: Vec::new(),
-
             opts,
 
             rt,
@@ -153,18 +153,18 @@ impl AppModel {
     }
 
     pub fn recompute(&self) {
+        const PANGO_SCALE: f64 = pango::SCALE as f64;
         const SINGLE_WIDTH_CHARS: &'static str = concat!(
-            "ABC D E F G H I J K L M N O P Q R S T U V W X Y Z ",
-            "! \" # $ % & ' ( ) * + , - . / ",
+            " ! \" # $ % & ' ( ) * + , - . / ",
             "0 1 2 3 4 5 6 7 8 9 ",
             ": ; < = > ? @ ",
+            "A B C D E F G H I J K L M N O P Q R S T U V W X Y Z ",
             "[ \\ ] ^ _ ` ",
             "a b c d e f g h i j k l m n o p q r s t u v w x y z ",
             "{ | } ~ ",
+            ""
         );
         let desc = self.font_description.borrow_mut();
-        // desc.set_weight(pango::Weight::Light);
-        // desc.set_stretch(pango::Stretch::Condensed);
         log::error!(
             "----------------------> font desc {} {} {} {}",
             desc.family().unwrap(),
@@ -172,37 +172,51 @@ impl AppModel {
             desc.style(),
             desc.size() / pango::SCALE,
         );
-        self.pctx.set_font_description(&desc);
+        // self.pctx.set_font_description(&desc);
         let layout = pango::Layout::new(&self.pctx);
-        let font_metrics = self.pctx.metrics(Some(&desc), None).unwrap();
+        layout.set_font_description(Some(&desc));
+        let mut tabs = pango::TabArray::new(1, false);
+        tabs.set_tab(0, pango::TabAlign::Left, 1);
+        layout.set_tabs(Some(&tabs));
+        let mut max_width = 1;
+        let mut max_height = 1;
+
+        (0x21u8..0x7f).for_each(|c| {
+            // char_
+            let text = unsafe { String::from_utf8_unchecked(vec![c]) };
+            layout.set_text(&text);
+            let logical = layout.extents().1;
+            max_height = logical.height().max(max_height);
+            max_width = logical.width().max(max_width);
+        });
+
         layout.set_text(SINGLE_WIDTH_CHARS);
-        let layoutline = layout.line_readonly(0).unwrap();
-        let charheight = layoutline.height();
-        // let charwidth1 = layoutline.index_to_x(0, false);
-        // let charwidth2 = layoutline.index_to_x(1, false);
-        // let charwidth3 = layoutline.index_to_x(2, false);
-        // log::error!("charwidth {} {} {}", charwidth1, charwidth2, charwidth3);
-        let item = pango::itemize(&self.pctx, "A", 0, 1, &pango::AttrList::new(), None)
-            .pop()
-            .unwrap();
-        let mut glyphs = pango::GlyphString::new();
-        pango::shape("A", item.analysis(), &mut glyphs);
-        let (_, rect) = glyphs.extents(&item.analysis().font());
-        let charwidth = rect.width() as f64 / pango::SCALE as f64;
+        // let logical = layout.extents().1;
+        let ascent = layout.baseline() as f64 / PANGO_SCALE;
+        let font_metrics = self.pctx.metrics(Some(&desc), None).unwrap();
+        let fm_width = font_metrics.approximate_digit_width();
+        let fm_height = font_metrics.height();
+        let fm_ascent = font_metrics.ascent();
+        log::error!("font-metrics widht: {}", fm_width as f64 / PANGO_SCALE);
+        log::error!("font-metrics height: {}", fm_height as f64 / PANGO_SCALE);
+        log::error!("font-metrics ascent: {}", fm_ascent as f64 / PANGO_SCALE);
         let mut metrics = self.metrics.get();
-        let charheight = charheight as f64 / pango::SCALE as f64;
-        let width = font_metrics.approximate_digit_width() as f64 / pango::SCALE as f64;
+        let charheight = max_height as f64 / PANGO_SCALE;
+        let charwidth = max_width as f64 / PANGO_SCALE;
+        let width = charwidth;
         if metrics.charheight() == charheight
             && metrics.charwidth() == charwidth
             && metrics.width() == width
         {
             return;
         }
-        metrics.set_width(width);
-        metrics.set_charwidth(charwidth);
-        metrics.set_charheight(charheight);
-        log::error!("char-height {:?}", metrics.charheight());
+        metrics.set_width(width.ceil());
+        metrics.set_ascent(ascent.ceil());
+        metrics.set_charwidth(charwidth.ceil());
+        metrics.set_charheight(charheight.ceil());
         log::error!("char-width {:?}", metrics.charwidth());
+        log::error!("char-height {:?}", metrics.charheight());
+        log::error!("char-ascent {:?}", metrics.ascent());
         self.metrics.replace(metrics);
     }
 }
@@ -223,7 +237,6 @@ impl AppUpdate for AppModel {
         // log::info!("message at AppModel::update {:?}", message);
         match message {
             AppMessage::UiCommand(ui_command) => {
-                // sender.send(ui_command).unwrap();
                 components
                     .messager
                     .sender()
@@ -252,14 +265,14 @@ impl AppUpdate for AppModel {
                         bridge::GuiOption::GuiFont(guifont) => {
                             if !guifont.trim().is_empty() {
                                 log::info!("gui font: {}", &guifont);
-                                let mut desc = pango::FontDescription::from_string(
+                                let desc = pango::FontDescription::from_string(
                                     &guifont.replace(":h", " "),
                                 );
-                                // desc.set_stretch(pango::Stretch::ExtraExpanded);
 
                                 self.gtksettings.get().map(|settings| {
                                     settings.set_gtk_font_name(Some(&desc.to_str()));
                                 });
+                                self.pctx.set_font_description(&desc);
 
                                 self.guifont.replace(guifont);
                                 self.font_description.replace(desc);
@@ -367,12 +380,12 @@ impl AppUpdate for AppModel {
                             //
                             vgrid.down(rows.abs() as _);
                         } else if columns.is_positive() {
-                            //
+                            unimplemented!("scroll left.");
                         } else if columns.is_negative() {
-                            //
+                            unimplemented!("scroll right.");
                         } else {
                             // rows and columns are both zero.
-                            unimplemented!("Should not here.");
+                            unimplemented!("why here.");
                         }
                     }
                     RedrawEvent::Resize {
@@ -617,6 +630,7 @@ impl AppUpdate for AppModel {
                         self.vgrids
                             .get_mut(grid)
                             .map(|vgrid| vgrid.cursor_mut().set_pos(row, column));
+                        // TODO: Add im_context.set_cursor_location
                     }
                     RedrawEvent::ModeInfoSet { cursor_modes } => {
                         self.cursor_modes = cursor_modes;
@@ -634,6 +648,7 @@ impl AppUpdate for AppModel {
                         self.mode = mode;
                         self.cursor_mode = mode_index as _;
                         let cursor_mode = &self.cursor_modes[self.cursor_mode];
+                        log::error!("Mode Change to {:?} {:?}", &self.mode, cursor_mode);
                         let style = self.hldefs.read().unwrap();
                         let cursor = if let Some(cursor_at) = self.cursor_at {
                             self.vgrids.get_mut(cursor_at).unwrap().cursor_mut()
@@ -661,13 +676,6 @@ impl AppUpdate for AppModel {
                         replace_last,
                     } => {
                         log::error!("showing message {:?} {:?}", kind, content);
-                        if replace_last {
-                            if let Some(last) = self.messages.last_mut() {
-                                *last = Message { kind, content }
-                            } else {
-                                self.messages.push(Message { kind, content })
-                            }
-                        }
                     }
                     RedrawEvent::MessageShowMode { content } => {
                         log::error!("message show mode: {:?}", content);
@@ -697,7 +705,6 @@ impl AppUpdate for AppModel {
                     }
                     RedrawEvent::MessageClear => {
                         log::error!("message clear all");
-                        self.messages.clear();
                     }
 
                     RedrawEvent::WindowFloatPosition {
@@ -759,6 +766,8 @@ impl AppUpdate for AppModel {
 #[derive(relm4::Components)]
 pub struct AppComponents {
     messager: relm4::RelmMsgHandler<crate::messager::VimMessager, AppModel>,
+    messages: RelmComponent<VimNotifactions, AppModel>,
+    cmd_prompt: RelmComponent<VimCmdPrompt, AppModel>,
 }
 
 #[relm_macros::widget(pub)]
@@ -840,12 +849,17 @@ impl Widgets<AppModel, ()> for AppWidgets {
                         set_vexpand: false,
                         set_focus_on_click: false,
                     },
-                    add_overlay: messages_container = &gtk::Grid {
+                    add_overlay: messages_container = &gtk::Frame {
                         set_widget_name: "messages-container",
                         set_visible: false,
                         set_hexpand: false,
                         set_vexpand: false,
+                        set_child: Some(components.messages.root_widget()),
                     },
+                    add_overlay: commnad_prompt = &gtk::Frame {
+                        set_visible: false,
+                        set_child: Some(components.cmd_prompt.root_widget()),
+                    }
                 }
             },
             connect_close_request[sender = sender.clone()] => move |_| {
