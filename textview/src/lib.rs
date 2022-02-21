@@ -1,5 +1,10 @@
-pub mod box_drawing;
-pub mod minifont;
+#![feature(hash_set_entry)]
+pub mod attr;
+pub mod builtin_font;
+pub mod color;
+pub mod consts;
+pub mod drawing;
+pub mod font_metrics;
 
 #[cfg(test)]
 mod tests {

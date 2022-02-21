@@ -1,8 +1,11 @@
-fn is_box_char(c: char) -> bool {
+use crate::{color::Colorf, drawing::DrawingContext};
+
+pub fn is_builtin(c: char) -> bool {
     // Box Drawing & Block Elements
-    (c >= 0x2500 as char && c <= 0x259f as char)
-        || (c >= 0x25e2 as char && c <= 0x25e5 as char)
-        || (c >= 0x1fb00 as char && c <= 0x1fbaf as char)
+    let c = c as u32;
+    (c >= 0x2500 && c <= 0x259f) ||  // -
+    (c >= 0x25e2 && c <= 0x25e5) ||  // -
+    (c >= 0x1fb00 && c <= 0x1fbaf)
 }
 
 /// pixman data must have stride 1 mod 4
@@ -147,65 +150,55 @@ fn pattern(
     Ok(())
 }
 
-use crate::box_drawing::DRAW_BOX_DRAWING_BITMAPS;
-
-struct DrawingContext {}
-impl DrawingContext {
-    fn cairo(&self) -> &cairo::Context {
-        todo!()
-    }
-    fn cell_width(&self) -> i32 {
-        todo!()
-    }
-    fn cell_height(&self) -> i32 {
-        todo!()
-    }
+mod builtins {
+    include!(concat!(env!("OUT_DIR"), "/box_drawing.rs"));
 }
-struct RGB;
 
-pub fn draw_box_char(
+pub fn draw_builtin(
     context: &DrawingContext,
     c: char,
-    attr: u32,
-    fg: &RGB,
+    // attr: u32,
+    fg: &Colorf,
     x: i32,
     y: i32,
     font_width: i32,
     columns: i32,
-    font_height: i32,
+    // font_height: i32,
 ) -> Result<(), cairo::Error> {
-    let mut width: i32;
-    let mut height: i32;
-    let mut xcenter: i32;
-    let mut xright: i32;
-    let mut ycenter: i32;
-    let mut ybottom: i32;
-    let mut upper_half: i32;
-    let mut left_half: i32;
-    let mut light_line_width: i32;
-    let mut heavy_line_width: i32;
-    let mut adjust: f32;
+    let width: f64;
+    let height: f64;
+    let xcenter: f64;
+    let xright: f64;
+    let ycenter: f64;
+    let ybottom: f64;
+    let upper_half: f64;
+    let left_half: f64;
+    let mut light_line_width: f64;
+    let heavy_line_width: f64;
+    let adjust: f64;
     let cr = context.cairo();
 
     cr.save()?;
 
-    let c = c as u32;
+    let mut c = c as u32;
 
-    width = context.cell_width() * columns;
-    height = context.cell_height();
-    upper_half = height / 2;
-    left_half = width / 2;
+    width = f64::from(context.cell_width()) * f64::from(columns);
+    height = context.cell_height().into();
+    upper_half = height / 2.;
+    left_half = width / 2.;
 
     /* Exclude the spacing for line width computation. */
-    light_line_width = font_width / 5;
-    light_line_width = light_line_width.max(1);
+    light_line_width = f64::from(font_width) / 5.;
+    light_line_width = light_line_width.max(1.);
 
     if c >= 0x2550 && c <= 0x256c {
-        heavy_line_width = 3 * light_line_width;
+        heavy_line_width = 3. * light_line_width;
     } else {
-        heavy_line_width = light_line_width + 2;
+        heavy_line_width = light_line_width + 2.;
     }
 
+    let x = x.into();
+    let y = y.into();
     xcenter = x + left_half;
     ycenter = y + upper_half;
     xright = x + width;
@@ -216,7 +209,7 @@ pub fn draw_box_char(
         /* box drawings light horizontal with vertical stroke */
         rectangle(
             cr,
-            (x + left_half - light_line_width / 2) as f64,
+            x + left_half - light_line_width / 2.,
             y as f64,
             light_line_width as f64,
             height as f64,
@@ -226,7 +219,7 @@ pub fn draw_box_char(
             1,
             1,
             2,
-        );
+        )?;
         c = 0x2500;
     }
     match c {
@@ -341,21 +334,21 @@ pub fn draw_box_char(
         0x257f => {
             /* box drawings heavy up and light down */
 
-            let mut bitmap: u32 = DRAW_BOX_DRAWING_BITMAPS[c as usize - 0x2500];
-            let xboundaries: [i32; 6] = [
-                0,
-                left_half - heavy_line_width / 2,
-                left_half - light_line_width / 2,
-                left_half - light_line_width / 2 + light_line_width,
-                left_half - heavy_line_width / 2 + heavy_line_width,
+            let mut bitmap: u32 = builtins::BITMAPS[c as usize - 0x2500];
+            let xboundaries: [f64; 6] = [
+                0.,
+                left_half - heavy_line_width / 2.,
+                left_half - light_line_width / 2.,
+                left_half - light_line_width / 2. + light_line_width,
+                left_half - heavy_line_width / 2. + heavy_line_width,
                 width,
             ];
-            let yboundaries: [i32; 6] = [
-                0,
-                upper_half - heavy_line_width / 2,
-                upper_half - light_line_width / 2,
-                upper_half - light_line_width / 2 + light_line_width,
-                upper_half - heavy_line_width / 2 + heavy_line_width,
+            let yboundaries: [f64; 6] = [
+                0.,
+                upper_half - heavy_line_width / 2.,
+                upper_half - light_line_width / 2.,
+                upper_half - light_line_width / 2. + light_line_width,
+                upper_half - heavy_line_width / 2. + heavy_line_width,
                 height,
             ];
             cr.set_line_width(0.);
@@ -389,32 +382,33 @@ pub fn draw_box_char(
         0x254f => {
             /* box drawings heavy double dash vertical */
 
-            let v: u32 = c as u32 - 0x2500;
+            let v: u32 = c - 0x2500;
             // int size, line_width;
 
-            let size = if v >= 2 { height } else { width };
+            let size: f64 = if v >= 2 { height } else { width };
 
             match v >> 2 {
                 1 => {
                     // triple dash */
                     let segment: f64 = size / 8.;
                     let dashes: [f64; 2] = [segment * 2., segment];
-                    cr.set_dash(&dashes, G_N_ELEMENTS(dashes), 0.);
+                    cr.set_dash(&dashes, 0.);
                 }
                 2 => {
                     // quadruple dash
 
                     let segment = size / 11.;
                     let dashes: [f64; 2] = [segment * 2., segment];
-                    cr.set_dash(&dashes, G_N_ELEMENTS(dashes), 0.);
+                    cr.set_dash(&dashes, 0.);
                 }
                 19 => {
                     // double dash
 
                     let segment = size / 5.;
                     let dashes: [f64; 2] = [segment * 2., segment];
-                    cr.set_dash(&dashes, G_N_ELEMENTS(dashes), 0.);
+                    cr.set_dash(&dashes, 0.);
                 }
+                _ => unreachable!()
             }
 
             let line_width = if v >= 1 {
@@ -422,7 +416,7 @@ pub fn draw_box_char(
             } else {
                 light_line_width
             };
-            adjust = if line_width >= 1 { 0.5 } else { 0. };
+            adjust = if line_width >= 1. { 0.5 } else { 0. };
 
             cr.set_line_width(line_width);
             cr.set_line_cap(cairo::LineCap::Butt);
@@ -430,10 +424,10 @@ pub fn draw_box_char(
                 cr.move_to(xcenter + adjust, y);
                 cr.line_to(xcenter + adjust, y + height);
             } else {
-                cr.move_to(x, ycenter + adjust);
+                cr.move_to(x, f64::from(ycenter) + adjust);
                 cr.line_to(x + width, ycenter + adjust);
             }
-            cr.stroke();
+            cr.stroke()?;
         }
 
         0x256d | /* box drawings light arc down and right */
@@ -442,54 +436,52 @@ pub fn draw_box_char(
         0x2570 => {
             /* box drawings light arc up and right */
 
-            let v = c as usize - 0x256d;
-            // int line_width;
-            // int radius;
+            let v = c as u32 - 0x256d;
 
             cr.set_line_cap(cairo::LineCap::Butt);
 
-            let line_width = light_line_width;
-            adjust = if line_width >= 1 { 0.5 } else { 0. };
+            let line_width = light_line_width.into();
+            adjust = if line_width >= 1. { 0.5 } else { 0. };
             cr.set_line_width(line_width);
 
-            let radius = (font_width + 2) / 3;
+            let radius: f64 = (f64::from(font_width) + 2.) / 3.;
             let radius = radius.max(heavy_line_width);
 
             if v >= 2 {
                 cr.move_to(xcenter + adjust, y);
-                cr.line_to(xcenter + adjust, ycenter - radius + 2 * adjust);
+                cr.line_to(xcenter + adjust, ycenter - radius + 2. * adjust);
             } else {
                 cr.move_to(xcenter + adjust, ybottom);
                 cr.line_to(xcenter + adjust, ycenter + radius);
             }
-            cr.stroke();
+            cr.stroke()?;
 
             cr.arc(
                 if v == 1 || v == 2 {
-                    xcenter - radius + 2 * adjust
+                    xcenter - radius + 2. * adjust
                 } else {
                     xcenter + radius
                 },
                 if v >= 2 {
-                    ycenter - radius + 2 * adjust
+                    ycenter - radius + 2. * adjust
                 } else {
                     ycenter + radius
                 },
                 radius - adjust,
-                (v + 2) * M_PI / 2.0,
-                (v + 3) * M_PI / 2.0,
+                (f64::from(v) + 2.) * std::f64::consts::PI / 2.0,
+                (f64::from(v) + 3.) * std::f64::consts::PI / 2.0,
             );
-            cr.stroke();
+            cr.stroke()?;
 
             if v == 1 || v == 2 {
-                cr.move_to(xcenter - radius + 2 * adjust, ycenter + adjust);
+                cr.move_to(xcenter - radius + 2. * adjust, ycenter + adjust);
                 cr.line_to(x, ycenter + adjust);
             } else {
                 cr.move_to(xcenter + radius, ycenter + adjust);
                 cr.line_to(xright, ycenter + adjust);
             }
 
-            cr.stroke();
+            cr.stroke()?;
         }
 
         0x2571 | /* box drawings light diagonal upper right to lower left */
@@ -497,27 +489,27 @@ pub fn draw_box_char(
         0x2573 => {
             /* box drawings light diagonal cross */
 
-            let dx = (light_line_width + 1) / 2;
-            cr.rectangle(x - dx, y, width + 2 * dx, height);
+            let dx = (light_line_width + 1.) / 2.;
+            cr.rectangle(x - dx, y, width + 2. * dx, height);
             cr.clip();
-            cr.set_line_cap(CAIRO_LINE_CAP_SQUARE);
+            cr.set_line_cap(cairo::LineCap::Square);
             cr.set_line_width(light_line_width);
-            if (c != 0x2571) {
+            if c != 0x2571 {
                 cr.move_to(x, y);
                 cr.line_to(xright, ybottom);
-                cr.stroke();
+                cr.stroke()?;
             }
-            if (c != 0x2572) {
+            if c != 0x2572 {
                 cr.move_to(xright, y);
                 cr.line_to(x, ybottom);
-                cr.stroke();
+                cr.stroke()?;
             }
         }
 
         /* Block Elements */
         0x2580 => {
             /* upper half block */
-            rectangle(cr, x, y, width, height, 1, 2, 0, 0, 1, 1);
+            rectangle(cr, x, y, width, height, 1, 2, 0, 0, 1, 1)?;
         }
         0x2581 | /* lower one eighth block */
         0x2582 | /* lower one quarter block */
@@ -529,7 +521,7 @@ pub fn draw_box_char(
             /* lower seven eighths block */
 
             let v = 0x2588 - c;
-            rectangle(cr, x, y, width, height, 1, 8, 0, v, 1, 8);
+            rectangle(cr, x, y, width, height, 1, 8, 0, v as i32, 1, 8)?;
         }
 
         0x2588 | /* full block */
@@ -543,12 +535,12 @@ pub fn draw_box_char(
             /* left one eighth block */
 
             let v = 0x2590 - c;
-            rectangle(cr, x, y, width, height, 8, 1, 0, 0, v, 1);
+            rectangle(cr, x, y, width, height, 8, 1, 0, 0, v as i32, 1)?;
         }
 
         0x2590 => {
             /* right half block */
-            rectangle(cr, x, y, width, height, 2, 1, 1, 0, 2, 1);
+            rectangle(cr, x, y, width, height, 2, 1, 1, 0, 2, 1)?;
         }
         0x2591 | /* light shade */
         0x2592 | /* medium shade */
@@ -558,93 +550,93 @@ pub fn draw_box_char(
                 fg.red() / 65535.,
                 fg.green() / 65535.,
                 fg.blue() / 65535.,
-                (c - 0x2590) / 4.,
+                f64::from(c - 0x2590) / 4.,
             );
             cr.rectangle(x, y, width, height);
-            cr.fill();
+            cr.fill()?;
         }
         0x2594 =>
         /* upper one eighth block */
         {
-            rectangle(cr, x, y, width, height, 1, 8, 0, 0, 1, 1);
+            rectangle(cr, x, y, width, height, 1, 8, 0, 0, 1, 1)?;
         }
 
         0x2595 => {
             /* right one eighth block */
 
-            rectangle(cr, x, y, width, height, 8, 1, 7, 0, 8, 1);
+            rectangle(cr, x, y, width, height, 8, 1, 7, 0, 8, 1)?;
         }
 
         0x2596 => {
             /* quadrant lower left */
-            rectangle(cr, x, y, width, height, 2, 2, 0, 1, 1, 2);
+            rectangle(cr, x, y, width, height, 2, 2, 0, 1, 1, 2)?;
         }
         0x2597 => {
             /* quadrant lower right */
-            rectangle(cr, x, y, width, height, 2, 2, 1, 1, 2, 2);
+            rectangle(cr, x, y, width, height, 2, 2, 1, 1, 2, 2)?;
         }
 
         0x2598 => {
             /* quadrant upper left */
-            rectangle(cr, x, y, width, height, 2, 2, 0, 0, 1, 1);
+            rectangle(cr, x, y, width, height, 2, 2, 0, 0, 1, 1)?;
         }
 
         0x2599 => {
             /* quadrant upper left and lower left and lower right */
-            rectangle(cr, x, y, width, height, 2, 2, 0, 0, 1, 1);
-            rectangle(cr, x, y, width, height, 2, 2, 0, 1, 2, 2);
+            rectangle(cr, x, y, width, height, 2, 2, 0, 0, 1, 1)?;
+            rectangle(cr, x, y, width, height, 2, 2, 0, 1, 2, 2)?;
         }
         0x259a => {
             /* quadrant upper left and lower right */
-            rectangle(cr, x, y, width, height, 2, 2, 0, 0, 1, 1);
-            rectangle(cr, x, y, width, height, 2, 2, 1, 1, 2, 2);
+            rectangle(cr, x, y, width, height, 2, 2, 0, 0, 1, 1)?;
+            rectangle(cr, x, y, width, height, 2, 2, 1, 1, 2, 2)?;
         }
         0x259b => {
             /* quadrant upper left and upper right and lower left */
-            rectangle(cr, x, y, width, height, 2, 2, 0, 0, 2, 1);
-            rectangle(cr, x, y, width, height, 2, 2, 0, 1, 1, 2);
+            rectangle(cr, x, y, width, height, 2, 2, 0, 0, 2, 1)?;
+            rectangle(cr, x, y, width, height, 2, 2, 0, 1, 1, 2)?;
         }
         0x259c => {
             /* quadrant upper left and upper right and lower right */
-            rectangle(cr, x, y, width, height, 2, 2, 0, 0, 2, 1);
-            rectangle(cr, x, y, width, height, 2, 2, 1, 1, 2, 2);
+            rectangle(cr, x, y, width, height, 2, 2, 0, 0, 2, 1)?;
+            rectangle(cr, x, y, width, height, 2, 2, 1, 1, 2, 2)?;
         }
         0x259d => {
             /* quadrant upper right */
-            rectangle(cr, x, y, width, height, 2, 2, 1, 0, 2, 1);
+            rectangle(cr, x, y, width, height, 2, 2, 1, 0, 2, 1)?;
         }
         0x259e => {
             /* quadrant upper right and lower left */
-            rectangle(cr, x, y, width, height, 2, 2, 1, 0, 2, 1);
-            rectangle(cr, x, y, width, height, 2, 2, 0, 1, 1, 2);
+            rectangle(cr, x, y, width, height, 2, 2, 1, 0, 2, 1)?;
+            rectangle(cr, x, y, width, height, 2, 2, 0, 1, 1, 2)?;
         }
         0x259f => {
             /* quadrant upper right and lower left and lower right */
-            rectangle(cr, x, y, width, height, 2, 2, 1, 0, 2, 1);
-            rectangle(cr, x, y, width, height, 2, 2, 0, 1, 2, 2);
+            rectangle(cr, x, y, width, height, 2, 2, 1, 0, 2, 1)?;
+            rectangle(cr, x, y, width, height, 2, 2, 0, 1, 2, 2)?;
         }
         0x25e2 => {
             /* black lower right triangle */
             let coords: &[i8] = &[0, 1, 1, 0, 1, 1, -1];
-            polygon(cr, x, y, width, height, 1, 1, coords);
+            polygon(cr, x, y, width, height, 1, 1, coords)?;
         }
 
         0x25e3 => {
             /* black lower left triangle */
             let coords: &[i8] = &[0, 0, 1, 1, 0, 1, -1];
-            polygon(cr, x, y, width, height, 1, 1, coords);
+            polygon(cr, x, y, width, height, 1, 1, coords)?;
         }
 
         0x25e4 => {
             /* black upper left triangle */
             let coords: &[i8] = &[0, 0, 1, 0, 0, 1, -1];
-            polygon(cr, x, y, width, height, 1, 1, coords);
+            polygon(cr, x, y, width, height, 1, 1, coords)?;
         }
 
         0x25e5 => {
             /* black upper right triangle */
             let coords: &[i8] = &[0, 0, 1, 0, 1, 1, -1];
-            polygon(cr, x, y, width, height, 1, 1, coords);
+            polygon(cr, x, y, width, height, 1, 1, coords)?;
         }
 
         0x1fb00 |
@@ -721,7 +713,7 @@ pub fn draw_box_char(
                 // for (xi = 0; xi <= 1; xi++) {
                 for xi in 0..=1 {
                     if bitmap >= 1 {
-                        rectangle(cr, x, y, width, height, 2, 3, xi, yi, xi + 1, yi + 1);
+                        rectangle(cr, x, y, width, height, 2, 3, xi, yi, xi + 1, yi + 1)?;
                     }
                     bitmap >>= 1;
                 }
@@ -773,7 +765,7 @@ pub fn draw_box_char(
         0x1fb66 |
         0x1fb67 => {
             let v = c - 0x1fb3c;
-            let coords: &[&[i8]] = [
+            let coords: Vec<&[i8]> = vec![
                 &[0, 2, 1, 3, 0, 3, -1],             /* 3c */
                 &[0, 2, 2, 3, 0, 3, -1],             /* 3d */
                 &[0, 1, 1, 3, 0, 3, -1],             /* 3e */
@@ -819,7 +811,7 @@ pub fn draw_box_char(
                 &[1, 0, 2, 0, 2, 3, -1],             /* 66 */
                 &[0, 0, 2, 0, 2, 2, 0, 1, -1],       /* 67 */
             ];
-            polygon(cr, x, y, width, height, 2, 3, coords[v]);
+            polygon(cr, x, y, width, height, 2, 3, coords[v as usize])?;
         }
 
         0x1fb68 => {}
@@ -831,17 +823,17 @@ pub fn draw_box_char(
         0x1fb6e => {}
         0x1fb6f => {
             let v = c - 0x1fb68;
-            let coords: [[i8; 11]; 8] = [
-                [0, 0, 2, 0, 2, 2, 0, 2, 1, 1, -1], /* 68 */
-                [0, 0, 1, 1, 2, 0, 2, 2, 0, 2, -1], /* 69 */
-                [0, 0, 2, 0, 1, 1, 2, 2, 0, 2, -1], /* 6a */
-                [0, 0, 2, 0, 2, 2, 1, 1, 0, 2, -1], /* 6b */
-                [0, 0, 1, 1, 0, 2, -1],             /* 6c */
-                [0, 0, 2, 0, 1, 1, -1],             /* 6d */
-                [1, 1, 2, 0, 2, 2, -1],             /* 6e */
-                [1, 1, 2, 2, 0, 2, -1],             /* 6f */
+            let coords: [&[i8]; 8] = [
+                &[0, 0, 2, 0, 2, 2, 0, 2, 1, 1, -1], /* 68 */
+                &[0, 0, 1, 1, 2, 0, 2, 2, 0, 2, -1], /* 69 */
+                &[0, 0, 2, 0, 1, 1, 2, 2, 0, 2, -1], /* 6a */
+                &[0, 0, 2, 0, 2, 2, 1, 1, 0, 2, -1], /* 6b */
+                &[0, 0, 1, 1, 0, 2, -1],             /* 6c */
+                &[0, 0, 2, 0, 1, 1, -1],             /* 6d */
+                &[1, 1, 2, 0, 2, 2, -1],             /* 6e */
+                &[1, 1, 2, 2, 0, 2, -1],             /* 6f */
             ];
-            polygon(cr, x, y, width, height, 2, 2, coords[v]);
+            polygon(cr, x, y, width, height, 2, 2, coords[v as usize])?;
         }
 
         0x1fb70 => {}
@@ -850,8 +842,8 @@ pub fn draw_box_char(
         0x1fb73 => {}
         0x1fb74 => {}
         0x1fb75 => {
-            let v = c - 0x1fb70 + 1;
-            rectangle(cr, x, y, width, height, 8, 1, v, 0, v + 1, 1);
+            let v = (c - 0x1fb70 + 1) as i32;
+            rectangle(cr, x, y, width, height, 8, 1, v, 0, v + 1, 1)?;
         }
 
         0x1fb76 => {}
@@ -860,46 +852,46 @@ pub fn draw_box_char(
         0x1fb79 => {}
         0x1fb7a => {}
         0x1fb7b => {
-            let v = c - 0x1fb76 + 1;
-            rectangle(cr, x, y, width, height, 1, 8, 0, v, 1, v + 1);
+            let v = (c - 0x1fb76 + 1) as i32;
+            rectangle(cr, x, y, width, height, 1, 8, 0, v, 1, v + 1)?;
         }
 
         0x1fb7c => {
-            rectangle(cr, x, y, width, height, 1, 8, 0, 7, 1, 8);
-            rectangle(cr, x, y, width, height, 8, 1, 0, 0, 1, 1);
+            rectangle(cr, x, y, width, height, 1, 8, 0, 7, 1, 8)?;
+            rectangle(cr, x, y, width, height, 8, 1, 0, 0, 1, 1)?;
         }
         0x1fb7d => {
-            rectangle(cr, x, y, width, height, 1, 8, 0, 0, 1, 1);
-            rectangle(cr, x, y, width, height, 8, 1, 0, 0, 1, 1);
+            rectangle(cr, x, y, width, height, 1, 8, 0, 0, 1, 1)?;
+            rectangle(cr, x, y, width, height, 8, 1, 0, 0, 1, 1)?;
         }
         0x1fb7e => {
-            rectangle(cr, x, y, width, height, 1, 8, 0, 0, 1, 1);
-            rectangle(cr, x, y, width, height, 8, 1, 7, 0, 8, 1);
+            rectangle(cr, x, y, width, height, 1, 8, 0, 0, 1, 1)?;
+            rectangle(cr, x, y, width, height, 8, 1, 7, 0, 8, 1)?;
         }
         0x1fb7f => {
-            rectangle(cr, x, y, width, height, 1, 8, 0, 7, 1, 8);
-            rectangle(cr, x, y, width, height, 8, 1, 7, 0, 8, 1);
+            rectangle(cr, x, y, width, height, 1, 8, 0, 7, 1, 8)?;
+            rectangle(cr, x, y, width, height, 8, 1, 7, 0, 8, 1)?;
         }
         0x1fb80 => {
-            rectangle(cr, x, y, width, height, 1, 8, 0, 0, 1, 1);
-            rectangle(cr, x, y, width, height, 1, 8, 0, 7, 1, 8);
+            rectangle(cr, x, y, width, height, 1, 8, 0, 0, 1, 1)?;
+            rectangle(cr, x, y, width, height, 1, 8, 0, 7, 1, 8)?;
         }
         0x1fb81 => {
-            rectangle(cr, x, y, width, height, 1, 8, 0, 0, 1, 1);
-            rectangle(cr, x, y, width, height, 1, 8, 0, 2, 1, 3);
-            rectangle(cr, x, y, width, height, 1, 8, 0, 4, 1, 5);
-            rectangle(cr, x, y, width, height, 1, 8, 0, 7, 1, 8);
+            rectangle(cr, x, y, width, height, 1, 8, 0, 0, 1, 1)?;
+            rectangle(cr, x, y, width, height, 1, 8, 0, 2, 1, 3)?;
+            rectangle(cr, x, y, width, height, 1, 8, 0, 4, 1, 5)?;
+            rectangle(cr, x, y, width, height, 1, 8, 0, 7, 1, 8)?;
         }
         0x1fb82 => {}
         0x1fb83 => {}
         0x1fb84 => {}
         0x1fb85 => {}
         0x1fb86 => {
-            let mut v = c - 0x1fb82 + 2;
+            let mut v = (c - 0x1fb82 + 2) as i32;
             if v >= 4 {
                 v += 1
             };
-            rectangle(cr, x, y, width, height, 1, 8, 0, 0, 1, v);
+            rectangle(cr, x, y, width, height, 1, 8, 0, 0, 1, v)?;
         }
 
         0x1fb87 => {}
@@ -907,11 +899,11 @@ pub fn draw_box_char(
         0x1fb89 => {}
         0x1fb8a => {}
         0x1fb8b => {
-            let v = c - 0x1fb87 + 2;
+            let mut v = (c - 0x1fb87 + 2) as i32;
             if v >= 4 {
                 v += 1
             };
-            rectangle(cr, x, y, width, height, 8, 1, 8 - v, 0, 8, 1);
+            rectangle(cr, x, y, width, height, 8, 1, 8 - v, 0, 8, 1)?;
         }
 
         0x1fb8c => {
@@ -921,7 +913,7 @@ pub fn draw_box_char(
                 fg.blue() / 65535.,
                 0.5,
             );
-            rectangle(cr, x, y, width, height, 2, 1, 0, 0, 1, 1);
+            rectangle(cr, x, y, width, height, 2, 1, 0, 0, 1, 1)?;
         }
         0x1fb8d => {
             cr.set_source_rgba(
@@ -930,7 +922,7 @@ pub fn draw_box_char(
                 fg.blue() / 65535.,
                 0.5,
             );
-            rectangle(cr, x, y, width, height, 2, 1, 1, 0, 2, 1);
+            rectangle(cr, x, y, width, height, 2, 1, 1, 0, 2, 1)?;
         }
         0x1fb8e => {
             cr.set_source_rgba(
@@ -939,7 +931,7 @@ pub fn draw_box_char(
                 fg.blue() / 65535.,
                 0.5,
             );
-            rectangle(cr, x, y, width, height, 1, 2, 0, 0, 1, 1);
+            rectangle(cr, x, y, width, height, 1, 2, 0, 0, 1, 1)?;
         }
         0x1fb8f => {
             cr.set_source_rgba(
@@ -948,43 +940,43 @@ pub fn draw_box_char(
                 fg.blue() / 65535.,
                 0.5,
             );
-            rectangle(cr, x, y, width, height, 1, 2, 0, 1, 1, 2);
+            rectangle(cr, x, y, width, height, 1, 2, 0, 1, 1, 2)?;
         }
         0x1fb90 => {
             cr.set_source_rgba(fg.red() / 65535., fg.green() / 65535., fg.blue() / 65535., 0.5);
-            rectangle(cr, x, y, width, height, 1, 1, 0, 0, 1, 1);
+            rectangle(cr, x, y, width, height, 1, 1, 0, 0, 1, 1)?;
         }
         0x1fb91 => {
-            rectangle(cr, x, y, width, height, 1, 2, 0, 0, 1, 1);
+            rectangle(cr, x, y, width, height, 1, 2, 0, 0, 1, 1)?;
             cr.set_source_rgba(fg.red() / 65535., fg.green() / 65535., fg.blue() / 65535., 0.5);
-            rectangle(cr, x, y, width, height, 1, 2, 0, 1, 1, 2);
+            rectangle(cr, x, y, width, height, 1, 2, 0, 1, 1, 2)?;
         }
         0x1fb92 => {
-            rectangle(cr, x, y, width, height, 1, 2, 0, 1, 1, 2);
+            rectangle(cr, x, y, width, height, 1, 2, 0, 1, 1, 2)?;
             cr.set_source_rgba(fg.red() / 65535., fg.green() / 65535., fg.blue() / 65535., 0.5);
-            rectangle(cr, x, y, width, height, 1, 2, 0, 0, 1, 1);
+            rectangle(cr, x, y, width, height, 1, 2, 0, 0, 1, 1)?;
         }
 
         0x1fb93 => {
             //#if 0
-            //                /* codepoint not assigned */
-            //                rectangle(cr, x, y, width, height, 2, 1,  0, 0,  1, 1);
-            //                cairo_set_source_rgba (cr,
-            //                                       fg.red / 65535.,
-            //                                       fg.green / 65535.,
-            //                                       fg.blue / 65535.,
-            //                                       0.5);
-            //                rectangle(cr, x, y, width, height, 2, 1,  1, 0,  2, 1);
+            //     /* codepoint not assigned */
+            //     rectangle(cr, x, y, width, height, 2, 1,  0, 0,  1, 1);
+            //     cairo_set_source_rgba (cr,
+            //                            fg.red / 65535.,
+            //                            fg.green / 65535.,
+            //                            fg.blue / 65535.,
+            //                            0.5);
+            //     rectangle(cr, x, y, width, height, 2, 1,  1, 0,  2, 1);
             //#endif
         }
         0x1fb94 => {
-            rectangle(cr, x, y, width, height, 2, 1, 1, 0, 2, 1);
+            rectangle(cr, x, y, width, height, 2, 1, 1, 0, 2, 1)?;
             cr.set_source_rgba(fg.red() / 65535., fg.green() / 65535., fg.blue() / 65535., 0.5);
-            rectangle(cr, x, y, width, height, 2, 1, 0, 0, 1, 1);
+            rectangle(cr, x, y, width, height, 2, 1, 0, 0, 1, 1)?;
         }
 
         0x1fb95 => {
-            pattern(cr, create_checkerboard_pattern(), x, y, width, height);
+            pattern(cr, create_checkerboard_pattern(), x, y, width, height)?;
         }
 
         0x1fb96 => {
@@ -995,54 +987,54 @@ pub fn draw_box_char(
                 y,
                 width,
                 height,
-            );
+            )?;
         }
 
         0x1fb97 => {
-            rectangle(cr, x, y, width, height, 1, 4, 0, 1, 1, 2);
-            rectangle(cr, x, y, width, height, 1, 4, 0, 3, 1, 4);
+            rectangle(cr, x, y, width, height, 1, 4, 0, 1, 1, 2)?;
+            rectangle(cr, x, y, width, height, 1, 4, 0, 3, 1, 4)?;
         }
 
         0x1fb98 => {
-            pattern(cr, create_hatching_pattern_lr(), x, y, width, height);
+            pattern(cr, create_hatching_pattern_lr(), x, y, width, height)?;
         }
 
         0x1fb99 => {
-            pattern(cr, create_hatching_pattern_rl(), x, y, width, height);
+            pattern(cr, create_hatching_pattern_rl(), x, y, width, height)?;
         }
 
         0x1fb9a => {
             let coords: &[i8] = &[0, 0, 1, 0, 0, 1, 1, 1, -1];
-            polygon(cr, x, y, width, height, 1, 1, &coords);
+            polygon(cr, x, y, width, height, 1, 1, &coords)?;
         }
 
         0x1fb9b => {
             let coords: &[i8] = &[0, 0, 1, 1, 1, 0, 0, 1, -1];
-            polygon(cr, x, y, width, height, 1, 1, &coords);
+            polygon(cr, x, y, width, height, 1, 1, &coords)?;
         }
 
         0x1fb9c => {
             let coords: &[i8] = &[0, 0, 1, 0, 0, 1, -1];
-            cr.set_source_rgba(fg.red / 65535., fg.green / 65535., fg.blue / 65535., 0.5);
-            polygon(cr, x, y, width, height, 1, 1, &coords);
+            cr.set_source_rgba(fg.red() / 65535., fg.green() / 65535., fg.blue() / 65535., 0.5);
+            polygon(cr, x, y, width, height, 1, 1, &coords)?;
         }
 
         0x1fb9d => {
             let coords: &[i8] = &[0, 0, 1, 0, 1, 1, -1];
-            cr.set_source_rgba(fg.red / 65535., fg.green / 65535., fg.blue / 65535., 0.5);
-            polygon(cr, x, y, width, height, 1, 1, &coords);
+            cr.set_source_rgba(fg.red() / 65535., fg.green() / 65535., fg.blue() / 65535., 0.5);
+            polygon(cr, x, y, width, height, 1, 1, &coords)?;
         }
 
         0x1fb9e => {
             let coords: &[i8] = &[0, 1, 1, 0, 1, 1, -1];
-            cr.set_source_rgba(fg.red / 65535., fg.green / 65535., fg.blue / 65535., 0.5);
-            polygon(cr, x, y, width, height, 1, 1, &coords);
+            cr.set_source_rgba(fg.red() / 65535., fg.green() / 65535., fg.blue() / 65535., 0.5);
+            polygon(cr, x, y, width, height, 1, 1, &coords)?;
         }
 
         0x1fb9f => {
             let coords: &[i8] = &[0, 0, 1, 1, 0, 1, -1];
-            cr.set_source_rgba(fg.red / 65535., fg.green / 65535., fg.blue / 65535., 0.5);
-            polygon(cr, x, y, width, height, 1, 1, &coords);
+            cr.set_source_rgba(fg.red() / 65535., fg.green() / 65535., fg.blue() / 65535., 0.5);
+            polygon(cr, x, y, width, height, 1, 1, &coords)?;
         }
 
         0x1fba0 => {}
@@ -1068,7 +1060,7 @@ pub fn draw_box_char(
             cr.set_line_cap(cairo::LineCap::Butt);
             cr.set_line_cap(cairo::LineCap::Butt);
             cr.set_line_width(light_line_width);
-            adjust = if light_line_width >= 1 { 0.5 } else { 0. };
+            adjust = if light_line_width >= 1. { 0.5 } else { 0. };
             let dx: f64 = light_line_width / 2.;
             let dy: f64 = light_line_width / 2.;
             if map[v as usize] >= 1 {
@@ -1077,7 +1069,7 @@ pub fn draw_box_char(
                 cr.line_to(x + dx, ycenter + adjust);
                 cr.line_to(xcenter + adjust, y + dy);
                 cr.line_to(xcenter + adjust, y);
-                cr.stroke();
+                cr.stroke()?;
             }
             if map[v as usize] >= 2 {
                 /* upper right */
@@ -1085,7 +1077,7 @@ pub fn draw_box_char(
                 cr.line_to(xright - dx, ycenter + adjust);
                 cr.line_to(xcenter + adjust, y + dy);
                 cr.line_to(xcenter + adjust, y);
-                cr.stroke();
+                cr.stroke()?;
             }
             if map[v as usize] >= 4 {
                 /* lower left */
@@ -1093,7 +1085,7 @@ pub fn draw_box_char(
                 cr.line_to(x + dx, ycenter + adjust);
                 cr.line_to(xcenter + adjust, ybottom - dy);
                 cr.line_to(xcenter + adjust, ybottom);
-                cr.stroke();
+                cr.stroke()?;
             }
             if map[v as usize] >= 8 {
                 /* lower right */
@@ -1101,7 +1093,7 @@ pub fn draw_box_char(
                 cr.line_to(xright - dx, ycenter + adjust);
                 cr.line_to(xcenter + adjust, ybottom - dy);
                 cr.line_to(xcenter + adjust, ybottom);
-                cr.stroke();
+                cr.stroke()?;
             }
         }
 
@@ -1110,6 +1102,6 @@ pub fn draw_box_char(
         }
     }
 
-    cr.restore();
+    cr.restore()?;
     Ok(())
 }

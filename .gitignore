@@ -5,3 +5,4 @@ vim/
 perf.data
 perf.data.old
 flamegraph.svg
+box_drawing.rs
