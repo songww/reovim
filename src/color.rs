@@ -1,3 +1,5 @@
+use gtk::gdk;
+
 // #[derive(Copy, Clone, Debug, PartialEq)]
 pub type Color = gdk::RGBA;
 

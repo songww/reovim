@@ -2,8 +2,9 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{atomic, RwLock};
 
-use adw::prelude::*;
-use gdk::prelude::FontMapExt;
+//use adw::prelude::*;
+use gtk::gdk;
+use gtk::gdk::prelude::FontMapExt;
 use gtk::prelude::{
     BoxExt, DrawingAreaExt, DrawingAreaExtManual, EditableExt, EditableExtManual,
     EventControllerExt, FrameExt, GtkWindowExt, IMContextExt, IMContextExtManual,

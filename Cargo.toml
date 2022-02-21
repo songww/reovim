@@ -27,29 +27,54 @@ clap = { version = "3", features = [ "derive" ] }
 chan = { version = "0.5", package = "crossbeam-channel" }
 nvim = { version = "0.4", package = "nvim-rs", features = [ "use_tokio" ] }
 
-pangocairo = "0.15"
-graphene-rs = "0.15"
-glib = { version = "0.15", features = [ "v2_70" ] }
-pango = { version = "0.15", features = [ "v1_50" ] }
-gdk = { version = "0.4", package = "gdk4", features = [ "v4_6" ] }
-gtk = { version = "0.4", package = "gtk4", features = [ "v4_6" ] }
-cairo = { version = "0.15", package = "cairo-rs", features = [ "v1_16", "png" ] }
-adw = { version = "0", package = "libadwaita" }
-
-relm4 = {  version = "0.4", features = [ "tokio-rt", "libadwaita" ] }
+relm4 = {  version = "0.4", features = [ "tokio-rt" ] } #, "libadwaita"
 relm-macros = { version = "0.4", package = "relm4-macros" }
 relm-components = { version = "0.4", package = "relm4-components" }
 
 tokio = { version = "1", features = ["process", "io-util", "sync", "rt", "time", "signal", "rt-multi-thread"] }
 tokio-util = { version = "0.7", features = ["compat"] }
 
+#[dependencies.adw]
+#branch = "master"
+#package = "libadwaita"
+#git = "https://gitlab.gnome.org/World/Rust/libadwaita-rs.git"
+
+[dependencies.cairo]
+git = "https://github.com/gtk-rs/gtk-rs-core.git"
+package = "cairo-rs"
+branch = "master"
+features = [ "v1_16", "png" ]
+
+[dependencies.pango]
+git = "https://github.com/songww/gtk-rs-core.git"
+package = "pango"
+branch = "add_getter_for_glyph_item_iter"
+features = [ "v1_50" ]
+
+[dependencies.pangocairo]
+git = "https://github.com/gtk-rs/gtk-rs-core.git"
+package = "pangocairo"
+branch = "master"
+
+[dependencies.graphene]
+git = "https://github.com/gtk-rs/gtk-rs-core.git"
+package = "graphene-rs"
+branch = "master"
+
+[dependencies.gtk]
+#git = "https://github.com/gtk-rs/gtk4-rs.git"
+version = "0.4"
+package = "gtk4"
+features = [ "v4_6" ]
+
+[dependencies.glib]
+git = "https://github.com/gtk-rs/gtk-rs-core.git"
+package = "glib"
+branch = "master"
+features = [ "v2_70" ]
+
 [profile.release]
 debug = true
-
-[patch.tuna]
-"pango" = { path = '/home/songww/workspace/github.com/gtk-rs-core/pango' }
-[patch.crates-io]
-"pango" = { path = '/home/songww/workspace/github.com/gtk-rs-core/pango' }
 
 [workspace]
 members = [

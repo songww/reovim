@@ -12,6 +12,8 @@ impl From<(gdk::keys::Key, gdk::ModifierType)> for KeyEvent {
 
 use std::borrow::Cow;
 
+use gtk::gdk;
+
 pub trait ToInput {
     fn to_input(&self) -> Option<Cow<'_, str>>;
 }

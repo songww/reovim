@@ -1,7 +1,7 @@
 use std::ops::Deref;
 
+use gtk::gdk;
 use log::trace;
-
 use nvim::Neovim;
 
 use crate::{bridge::Tx, keys::ToInput};
