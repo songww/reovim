@@ -76,10 +76,9 @@ pub struct AppModel {
     pub cursor_modes: Vec<CursorMode>,
     pub cursor_redraw: atomic::AtomicBool,
 
-    pub im_context: Lazy<gtk::IMMulticontext>,
-
     pub pctx: Rc<pango::Context>,
     pub gtksettings: OnceCell<gtk::Settings>,
+    pub im_context: OnceCell<gtk::IMMulticontext>,
 
     pub hldefs: Rc<RwLock<vimview::HighlightDefinitions>>,
 
@@ -139,8 +138,8 @@ impl AppModel {
                 })
                 .unwrap()
                 .into(),
-            im_context: Lazy::new(|| gtk::IMMulticontext::new()),
             gtksettings: OnceCell::new(),
+            im_context: OnceCell::new(),
 
             metrics: Rc::new(Metrics::new().into()),
             font_description: Rc::new(RefCell::new(font_desc)),
@@ -632,7 +631,6 @@ impl AppUpdate for AppModel {
                     RedrawEvent::CursorGoto { grid, row, column } => {
                         let vgrid = self.vgrids.get(grid).unwrap();
                         let vgrid_pos = vgrid.pos();
-                        self.cursor_redraw.store(true, atomic::Ordering::Relaxed);
                         if let Some(cell) =
                             vgrid.textbuf().borrow().cell(row as usize, column as usize)
                         {
@@ -641,12 +639,6 @@ impl AppUpdate for AppModel {
                             let y = metrics.height() * row as f64 + vgrid_pos.x;
                             self.cursor.borrow_mut().set_pos(x, y);
                             self.cursor.borrow_mut().set_cell(cell.clone());
-                            self.im_context.set_cursor_location(&gdk::Rectangle::new(
-                                x as i32,
-                                y as i32,
-                                metrics.width() as i32,
-                                metrics.height() as i32,
-                            ));
                         } else {
                             log::warn!(
                                 "Cursor pos {}x{} of grid {} dose not exists",
@@ -655,6 +647,7 @@ impl AppUpdate for AppModel {
                                 grid
                             );
                         }
+                        self.cursor_redraw.store(true, atomic::Ordering::Relaxed);
                     }
                     RedrawEvent::ModeInfoSet { cursor_modes } => {
                         self.cursor_modes = cursor_modes;
@@ -864,7 +857,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
                         set_visible: true,
                         set_hexpand: true,
                         set_vexpand: true,
-                        set_focusable: false,
+                        set_can_focus: false,
                         set_sensitive: false,
                         set_focus_on_click: false,
                         set_draw_func[hldefs = model.hldefs.clone(),
@@ -946,31 +939,29 @@ impl Widgets<AppModel, ()> for AppWidgets {
         model.gtksettings.set(overlay.settings()).ok();
         model.recompute();
 
-        model.im_context.set_use_preedit(false);
-        model.im_context.set_client_widget(Some(&overlay));
-        model
-            .im_context
-            .set_input_purpose(gtk::InputPurpose::Terminal);
-        model
-            .im_context
-            .set_cursor_location(&gdk::Rectangle::new(0, 0, 5, 10));
-        model.im_context.connect_preedit_start(|_| {
+        let im_context = gtk::IMMulticontext::new();
+        im_context.set_use_preedit(false);
+        im_context.set_client_widget(Some(&overlay));
+
+        im_context.set_input_purpose(gtk::InputPurpose::Terminal);
+
+        im_context.set_cursor_location(&gdk::Rectangle::new(0, 0, 5, 10));
+        im_context.connect_preedit_start(|_| {
             log::debug!("preedit started.");
         });
-        model.im_context.connect_preedit_end(|im_context| {
+        im_context.connect_preedit_end(|im_context| {
             log::debug!("preedit done, '{}'", im_context.preedit_string().0);
         });
-        model.im_context.connect_preedit_changed(|im_context| {
+        im_context.connect_preedit_changed(|im_context| {
             log::debug!("preedit changed, '{}'", im_context.preedit_string().0);
         });
-        model
-            .im_context
-            .connect_commit(glib::clone!(@strong sender => move |ctx, text| {
-                log::debug!("im-context({}) commit '{}'", ctx.context_id(), text);
-                sender
-                    .send(UiCommand::Keyboard(text.replace("<", "<lt>").into()).into())
-                    .unwrap();
-            }));
+
+        im_context.connect_commit(glib::clone!(@strong sender => move |ctx, text| {
+            log::debug!("im-context({}) commit '{}'", ctx.context_id(), text);
+            sender
+                .send(UiCommand::Keyboard(text.replace("<", "<lt>").into()).into())
+                .unwrap();
+        }));
 
         main_window.set_focus_widget(Some(&overlay));
         main_window.set_default_widget(Some(&overlay));
@@ -1050,14 +1041,14 @@ impl Widgets<AppModel, ()> for AppWidgets {
             .name("vimview-focus-controller")
             .build();
         focus_controller.connect_enter(
-            glib::clone!(@strong sender, @strong model.im_context as im_context => move |_| {
+            glib::clone!(@strong sender, @strong im_context => move |_| {
                 log::error!("FocusGained");
                 im_context.focus_in();
                 sender.send(UiCommand::FocusGained.into()).unwrap();
             }),
         );
         focus_controller.connect_leave(
-            glib::clone!(@strong sender, @strong model.im_context as im_context  => move |_| {
+            glib::clone!(@strong sender, @strong im_context  => move |_| {
                 log::error!("FocusLost");
                 im_context.focus_out();
                 sender.send(UiCommand::FocusLost.into()).unwrap();
@@ -1068,7 +1059,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
         let key_controller = gtk::EventControllerKey::builder()
             .name("vimview-key-controller")
             .build();
-        key_controller.set_im_context(&*model.im_context);
+        key_controller.set_im_context(&im_context);
         key_controller.connect_key_pressed(
             glib::clone!(@strong sender => move |c, keyval, _keycode, modifier| {
                 let event = c.current_event().unwrap();
@@ -1088,7 +1079,8 @@ impl Widgets<AppModel, ()> for AppWidgets {
                 }
             }),
         );
-        main_window.add_controller(&key_controller);
+        overlay.add_controller(&key_controller);
+        model.im_context.set(im_context).unwrap();
     }
 
     fn pre_view() {
@@ -1106,6 +1098,14 @@ impl Widgets<AppModel, ()> for AppWidgets {
             atomic::Ordering::Acquire,
             atomic::Ordering::Relaxed,
         ) {
+            let metrics = model.metrics.get();
+            let (x, y) = model.cursor.borrow().pos();
+            unsafe { model.im_context.get_unchecked() }.set_cursor_location(&gdk::Rectangle::new(
+                x as i32,
+                y as i32,
+                metrics.width() as i32,
+                metrics.height() as i32,
+            ));
             self.cursor_drawing_area.queue_draw();
         }
         if let Ok(true) = model.font_changed.compare_exchange(
