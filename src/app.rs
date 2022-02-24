@@ -827,18 +827,6 @@ impl Widgets<AppModel, ()> for AppWidgets {
                                 )
                                 .unwrap();
                         },
-                        set_draw_func[hldefs = model.hldefs.clone()] => move |da, cr, _, _| {
-                            //if let Some(background) = hldefs.read().unwrap().defaults().and_then(|defaults| defaults.background) {
-                                //cr.rectangle(0., 0., da.width() as _, da.height() as _);
-                                //cr.set_source_rgba(
-                                //    background.red() as _,
-                                //    background.green() as _,
-                                //    background.blue() as _,
-                                //    1.,
-                                //);
-                                //cr.paint().unwrap();
-                            //}
-                        }
                     },
                     add_overlay: grids_container = &gtk::Fixed {
                         set_widget_name: "grids-container",
@@ -867,12 +855,11 @@ impl Widgets<AppModel, ()> for AppWidgets {
                             let hldefs = hldefs.read().unwrap();
                             let default_colors = hldefs.defaults().unwrap();
                             let cursor = cursor.borrow();
-                            let bg = cursor.background(default_colors);
-                            let fg = cursor.foreground(default_colors);
+                            let fg = cursor.background(default_colors);
+                            let bg = cursor.foreground(default_colors);
                             let cell = cursor.cell();
                             let metrics = metrics.get();
-                            let (width, height)  = cursor.size(metrics.width(), metrics.height());
-                            let (x, y) = cursor.pos();
+                            let (x, y, width, height)  = cursor.rectangle(metrics.width(), metrics.height());
                             log::error!("drawing cursor at {}x{}.", x, y);
                             match cursor.shape {
                                 CursorShape::Block => {
@@ -900,15 +887,21 @@ impl Widgets<AppModel, ()> for AppWidgets {
                                         let x_offset =geometry.x_offset() - (geometry.width() - width) / 2;
                                         geometry.set_width(width);
                                         geometry.set_x_offset(x_offset);
+                                        log::error!("cursor glyph width {}", width);
                                     }
-                                    cr.set_source_rgba(bg.red() as f64, bg.green() as f64, bg.blue() as f64, bg.alpha() as f64);
+                                    // 试试汉字
+                                    cr.save().unwrap();
                                     cr.rectangle(x, y, width as f64, metrics.height());
+                                    cr.set_source_rgba(bg.red() as f64, bg.green() as f64, bg.blue() as f64, bg.alpha() as f64);
                                     cr.fill().unwrap();
-                                    cr.set_source_rgba(fg.red() as f64, fg.green() as f64, fg.blue() as f64, bg.alpha() as f64);
+                                    cr.restore().unwrap();
+                                    cr.set_source_rgba(fg.red() as f64, fg.green() as f64, fg.blue() as f64, fg.alpha() as f64);
+                                    cr.move_to(x + geometry.width() as f64 / 2., y + metrics.ascent());
                                     pangocairo::show_glyph_string(cr, &itemized.analysis().font(), &mut glyph_string);
                                 }
                                 _ => {
-                                    cr.set_source_rgba(fg.red() as f64, fg.green() as f64, fg.blue() as f64, bg.alpha() as f64);
+                                    log::error!("drawing cursor with {}x{}", width, height);
+                                    cr.set_source_rgba(bg.red() as f64, bg.green() as f64, bg.blue() as f64, bg.alpha() as f64);
                                     cr.rectangle(x, y, width, height);
                                     cr.fill().unwrap();
                                 }

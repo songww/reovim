@@ -66,12 +66,22 @@ impl Cursor {
         }
     }
 
-    pub fn size(&self, width: f64, height: f64) -> (f64, f64) {
-        let percentage = self.cell_percentage.unwrap_or(100.) / 100.;
+    pub fn rectangle(&self, width: f64, height: f64) -> (f64, f64, f64, f64) {
+        let percentage = self.cell_percentage.unwrap_or(1.);
+        log::error!(
+            "cursor percentage {:?} {}",
+            self.cell_percentage,
+            percentage
+        );
         match self.shape {
-            CursorShape::Block => (width, height),
-            CursorShape::Vertical => (width * percentage, height),
-            CursorShape::Horizontal => (width, height * percentage),
+            CursorShape::Block => (self.pos.0, self.pos.1, width, height),
+            CursorShape::Vertical => (self.pos.0, self.pos.1, width * percentage, height),
+            CursorShape::Horizontal => (
+                self.pos.0,
+                self.pos.1 + height - height * percentage,
+                width,
+                height * percentage,
+            ),
         }
     }
 
