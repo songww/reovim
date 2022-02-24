@@ -428,7 +428,7 @@ fn parse_mode_info_set(mode_info_set_arguments: Vec<Value>) -> Result<RedrawEven
                     mode_info.shape = CursorShape::from_type_name(&parse_string(value)?);
                 }
                 "cell_percentage" => {
-                    mode_info.cell_percentage = Some(parse_u64(value)? as f32 / 100.0);
+                    mode_info.cell_percentage = Some(parse_u64(value)? as f64 / 100.0);
                 }
                 "blinkwait" => {
                     mode_info.blinkwait = Some(parse_u64(value)?);

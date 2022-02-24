@@ -389,7 +389,7 @@ impl TextBuf {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct TextCell {
     pub text: String,
     pub hldef: Option<u64>,

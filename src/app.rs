@@ -20,7 +20,7 @@ use crate::bridge::{EditorMode, MessageKind, WindowAnchor};
 use crate::components::{
     VimCmdPrompt, VimCmdPromptWidgets, VimNotifactions, VimNotifactionsWidgets,
 };
-use crate::cursor::{Cursor, CursorMode};
+use crate::cursor::{Cursor, CursorMode, CursorShape};
 use crate::keys::ToInput;
 use crate::vimview::{self, VimGrid};
 use crate::{
@@ -71,10 +71,12 @@ pub struct AppModel {
     pub mode: EditorMode,
 
     pub mouse_on: Rc<atomic::AtomicBool>,
-    pub cursor: Cell<Option<Cursor>>,
-    pub cursor_at: Option<u64>,
+    pub cursor: Rc<RefCell<Cursor>>,
     pub cursor_mode: usize,
     pub cursor_modes: Vec<CursorMode>,
+    pub cursor_redraw: atomic::AtomicBool,
+
+    pub im_context: Lazy<gtk::IMMulticontext>,
 
     pub pctx: Rc<pango::Context>,
     pub gtksettings: OnceCell<gtk::Settings>,
@@ -113,10 +115,10 @@ impl AppModel {
             mode: EditorMode::Normal,
 
             mouse_on: Rc::new(false.into()),
-            cursor: Cell::new(Some(Cursor::new())),
-            cursor_at: None,
+            cursor: Rc::new(RefCell::new(Cursor::new())),
             cursor_mode: 0,
             cursor_modes: Vec::new(),
+            cursor_redraw: atomic::AtomicBool::new(false),
 
             pctx: pangocairo::FontMap::default()
                 .unwrap()
@@ -137,6 +139,7 @@ impl AppModel {
                 })
                 .unwrap()
                 .into(),
+            im_context: Lazy::new(|| gtk::IMMulticontext::new()),
             gtksettings: OnceCell::new(),
 
             metrics: Rc::new(Metrics::new().into()),
@@ -355,7 +358,7 @@ impl AppUpdate for AppModel {
                         //     })
                         //     .collect();
 
-                        log::info!(
+                        log::debug!(
                             "grid line {}/{} - {} cells at {}x{}",
                             grid,
                             winid,
@@ -627,46 +630,49 @@ impl AppUpdate for AppModel {
                         self.vgrids.flush();
                     }
                     RedrawEvent::CursorGoto { grid, row, column } => {
-                        let cursor_at = self.cursor_at.replace(grid);
-                        if let Some(cursor_at) = cursor_at {
-                            if cursor_at != grid {
-                                let cursor = self.vgrids.get_mut(cursor_at).unwrap().take_cursor();
-                                self.vgrids.get_mut(grid).unwrap().set_cursor(cursor);
-                            }
+                        let vgrid = self.vgrids.get(grid).unwrap();
+                        let vgrid_pos = vgrid.pos();
+                        self.cursor_redraw.store(true, atomic::Ordering::Relaxed);
+                        if let Some(cell) =
+                            vgrid.textbuf().borrow().cell(row as usize, column as usize)
+                        {
+                            let metrics = self.metrics.get();
+                            let x = metrics.width() * column as f64 + vgrid_pos.x;
+                            let y = metrics.height() * row as f64 + vgrid_pos.x;
+                            self.cursor.borrow_mut().set_pos(x, y);
+                            self.cursor.borrow_mut().set_cell(cell.clone());
+                            self.im_context.set_cursor_location(&gdk::Rectangle::new(
+                                x as i32,
+                                y as i32,
+                                metrics.width() as i32,
+                                metrics.height() as i32,
+                            ));
                         } else {
-                            self.vgrids
-                                .get_mut(grid)
-                                .map(|vgrid| vgrid.set_cursor(self.cursor.take().unwrap()));
-                        };
-                        self.vgrids
-                            .get_mut(grid)
-                            .map(|vgrid| vgrid.cursor_mut().set_pos(row, column));
-                        // TODO: Add im_context.set_cursor_location
+                            log::warn!(
+                                "Cursor pos {}x{} of grid {} dose not exists",
+                                row,
+                                column,
+                                grid
+                            );
+                        }
                     }
                     RedrawEvent::ModeInfoSet { cursor_modes } => {
                         self.cursor_modes = cursor_modes;
+                        self.cursor_redraw.store(true, atomic::Ordering::Relaxed);
 
                         let mode = &self.cursor_modes[self.cursor_mode];
                         let style = self.hldefs.read().unwrap();
-                        let cursor = if let Some(cursor_at) = self.cursor_at {
-                            self.vgrids.get_mut(cursor_at).unwrap().cursor_mut()
-                        } else {
-                            self.cursor.get_mut().as_mut().unwrap()
-                        };
-                        cursor.change_mode(mode, &style);
+                        self.cursor.borrow_mut().change_mode(mode, &style);
                     }
                     RedrawEvent::ModeChange { mode, mode_index } => {
                         self.mode = mode;
                         self.cursor_mode = mode_index as _;
+                        self.cursor_redraw.store(true, atomic::Ordering::Relaxed);
                         let cursor_mode = &self.cursor_modes[self.cursor_mode];
                         log::error!("Mode Change to {:?} {:?}", &self.mode, cursor_mode);
                         let style = self.hldefs.read().unwrap();
-                        let cursor = if let Some(cursor_at) = self.cursor_at {
-                            self.vgrids.get_mut(cursor_at).unwrap().cursor_mut()
-                        } else {
-                            self.cursor.get_mut().as_mut().unwrap()
-                        };
-                        cursor.change_mode(cursor_mode, &style);
+
+                        self.cursor.borrow_mut().change_mode(cursor_mode, &style);
                     }
                     RedrawEvent::BusyStart => {
                         log::debug!("Ignored BusyStart.");
@@ -829,7 +835,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
                                 .unwrap();
                         },
                         set_draw_func[hldefs = model.hldefs.clone()] => move |da, cr, _, _| {
-                            if let Some(background) = hldefs.read().unwrap().defaults().and_then(|defaults| defaults.background) {
+                            //if let Some(background) = hldefs.read().unwrap().defaults().and_then(|defaults| defaults.background) {
                                 //cr.rectangle(0., 0., da.width() as _, da.height() as _);
                                 //cr.set_source_rgba(
                                 //    background.red() as _,
@@ -838,7 +844,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
                                 //    1.,
                                 //);
                                 //cr.paint().unwrap();
-                            }
+                            //}
                         }
                     },
                     add_overlay: grids_container = &gtk::Fixed {
@@ -855,10 +861,66 @@ impl Widgets<AppModel, ()> for AppWidgets {
                     },
                     add_overlay: cursor_drawing_area = &gtk::DrawingArea {
                         set_widget_name: "cursor-drawing-area",
-                        set_visible: false,
-                        set_hexpand: false,
-                        set_vexpand: false,
+                        set_visible: true,
+                        set_hexpand: true,
+                        set_vexpand: true,
+                        set_focusable: false,
+                        set_sensitive: false,
                         set_focus_on_click: false,
+                        set_draw_func[hldefs = model.hldefs.clone(),
+                                      cursor = model.cursor.clone(),
+                                      metrics = model.metrics.clone(),
+                                      pctx = model.pctx.clone()] => move |_da, cr, _, _| {
+                            let hldefs = hldefs.read().unwrap();
+                            let default_colors = hldefs.defaults().unwrap();
+                            let cursor = cursor.borrow();
+                            let bg = cursor.background(default_colors);
+                            let fg = cursor.foreground(default_colors);
+                            let cell = cursor.cell();
+                            let metrics = metrics.get();
+                            let (width, height)  = cursor.size(metrics.width(), metrics.height());
+                            let (x, y) = cursor.pos();
+                            log::error!("drawing cursor at {}x{}.", x, y);
+                            match cursor.shape {
+                                CursorShape::Block => {
+                                    use pango::AttrType;
+                                    let attrs = pango::AttrList::new();
+                                    cell.attrs.iter().filter_map(|attr| {
+                                        match attr.type_() {
+                                            AttrType::Family | AttrType::Style | AttrType::Weight | AttrType::Variant | AttrType::Underline | AttrType::Strikethrough | AttrType::Overline => {
+                                                let mut attr = attr.clone();
+                                                attr.set_start_index(0);
+                                                attr.set_end_index(0);
+                                                Some(attr)
+                                            }, _ => None
+                                        }
+                                    }).for_each(|attr| attrs.insert(attr));
+                                    log::error!("cursor cell '{}' wide {}", cell.text, cursor.width);
+                                    let itemized = &pango::itemize(&pctx, &cell.text, 0, cell.text.len() as _, &attrs, None)[0];
+                                    let mut glyph_string = pango::GlyphString::new();
+                                    pango::shape(&cell.text, itemized.analysis(), &mut glyph_string);
+                                    let glyphs = glyph_string.glyph_info_mut();
+                                    assert_eq!(glyphs.len(), 1);
+                                    let geometry = glyphs[0].geometry_mut();
+                                    let width = (metrics.width() * cursor.width).ceil() as i32;
+                                    if geometry.width() > 0 && geometry.width() != width {
+                                        let x_offset =geometry.x_offset() - (geometry.width() - width) / 2;
+                                        geometry.set_width(width);
+                                        geometry.set_x_offset(x_offset);
+                                    }
+                                    cr.set_source_rgba(bg.red() as f64, bg.green() as f64, bg.blue() as f64, bg.alpha() as f64);
+                                    cr.rectangle(x, y, width as f64, metrics.height());
+                                    cr.fill().unwrap();
+                                    cr.set_source_rgba(fg.red() as f64, fg.green() as f64, fg.blue() as f64, bg.alpha() as f64);
+                                    pangocairo::show_glyph_string(cr, &itemized.analysis().font(), &mut glyph_string);
+                                }
+                                _ => {
+                                    cr.set_source_rgba(fg.red() as f64, fg.green() as f64, fg.blue() as f64, bg.alpha() as f64);
+                                    cr.rectangle(x, y, width, height);
+                                    cr.fill().unwrap();
+                                }
+                            }
+                        }
                     },
                     add_overlay: messages_container = &gtk::Frame {
                         set_widget_name: "messages-container",
@@ -884,26 +946,31 @@ impl Widgets<AppModel, ()> for AppWidgets {
         model.gtksettings.set(overlay.settings()).ok();
         model.recompute();
 
-        let im_context = gtk::IMMulticontext::new();
-        im_context.set_use_preedit(false);
-        im_context.set_client_widget(Some(&overlay));
-        im_context.set_input_purpose(gtk::InputPurpose::Terminal);
-        im_context.set_cursor_location(&gdk::Rectangle::new(0, 0, 5, 10));
-        im_context.connect_preedit_start(|_| {
+        model.im_context.set_use_preedit(false);
+        model.im_context.set_client_widget(Some(&overlay));
+        model
+            .im_context
+            .set_input_purpose(gtk::InputPurpose::Terminal);
+        model
+            .im_context
+            .set_cursor_location(&gdk::Rectangle::new(0, 0, 5, 10));
+        model.im_context.connect_preedit_start(|_| {
             log::debug!("preedit started.");
         });
-        im_context.connect_preedit_end(|im_context| {
+        model.im_context.connect_preedit_end(|im_context| {
             log::debug!("preedit done, '{}'", im_context.preedit_string().0);
         });
-        im_context.connect_preedit_changed(|im_context| {
+        model.im_context.connect_preedit_changed(|im_context| {
             log::debug!("preedit changed, '{}'", im_context.preedit_string().0);
         });
-        im_context.connect_commit(glib::clone!(@strong sender => move |ctx, text| {
-            log::debug!("im-context({}) commit '{}'", ctx.context_id(), text);
-            sender
-                .send(UiCommand::Keyboard(text.replace("<", "<lt>").into()).into())
-                .unwrap();
-        }));
+        model
+            .im_context
+            .connect_commit(glib::clone!(@strong sender => move |ctx, text| {
+                log::debug!("im-context({}) commit '{}'", ctx.context_id(), text);
+                sender
+                    .send(UiCommand::Keyboard(text.replace("<", "<lt>").into()).into())
+                    .unwrap();
+            }));
 
         main_window.set_focus_widget(Some(&overlay));
         main_window.set_default_widget(Some(&overlay));
@@ -983,14 +1050,14 @@ impl Widgets<AppModel, ()> for AppWidgets {
             .name("vimview-focus-controller")
             .build();
         focus_controller.connect_enter(
-            glib::clone!(@strong sender, @strong im_context => move |_| {
+            glib::clone!(@strong sender, @strong model.im_context as im_context => move |_| {
                 log::error!("FocusGained");
                 im_context.focus_in();
                 sender.send(UiCommand::FocusGained.into()).unwrap();
             }),
         );
         focus_controller.connect_leave(
-            glib::clone!(@strong sender, @strong im_context  => move |_| {
+            glib::clone!(@strong sender, @strong model.im_context as im_context  => move |_| {
                 log::error!("FocusLost");
                 im_context.focus_out();
                 sender.send(UiCommand::FocusLost.into()).unwrap();
@@ -1001,7 +1068,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
         let key_controller = gtk::EventControllerKey::builder()
             .name("vimview-key-controller")
             .build();
-        key_controller.set_im_context(&im_context);
+        key_controller.set_im_context(&*model.im_context);
         key_controller.connect_key_pressed(
             glib::clone!(@strong sender => move |c, keyval, _keycode, modifier| {
                 let event = c.current_event().unwrap();
@@ -1032,6 +1099,14 @@ impl Widgets<AppModel, ()> for AppWidgets {
             atomic::Ordering::Relaxed,
         ) {
             self.da.queue_draw();
+        }
+        if let Ok(true) = model.cursor_redraw.compare_exchange(
+            true,
+            false,
+            atomic::Ordering::Acquire,
+            atomic::Ordering::Relaxed,
+        ) {
+            self.cursor_drawing_area.queue_draw();
         }
         if let Ok(true) = model.font_changed.compare_exchange(
             true,
@@ -1064,7 +1139,5 @@ impl Widgets<AppModel, ()> for AppWidgets {
                 )
                 .unwrap();
         }
-        // TODO:
-        // self.im_context.set_cursor_location(&gdk::Rectangle::new(0, 0, 5, 10));
     }
 }

@@ -252,3 +252,112 @@ impl Widgets<VimCmdPrompt, AppModel> for VimCmdPromptWidgets {
         }
     }
 }
+
+/*
+#[derive(Debug)]
+pub enum CursorEvent {
+    GoTo,
+    Mode,
+}
+
+pub struct CursorModel {
+    visible: bool,
+    hldefs: Rc<RwLock<HighlightDefinitions>>,
+}
+
+impl Model for CursorModel {
+    type Msg = CursorEvent;
+    type Widgets = CursorWidgets;
+    type Components = ();
+}
+
+impl ComponentUpdate<AppModel> for CursorModel {
+    fn init_model(parent_model: &AppModel) -> Self {
+        CursorModel {
+            visible: false,
+            hldefs: parent_model.hldefs.clone(),
+        }
+    }
+
+    fn update(
+        &mut self,
+        event: CursorEvent,
+        _components: &(),
+        _sender: Sender<CursorEvent>,
+        _parent_sender: Sender<AppMessage>,
+    ) {
+        match event {
+            CursorEvent::GoTo => {
+                self.visible = true;
+            }
+            CursorEvent::Mode => {}
+        }
+    }
+}
+
+#[relm_macros::widget(pub)]
+impl Widgets<CursorModel, AppModel> for CursorWidgets {
+    view! {
+        da = gtk::DrawingArea {
+            set_widget_name: "cursor-drawing-area",
+            set_visible: false,
+            set_hexpand: false,
+            set_vexpand: false,
+            set_focus_on_click: false,
+            set_draw_func[hldefs = model.hldefs.clone(),
+                          cursor = model.cursor.clone(),
+                          metrics = model.metrics.clone(),
+                          pctx = model.pctx.clone()] => move |_da, cr, _, _| {
+                let hldefs = hldefs.read().unwrap();
+                let default_colors = hldefs.defaults().unwrap();
+                let cursor = cursor.borrow();
+                let bg = cursor.background(default_colors);
+                let fg = cursor.foreground(default_colors);
+                let cell = cursor.cell();
+                let metrics = metrics.get();
+                let (width, height)  = cursor.size(metrics.width(), metrics.height());
+                let (x, y) = cursor.pos();
+                log::error!("drawing cursor at {}x{}.", x, y);
+                match cursor.shape {
+                    CursorShape::Block => {
+                        use pango::AttrType;
+                        let attrs = pango::AttrList::new();
+                        cell.attrs.iter().filter_map(|attr| {
+                            match attr.type_() {
+                                AttrType::Family | AttrType::Style | AttrType::Weight | AttrType::Variant | AttrType::Underline | AttrType::Strikethrough | AttrType::Overline => {
+                                    let mut attr = attr.clone();
+                                    attr.set_start_index(0);
+                                    attr.set_end_index(0);
+                                    Some(attr)
+                                }, _ => None
+                            }
+                        }).for_each(|attr| attrs.insert(attr));
+                        let itemized = &pango::itemize(&pctx, &cell.text, 0, -1, &attrs, None)[0];
+                        let mut glyph_string = pango::GlyphString::new();
+                        pango::shape(&cell.text, itemized.analysis(), &mut glyph_string);
+                        let glyphs = glyph_string.glyph_info_mut();
+                        assert_eq!(glyphs.len(), 1);
+                        let geometry = glyphs[0].geometry_mut();
+                        let width = (metrics.width() * cursor.width).ceil() as i32;
+                        if geometry.width() > 0 && geometry.width() != width {
+                            let x_offset =geometry.x_offset() - (geometry.width() - width) / 2;
+                            geometry.set_width(width);
+                            geometry.set_x_offset(x_offset);
+                        }
+                        cr.set_source_rgba(bg.red() as f64, bg.green() as f64, bg.blue() as f64, bg.alpha() as f64);
+                        cr.rectangle(x, y, width as f64, metrics.height());
+                        cr.fill().unwrap();
+                        cr.set_source_rgba(fg.red() as f64, fg.green() as f64, fg.blue() as f64, bg.alpha() as f64);
+                        pangocairo::show_glyph_string(cr, &itemized.analysis().font(), &mut glyph_string);
+                    }
+                    _ => {
+                        cr.set_source_rgba(fg.red() as f64, fg.green() as f64, fg.blue() as f64, bg.alpha() as f64);
+                        cr.rectangle(x, y, width, height);
+                        cr.fill().unwrap();
+                    }
+                }
+            }
+        }
+    }
+}
+*/

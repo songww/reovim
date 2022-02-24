@@ -1,7 +1,10 @@
+use glib::ffi::{g_unichar_iswide, g_unichar_iswide_cjk, g_unichar_iszerowidth};
+use glib::translate::from_glib;
+
 use crate::color::Color;
 
 use crate::style::{Colors, Style};
-use crate::vimview::HighlightDefinitions;
+use crate::vimview::{HighlightDefinitions, TextCell};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum CursorShape {
@@ -25,7 +28,7 @@ impl CursorShape {
 pub struct CursorMode {
     pub shape: Option<CursorShape>,
     pub style: Option<u64>,
-    pub cell_percentage: Option<f32>,
+    pub cell_percentage: Option<f64>,
     pub blinkwait: Option<u64>,
     pub blinkon: Option<u64>,
     pub blinkoff: Option<u64>,
@@ -33,23 +36,23 @@ pub struct CursorMode {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Cursor {
-    pub pos: (u64, u64),
+    pub pos: (f64, f64),
     pub grid: u64,
     pub shape: CursorShape,
-    pub cell_percentage: Option<f32>,
+    pub cell_percentage: Option<f64>,
     pub blinkwait: Option<u64>,
     pub blinkon: Option<u64>,
     pub blinkoff: Option<u64>,
     pub style: Option<Style>,
     pub enabled: bool,
-    pub double_width: bool,
-    pub character: String,
+    pub width: f64,
+    pub cell: TextCell,
 }
 
 impl Cursor {
     pub fn new() -> Cursor {
         Cursor {
-            pos: (0, 0).into(),
+            pos: (0., 0.).into(),
             grid: 0,
             shape: CursorShape::Block,
             style: None,
@@ -58,12 +61,12 @@ impl Cursor {
             blinkon: None,
             blinkoff: None,
             enabled: true,
-            double_width: false,
-            character: " ".to_string(),
+            width: 1.,
+            cell: TextCell::default(),
         }
     }
 
-    pub fn size(&self, width: f32, height: f32) -> (f32, f32) {
+    pub fn size(&self, width: f64, height: f64) -> (f64, f64) {
         let percentage = self.cell_percentage.unwrap_or(100.) / 100.;
         match self.shape {
             CursorShape::Block => (width, height),
@@ -74,13 +77,10 @@ impl Cursor {
 
     pub fn foreground(&self, default_colors: &Colors) -> Color {
         if let Some(style) = &self.style {
-            // let alpha = (100 - style.blend) as f32 / 100.;
-            let mut color = style
+            style
                 .colors
                 .foreground
-                .unwrap_or_else(|| default_colors.background.unwrap());
-            // color.set_alpha(alpha);
-            color
+                .unwrap_or_else(|| default_colors.background.unwrap())
         } else {
             default_colors.background.unwrap()
         }
@@ -88,20 +88,53 @@ impl Cursor {
 
     pub fn background(&self, default_colors: &Colors) -> Color {
         if let Some(style) = &self.style {
-            // let alpha = (100 - style.blend) as f32 / 100.;
+            let alpha = (100 - style.blend) as f32 / 100.;
             let mut color = style
                 .colors
                 .background
                 .unwrap_or_else(|| default_colors.foreground.unwrap());
-            // color.set_alpha(alpha);
+            color.set_alpha(alpha);
             color
         } else {
             default_colors.foreground.unwrap()
         }
     }
 
-    pub fn set_pos(&mut self, row: u64, col: u64) {
-        self.pos = (row, col);
+    pub fn cell(&self) -> &TextCell {
+        &self.cell
+    }
+
+    pub fn pos(&self) -> (f64, f64) {
+        self.pos
+    }
+
+    pub fn set_pos(&mut self, x: f64, y: f64) {
+        self.pos = (x, y);
+    }
+
+    pub fn set_cell(&mut self, cell: TextCell) {
+        // let character = cell.text.chars().next().unwrap();
+        // let width = unsafe {
+        //     if from_glib(g_unichar_iswide(character as u32))
+        //         || from_glib(g_unichar_iswide_cjk(character as u32))
+        //     {
+        //         // if from_glib(g_unichar_iswide_cjk(character as u32)) {
+        //         2.
+        //     } else if from_glib(g_unichar_iszerowidth(character as u32)) {
+        //         0.
+        //     } else {
+        //         1.
+        //     }
+        // };
+        let width = if cell.double_width {
+            2.
+        } else if cell.text.is_empty() {
+            0.
+        } else {
+            1.
+        };
+        self.cell = cell;
+        self.width = width;
     }
 
     pub fn change_mode(&mut self, cursor_mode: &CursorMode, styles: &HighlightDefinitions) {
@@ -133,6 +166,8 @@ impl Cursor {
 mod tests {
     use super::*;
     use crate::color::Color;
+    use rustc_hash::FxHashMap;
+    use std::sync::Arc;
 
     const COLORS: Colors = Colors {
         foreground: Some(Color::new(0.1, 0.1, 0.1, 0.1)),

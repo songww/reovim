@@ -198,7 +198,7 @@ mod imp {
                 layout.set_text(&text);
                 layout.set_attributes(Some(&attrs));
                 let unknown_glyphs = layout.unknown_glyphs_count();
-                log::info!(
+                log::debug!(
                     "grid {} line {} baseline {} line-height {} space {} char-height {} unknown_glyphs {}",
                     self.id.get(),
                     lineno,
@@ -335,7 +335,7 @@ mod imp {
                     pangocairo::ffi::pango_cairo_show_layout_line(cr.to_raw_none(), layoutline);
                 }
 
-                log::info!("{}", text);
+                log::debug!("{}", text);
             }
             // log::info!("{}", text);
             // let font_desc = pango::FontDescription::from_string("Monaco Nerd Font Mono 12");
