@@ -40,26 +40,30 @@ tokio-util = { version = "0.7", features = ["compat"] }
 #git = "https://gitlab.gnome.org/World/Rust/libadwaita-rs.git"
 
 [dependencies.cairo]
-git = "https://github.com/gtk-rs/gtk-rs-core.git"
+#git = "https://github.com/gtk-rs/gtk-rs-core.git"
+version = "0.15"
 package = "cairo-rs"
-branch = "master"
+#branch = "master"
 features = [ "v1_16", "png" ]
 
 [dependencies.pango]
-git = "https://github.com/songww/gtk-rs-core.git"
+#git = "https://github.com/songww/gtk-rs-core.git"
+version = "0.15"
 package = "pango"
-branch = "add_getter_for_glyph_item_iter"
+#branch = "master"
 features = [ "v1_50" ]
 
 [dependencies.pangocairo]
-git = "https://github.com/gtk-rs/gtk-rs-core.git"
+#git = "https://github.com/gtk-rs/gtk-rs-core.git"
+version = "0.15"
 package = "pangocairo"
-branch = "master"
+#branch = "master"
 
 [dependencies.graphene]
-git = "https://github.com/gtk-rs/gtk-rs-core.git"
+#git = "https://github.com/gtk-rs/gtk-rs-core.git"
+version = "0.15"
 package = "graphene-rs"
-branch = "master"
+#branch = "master"
 
 [dependencies.gtk]
 #git = "https://github.com/gtk-rs/gtk4-rs.git"
@@ -68,15 +72,16 @@ package = "gtk4"
 features = [ "v4_6" ]
 
 [dependencies.glib]
-git = "https://github.com/gtk-rs/gtk-rs-core.git"
+#git = "https://github.com/gtk-rs/gtk-rs-core.git"
+version = "0.15"
 package = "glib"
-branch = "master"
+#branch = "master"
 features = [ "v2_70" ]
 
 [profile.release]
 debug = true
 
-[workspace]
-members = [
-    "textview"
-]
+#[workspace]
+#members = [
+#    "textview"
+#]

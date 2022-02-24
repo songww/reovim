@@ -117,14 +117,14 @@ impl AppModel {
                 .unwrap()
                 .create_context()
                 .map(|ctx| {
-                    ctx.set_round_glyph_positions(false);
+                    ctx.set_round_glyph_positions(true);
                     ctx.set_font_description(&font_desc);
                     ctx.set_base_dir(pango::Direction::Ltr);
                     ctx.set_language(&pango::Language::default());
                     let mut options = cairo::FontOptions::new().ok();
                     options.as_mut().map(|options| {
                         options.set_antialias(cairo::Antialias::Subpixel);
-                        options.set_hint_style(cairo::HintStyle::Default);
+                        options.set_hint_style(cairo::HintStyle::Full);
                         // options.set_hint_metrics(cairo::HintMetrics::On);
                     });
                     pangocairo::context_set_font_options(&ctx, options.as_ref());
@@ -202,9 +202,14 @@ impl AppModel {
         log::error!("font-metrics height: {}", fm_height as f64 / PANGO_SCALE);
         log::error!("font-metrics ascent: {}", fm_ascent as f64 / PANGO_SCALE);
         let mut metrics = self.metrics.get();
-        let charheight = max_height as f64 / PANGO_SCALE;
         let charwidth = max_width as f64 / PANGO_SCALE;
         let width = charwidth;
+        let charheight = if fm_height > 0 {
+            fm_height.min(max_height) as f64 / PANGO_SCALE
+        } else {
+            max_height as f64 / PANGO_SCALE
+        };
+        // max_height as f64 / PANGO_SCALE;
         if metrics.charheight() == charheight
             && metrics.charwidth() == charwidth
             && metrics.width() == width
@@ -820,14 +825,14 @@ impl Widgets<AppModel, ()> for AppWidgets {
                         },
                         set_draw_func[hldefs = model.hldefs.clone()] => move |da, cr, _, _| {
                             if let Some(background) = hldefs.read().unwrap().defaults().and_then(|defaults| defaults.background) {
-                                cr.rectangle(0., 0., da.width() as _, da.height() as _);
-                                cr.set_source_rgba(
-                                    background.red() as _,
-                                    background.green() as _,
-                                    background.blue() as _,
-                                    1.,
-                                );
-                                cr.paint().unwrap();
+                                //cr.rectangle(0., 0., da.width() as _, da.height() as _);
+                                //cr.set_source_rgba(
+                                //    background.red() as _,
+                                //    background.green() as _,
+                                //    background.blue() as _,
+                                //    1.,
+                                //);
+                                //cr.paint().unwrap();
                             }
                         }
                     },

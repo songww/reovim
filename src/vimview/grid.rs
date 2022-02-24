@@ -4,7 +4,8 @@ mod imp {
     use std::rc::Rc;
     use std::sync::RwLock;
 
-    use gtk::{gdk::prelude::*, graphene::Rect, prelude::*, subclass::prelude::*};
+    use glib::translate::ToGlibPtr;
+    use gtk::{gdk::prelude::*, graphene::Rect, subclass::prelude::*};
     use once_cell::sync::OnceCell;
 
     use crate::cursor::Cursor;
@@ -136,7 +137,7 @@ mod imp {
     impl WidgetImpl for VimGridView {
         fn snapshot(&self, widget: &Self::Type, snapshot: &gtk::Snapshot) {
             self.parent_snapshot(widget, snapshot);
-            const PANGO_SCALE: f32 = pango::SCALE as f32;
+            const PANGO_SCALE: f64 = pango::SCALE as f64;
             let textbuf = self.textbuf();
             let pctx = textbuf.pango_context();
 
@@ -148,39 +149,32 @@ mod imp {
 
             let rect = Rect::new(0., 0., width as _, height as _);
 
+            let hldef = hldefs.get(HighlightDefinitions::DEFAULT);
+            let mut background = hldef
+                .map(|style| &style.colors)
+                .and_then(|colors| colors.background)
+                .unwrap();
             if self.is_float.get() {
                 // float window should use blend and drawing background.
-                let hldef = hldefs.get(HighlightDefinitions::DEFAULT);
                 let blend = hldef.map(|style| style.blend).unwrap_or(0);
                 let alpha = (100 - blend) as f32 / 100.;
-                let mut background = hldef
-                    .map(|style| &style.colors)
-                    .and_then(|colors| colors.background)
-                    .unwrap();
                 background.set_alpha(alpha);
-                snapshot.append_color(&background, &rect);
             }
+            snapshot.append_color(&background, &rect);
 
             let cr = snapshot.append_cairo(&rect);
 
-            pangocairo::update_context(&cr, &pctx);
-            pangocairo::context_set_font_options(&pctx, {
-                cairo::FontOptions::new()
-                    .ok()
-                    .map(|mut options| {
-                        options.set_antialias(cairo::Antialias::Gray);
-                        options.set_hint_style(cairo::HintStyle::Default);
-                        options
-                    })
-                    .as_ref()
-            });
-
-            let mut y = 0.;
+            let mut y = metrics.ascent();
 
             let cols = textbuf.cols();
             let rows = textbuf.rows();
             let mut text = String::with_capacity(cols);
             log::debug!("text to render:");
+            let desc = pctx.font_description();
+            pctx.set_round_glyph_positions(true);
+            let layout = pango::Layout::new(&pctx);
+            layout.set_font_description(desc.as_ref());
+            pangocairo::update_layout(&cr, &layout);
             for lineno in 0..rows {
                 cr.move_to(0., y);
                 y += metrics.height();
@@ -200,14 +194,8 @@ mod imp {
                         .into_iter()
                         .for_each(|attr| attrs.insert(attr));
                 }
-                let layout = pango::Layout::new(&pctx);
                 layout.set_text(&text);
                 layout.set_attributes(Some(&attrs));
-                let desc = pctx.font_description().map(|mut desc| {
-                    desc.set_variations_static("wght=200,wdth=5");
-                    desc
-                });
-                layout.set_font_description(desc.as_ref());
                 let unknown_glyphs = layout.unknown_glyphs_count();
                 log::info!(
                     "grid {} line {} baseline {} line-height {} space {} char-height {} unknown_glyphs {}",
@@ -220,13 +208,118 @@ mod imp {
                     unknown_glyphs
                 );
 
-                pangocairo::update_layout(&cr, &layout);
-                // pangocairo::show_layout_line(&cr, &layout.line_readonly(0).unwrap());
-                pangocairo::show_layout(&cr, &layout);
+                /*
+                if let Some(mut iter) = layout.iter() {
+                    loop {
+                        if let Some(run) = iter.run() {
+                            let mut glyph_string = run.glyph_string();
+                            let c_glyph_string = glyph_string.to_glib_none();
+                            let log_clusters = unsafe {
+                                let ptr = (*c_glyph_string.0).log_clusters;
+                                std::slice::from_raw_parts(ptr, glyph_string.num_glyphs() as usize)
+                            };
+
+                            for (glyph, log_cluster) in
+                                glyph_string.glyph_info_mut().iter_mut().zip(log_clusters)
+                            {
+                                let index = (run.item().offset() + log_cluster) as usize;
+                                let col = text[..index].chars().count();
+                                let cell = self.textbuf().cell(lineno, col).unwrap();
+                                let width = if cell.double_width {
+                                    metrics.charwidth() * 2.
+                                } else {
+                                    metrics.charwidth()
+                                } * PANGO_SCALE;
+                                let width = width.ceil() as i32;
+                                let geo_width = glyph.geometry().width();
+                                if geo_width > 0 && geo_width != width {
+                                    let geometry = glyph.geometry_mut();
+                                    geometry.set_width(width);
+                                    let x_offset = (geo_width - width) / 2;
+                                    //log::error!(
+                                    //    "adjusting {}x{}  width {}->{}  x-offset {}->{}",
+                                    //    lineno,
+                                    //    col,
+                                    //    geo_width,
+                                    //    width,
+                                    //    geometry.x_offset(),
+                                    //    x_offset
+                                    //);
+                                    geometry.set_x_offset(x_offset);
+                                }
+                            }
+                        }
+
+                        if !iter.next_run() {
+                            break;
+                        }
+                    }
+                }
+                */
+                unsafe {
+                    let layout_line = pango::ffi::pango_layout_get_line(layout.to_glib_none().0, 0);
+                    let mut runs = (*layout_line).runs;
+                    loop {
+                        let run = (*runs).data as *mut pango::ffi::PangoLayoutRun;
+                        let item = (*run).item;
+                        let glyph_string = (*run).glyphs;
+                        let num_glyphs = (*glyph_string).num_glyphs as usize;
+                        let log_clusters = {
+                            std::slice::from_raw_parts((*glyph_string).log_clusters, num_glyphs)
+                        };
+                        let glyphs =
+                            { std::slice::from_raw_parts_mut((*glyph_string).glyphs, num_glyphs) };
+                        for (glyph, log_cluster) in glyphs.iter_mut().zip(log_clusters) {
+                            let index = ((*item).offset + log_cluster) as usize;
+                            let col = text[..index].chars().count();
+                            let cell = self.textbuf().cell(lineno, col).unwrap();
+                            let width = if cell.double_width {
+                                metrics.charwidth() * 2. * PANGO_SCALE
+                            } else {
+                                metrics.charwidth() * PANGO_SCALE
+                            };
+                            let width = width.ceil() as i32;
+                            let geometry = &mut glyph.geometry;
+                            if geometry.width > 0 && geometry.width != width {
+                                let x_offset = geometry.x_offset - (geometry.width - width) / 2;
+                                log::error!(
+                                    "adjusting {}x{}  width {}->{}  x-offset {}->{}",
+                                    lineno,
+                                    col,
+                                    geometry.width,
+                                    width,
+                                    geometry.x_offset,
+                                    x_offset
+                                );
+                                geometry.width = width;
+                                geometry.x_offset = x_offset;
+                            }
+                        }
+                        runs = (*runs).next;
+                        if runs.is_null() {
+                            break;
+                        }
+                    }
+                    pangocairo::ffi::pango_cairo_show_layout_line(cr.to_raw_none(), layout_line);
+                }
+
                 log::info!("{}", text);
             }
+            // log::info!("{}", text);
+            // let font_desc = pango::FontDescription::from_string("Monaco Nerd Font Mono 12");
+            // let fm = pangocairo::FontMap::default().unwrap();
+            // let pctx = fm.create_context().unwrap();
+            // pctx.set_language(&pango::Language::default());
+            // pctx.set_base_dir(pango::Direction::Ltr);
+            // pctx.set_font_description(&font_desc);
+            // pctx.set_round_glyph_positions(true);
+            //let layout = pango::Layout::new(&pctx);
+            //layout.set_text(&text);
+            //let style_context = widget.style_context();
+            //snapshot.render_layout(&style_context, 0., 0., &layout);
 
             // drawing cursor.
+            /*
             if let Some(ref cursor) = *self.cursor.borrow() {
                 let (rows, cols) = cursor.pos;
 
@@ -328,6 +421,7 @@ mod imp {
                 pangocairo::update_layout(&cr, &cursor_layout);
                 pangocairo::show_layout(&cr, &cursor_layout)
             }
+                */
         }
 
         fn measure(
