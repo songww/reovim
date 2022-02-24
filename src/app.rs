@@ -1,16 +1,17 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::sync::{atomic, RwLock};
+use std::sync::{atomic, Arc, RwLock};
 
+use glib::ObjectExt;
 //use adw::prelude::*;
-use gtk::gdk;
 use gtk::gdk::prelude::FontMapExt;
+use gtk::gdk::{self, ScrollDirection};
 use gtk::prelude::{
     BoxExt, DrawingAreaExt, DrawingAreaExtManual, EditableExt, EditableExtManual,
     EventControllerExt, FrameExt, GtkWindowExt, IMContextExt, IMContextExtManual,
     IMMulticontextExt, OrientableExt, WidgetExt,
 };
-use once_cell::sync::OnceCell;
+use once_cell::sync::{Lazy, OnceCell};
 use pango::FontDescription;
 use relm4::*;
 use rustc_hash::FxHashMap;
@@ -27,6 +28,10 @@ use crate::{
     metrics::Metrics,
     Opts,
 };
+
+#[allow(non_upper_case_globals)]
+pub static GridActived: Lazy<Arc<atomic::AtomicU64>> =
+    Lazy::new(|| Arc::new(atomic::AtomicU64::new(0)));
 
 #[derive(Clone, Debug)]
 pub enum AppMessage {
@@ -186,7 +191,7 @@ impl AppModel {
             // char_
             let text = unsafe { String::from_utf8_unchecked(vec![c]) };
             layout.set_text(&text);
-            let logical = layout.extents().1;
+            let (_ink, logical) = layout.extents();
             max_height = logical.height().max(max_height);
             max_width = logical.width().max(max_width);
         });
@@ -903,28 +908,49 @@ impl Widgets<AppModel, ()> for AppWidgets {
         main_window.set_focus_widget(Some(&overlay));
         main_window.set_default_widget(Some(&overlay));
 
-        let mut options = cairo::FontOptions::new().ok();
-        options.as_mut().map(|options| {
-            options.set_antialias(cairo::Antialias::Subpixel);
-            options.set_hint_style(cairo::HintStyle::Default);
-            // options.set_hint_metrics(cairo::HintMetrics::On);
-        });
-        main_window.set_font_options(options.as_ref());
-
         let listener = gtk::EventControllerScroll::builder()
             .flags(gtk::EventControllerScrollFlags::all())
             .name("vimview-scrolling-listener")
             .build();
-        listener.connect_scroll(glib::clone!(@strong sender, @strong model.mouse_on as mouse_on => move |c, x, y| {
+        listener.connect_scroll(glib::clone!(@strong sender, @strong model.mouse_on as mouse_on, @strong grids_container => move |c, x, y| {
             if !mouse_on.load(atomic::Ordering::Relaxed) {
                 return gtk::Inhibit(false)
             }
-            // FIXME: get grid id by neovim current buf.
-            let id = 1;
-            let direction = c.current_event().unwrap().downcast::<gdk::ScrollEvent>().unwrap().direction().to_string().to_lowercase();
+            let event = c.current_event().unwrap().downcast::<gdk::ScrollEvent>().unwrap();
+            // let (x, y) = event.position().unwrap();
+            // let vgrid = grids_container.first_child().unwrap();
+            // let mut id = if vgrid.is_visible() && vgrid.contains(x, y) {
+            //     vgrid.property::<u64>("id")
+            // } else {
+            //     1
+            // };
+            // while let Some(widget) = vgrid.next_sibling() {
+            //     if widget.is_visible() && widget.contains(x, y) {
+            //         id = widget.property::<u64>("id");
+            //         break;
+            //     }
+            // }
+            let id = GridActived.load(atomic::Ordering::Relaxed);
+            let direction = match event.direction() {
+                ScrollDirection::Up => {
+                    "up"
+                },
+                    ScrollDirection::Down => {
+                    "down"
+                }
+                ScrollDirection::Left => {
+                    "left"
+                }
+                ScrollDirection::Right => {
+                    "right"
+                }
+                _ => {
+                    return gtk::Inhibit(false)
+                }
+            };
+            log::error!("scrolling grid {} x: {}, y: {} {}", id, x, y, &direction);
             let command = UiCommand::Scroll { direction: direction.into(), grid_id: id, position: (0, 1) };
             sender.send(AppMessage::UiCommand(command)).unwrap();
-            log::error!("scrolling grid {} x: {}, y: {}", id, x, y);
             gtk::Inhibit(false)
         }));
         listener.connect_decelerate(|_c, _vel_x, _vel_y| {
@@ -951,7 +977,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
             //     .property("id");
             // log::error!("scrolling end grid {}.", id);
         });
-        overlay.add_controller(&listener);
+        main_window.add_controller(&listener);
 
         let focus_controller = gtk::EventControllerFocus::builder()
             .name("vimview-focus-controller")
@@ -995,7 +1021,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
                 }
             }),
         );
-        overlay.add_controller(&key_controller);
+        main_window.add_controller(&key_controller);
     }
 
     fn pre_view() {

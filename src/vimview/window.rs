@@ -241,8 +241,6 @@ impl factory::FactoryPrototype for VimGrid {
             }
         }
 
-        // self.set_pango_context(view.pango_context());
-
         let click_listener = gtk::GestureClick::builder()
             .button(0)
             .exclusive(false)
@@ -308,7 +306,13 @@ impl factory::FactoryPrototype for VimGrid {
         );
         view.add_controller(&click_listener);
 
-        view.set_cursor(self.cursor.clone());
+        let motion_listener = gtk::EventControllerMotion::new();
+        let grid_id = *grid;
+        motion_listener.connect_enter(move |_, _, _| {
+            app::GridActived.store(grid_id, atomic::Ordering::Relaxed);
+        });
+
+        // view.set_cursor(self.cursor.clone());
 
         VimGridWidgets { view }
     }

@@ -1,6 +1,7 @@
 mod imp {
     use core::f32;
     use std::cell::{Cell, Ref, RefCell};
+    use std::ptr;
     use std::rc::Rc;
     use std::sync::RwLock;
 
@@ -257,11 +258,14 @@ mod imp {
                 }
                 */
                 unsafe {
-                    let layout_line = pango::ffi::pango_layout_get_line(layout.to_glib_none().0, 0);
-                    let mut runs = (*layout_line).runs;
+                    let mut isfirst = true;
+                    let baseline = pango::ffi::pango_layout_get_baseline(layout.to_glib_none().0);
+                    let layoutline = pango::ffi::pango_layout_get_line(layout.to_glib_none().0, 0);
+                    let mut runs = (*layoutline).runs;
                     loop {
                         let run = (*runs).data as *mut pango::ffi::PangoLayoutRun;
                         let item = (*run).item;
+                        let font = (*item).analysis.font;
                         let glyph_string = (*run).glyphs;
                         let num_glyphs = (*glyph_string).num_glyphs as usize;
                         let log_clusters = {
@@ -269,30 +273,58 @@ mod imp {
                         };
                         let glyphs =
                             { std::slice::from_raw_parts_mut((*glyph_string).glyphs, num_glyphs) };
+                        let ink_rect = ptr::null_mut();
+                        let mut logical_rect = pango::ffi::PangoRectangle {
+                            x: 0,
+                            y: 0,
+                            width: 0,
+                            height: 0,
+                        };
+                        pango::ffi::pango_glyph_string_extents(
+                            glyph_string,
+                            font,
+                            ink_rect,
+                            &mut logical_rect,
+                        );
                         for (glyph, log_cluster) in glyphs.iter_mut().zip(log_clusters) {
                             let index = ((*item).offset + log_cluster) as usize;
-                            let col = text[..index].chars().count();
-                            let cell = self.textbuf().cell(lineno, col).unwrap();
-                            let width = if cell.double_width {
-                                metrics.charwidth() * 2. * PANGO_SCALE
+                            let c = text[index..].chars().next().unwrap();
+                            let width = if glib::ffi::g_unichar_iswide(c as u32) == 1 {
+                                2.
+                            } else if glib::ffi::g_unichar_iszerowidth(c as u32) == 1 {
+                                0.
                             } else {
-                                metrics.charwidth() * PANGO_SCALE
+                                1.
                             };
+                            let width = metrics.charwidth() * width * PANGO_SCALE;
                             let width = width.ceil() as i32;
                             let geometry = &mut glyph.geometry;
                             if geometry.width > 0 && geometry.width != width {
-                                let x_offset = geometry.x_offset - (geometry.width - width) / 2;
-                                log::error!(
-                                    "adjusting {}x{}  width {}->{}  x-offset {}->{}",
+                                let x_offset = if isfirst {
+                                    geometry.x_offset
+                                } else {
+                                    geometry.x_offset - (geometry.width - width) / 2
+                                };
+                                let y_offset = geometry.y_offset
+                                    - (logical_rect.height / pango::SCALE
+                                        - metrics.height() as i32)
+                                        / 2;
+                                isfirst = false;
+                                // 啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊
+                                log::debug!(
+                                    "adjusting {} ({})  width {}->{}  x-offset {}->{} y-offset {} -> {}",
                                     lineno,
-                                    col,
+                                    c,
                                     geometry.width,
                                     width,
                                     geometry.x_offset,
-                                    x_offset
+                                    x_offset,
+                                    geometry.y_offset,
+                                    y_offset
                                 );
                                 geometry.width = width;
                                 geometry.x_offset = x_offset;
+                                // geometry.y_offset = y_offset;
                             }
                         }
                         runs = (*runs).next;
@@ -300,7 +332,7 @@ mod imp {
                             break;
                         }
                     }
-                    pangocairo::ffi::pango_cairo_show_layout_line(cr.to_raw_none(), layout_line);
+                    pangocairo::ffi::pango_cairo_show_layout_line(cr.to_raw_none(), layoutline);
                 }
 
                 log::info!("{}", text);
