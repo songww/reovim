@@ -1,15 +1,11 @@
 mod imp {
     use core::f32;
-    use std::cell::{Cell, Ref, RefCell};
-    use std::ptr;
+    use std::cell::{Cell, Ref};
     use std::rc::Rc;
     use std::sync::RwLock;
 
     use glib::translate::ToGlibPtr;
     use gtk::{gdk::prelude::*, graphene::Rect, subclass::prelude::*};
-    use once_cell::sync::OnceCell;
-
-    use crate::cursor::Cursor;
 
     use super::super::highlights::HighlightDefinitions;
     use super::super::TextBuf;
@@ -21,9 +17,6 @@ mod imp {
         height: Cell<u64>,
         is_float: Cell<bool>,
         textbuf: Cell<TextBuf>,
-        cursor: RefCell<Option<Cursor>>,
-        hldefs: OnceCell<Rc<RwLock<HighlightDefinitions>>>,
-        metrics: OnceCell<Rc<Cell<crate::metrics::Metrics>>>,
     }
 
     impl std::fmt::Debug for VimGridView {
@@ -32,6 +25,7 @@ mod imp {
                 .field("grid", &self.id.get())
                 .field("width", &self.width.get())
                 .field("height", &self.height.get())
+                .field("is-float-window", &self.is_float.get())
                 .finish_non_exhaustive()
         }
     }
@@ -47,10 +41,7 @@ mod imp {
                 id: 0.into(),
                 width: 0.into(),
                 height: 0.into(),
-                cursor: None.into(),
                 is_float: false.into(),
-                hldefs: OnceCell::new(), // Rc::new(RwLock::new(HighlightDefinitions::new()))),
-                metrics: OnceCell::new(),
                 textbuf: TextBuf::default().into(),
             }
         }
@@ -144,9 +135,10 @@ mod imp {
 
             let (width, height) = self.size_required();
 
-            let hldefs = self.hldefs.get().unwrap().read().unwrap();
+            let hldefs = textbuf.hldefs().unwrap();
+            let hldefs = hldefs.read().unwrap();
 
-            let metrics = self.metrics.get().unwrap().get();
+            let metrics = textbuf.metrics().unwrap().get();
 
             let rect = Rect::new(0., 0., width as _, height as _);
 
@@ -273,7 +265,7 @@ mod imp {
                         };
                         let glyphs =
                             { std::slice::from_raw_parts_mut((*glyph_string).glyphs, num_glyphs) };
-                        let ink_rect = ptr::null_mut();
+                        let ink_rect = std::ptr::null_mut();
                         let mut logical_rect = pango::ffi::PangoRectangle {
                             x: 0,
                             y: 0,
@@ -481,7 +473,7 @@ mod imp {
 
     impl VimGridView {
         pub(super) fn set_hldefs(&self, hldefs: Rc<RwLock<HighlightDefinitions>>) {
-            self.hldefs.set(hldefs).expect("hldefs must set only once.");
+            self.textbuf().set_hldefs(hldefs);
         }
 
         pub(super) fn set_textbuf(&self, textbuf: TextBuf) {
@@ -500,24 +492,19 @@ mod imp {
             self.height.replace(height);
         }
 
-        pub(super) fn set_cursor(&self, cursor: Option<Cursor>) {
-            self.cursor.replace(cursor);
-        }
-
         pub(super) fn set_is_float(&self, is_float: bool) {
             self.is_float.replace(is_float);
         }
 
         pub(super) fn set_metrics(&self, metrics: Rc<Cell<crate::metrics::Metrics>>) {
-            self.metrics
-                .set(metrics)
-                .expect("FontMetrics must set only once.");
+            self.textbuf().set_metrics(metrics)
         }
 
         pub(super) fn size_required(&self) -> (i32, i32) {
-            let width = self.width.get() as f64;
-            let height = self.height.get() as f64;
-            let metrics = self.metrics.get().unwrap().get();
+            let textbuf = self.textbuf();
+            let width = textbuf.cols() as f64;
+            let height = textbuf.rows() as f64;
+            let metrics = textbuf.metrics().unwrap().get();
             let w = width * metrics.width();
             let h = height * metrics.height();
             (w.ceil() as i32, h.ceil() as i32)
@@ -531,9 +518,6 @@ use std::sync::RwLock;
 
 use glib::subclass::prelude::*;
 use gtk::prelude::*;
-use gtk::subclass::prelude::*;
-
-use crate::cursor::Cursor;
 
 use super::{HighlightDefinitions, TextBuf};
 
@@ -565,10 +549,6 @@ impl VimGridView {
 
     pub fn set_textbuf(&self, textbuf: TextBuf) {
         self.imp().set_textbuf(textbuf);
-    }
-
-    pub fn set_cursor(&self, cursor: Option<Cursor>) {
-        self.imp().set_cursor(cursor);
     }
 
     pub fn set_is_float(&self, is_float: bool) {

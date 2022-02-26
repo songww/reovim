@@ -119,5 +119,16 @@ fn main() {
     //     }
     //     -1
     // });
+    relm4::set_global_css(
+        b"\
+vim-message-echo { \
+    border: 10px solid #e5e7eb; \
+    margin-top: 10px;
+    margin-right: 10px;
+};
+.vim-message { \
+    background: blue; \
+};",
+    );
     relm.run_with_args(&[title]);
 }

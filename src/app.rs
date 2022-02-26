@@ -13,21 +13,24 @@ use gtk::prelude::{
 };
 use once_cell::sync::{Lazy, OnceCell};
 use pango::FontDescription;
+use relm4::factory::FactoryVec;
 use relm4::*;
 use rustc_hash::FxHashMap;
 
 use crate::bridge::{EditorMode, MessageKind, WindowAnchor};
 use crate::components::{
-    VimCmdPrompt, VimCmdPromptWidgets, VimNotifactions, VimNotifactionsWidgets,
+    VimCmdEvent, VimCmdPromptWidgets, VimCmdPrompts, VimNotifactions, VimNotifactionsWidgets,
 };
 use crate::cursor::{Cursor, CursorMode, CursorShape};
 use crate::keys::ToInput;
-use crate::vimview::{self, VimGrid};
+use crate::vimview::{self, VimGrid, VimMessage};
 use crate::{
     bridge::{self, RedrawEvent, UiCommand},
     metrics::Metrics,
     Opts,
 };
+
+pub(crate) static NVIM: OnceCell<Arc<nvim::Neovim<crate::bridge::Tx>>> = OnceCell::new();
 
 #[allow(non_upper_case_globals)]
 pub static GridActived: Lazy<Arc<atomic::AtomicU64>> =
@@ -82,13 +85,13 @@ pub struct AppModel {
 
     pub hldefs: Rc<RwLock<vimview::HighlightDefinitions>>,
 
-    pub flush: Rc<atomic::AtomicBool>,
     pub focused: Rc<atomic::AtomicU64>,
     pub background_changed: Rc<atomic::AtomicBool>,
 
     pub vgrids: crate::factory::FactoryMap<vimview::VimGrid>,
     // relations about grid with window.
     pub relationships: FxHashMap<u64, GridWindow>,
+    pub messages: FactoryVec<vimview::VimMessage>,
 
     // pub floatwindows: crate::factory::FactoryMap<FloatWindow>,
     pub rt: tokio::runtime::Runtime,
@@ -147,12 +150,12 @@ impl AppModel {
 
             hldefs: Rc::new(RwLock::new(vimview::HighlightDefinitions::new())),
 
-            flush: Rc::new(false.into()),
             focused: Rc::new(1.into()),
             background_changed: Rc::new(false.into()),
 
             vgrids: crate::factory::FactoryMap::new(),
             relationships: FxHashMap::default(),
+            messages: FactoryVec::new(),
 
             opts,
 
@@ -421,7 +424,6 @@ impl AppUpdate for AppModel {
                                 0,
                                 (0., 0.).into(),
                                 (width, height).into(),
-                                self.flush.clone(),
                                 self.hldefs.clone(),
                                 self.metrics.clone(),
                                 self.font_description.clone(),
@@ -457,7 +459,6 @@ impl AppUpdate for AppModel {
                                 winid,
                                 (x.floor(), y.floor()).into(),
                                 (width, height).into(),
-                                self.flush.clone(),
                                 self.hldefs.clone(),
                                 self.metrics.clone(),
                                 self.font_description.clone(),
@@ -562,7 +563,6 @@ impl AppUpdate for AppModel {
                                 winid,
                                 (rect.x, rect.y).into(),
                                 (rect.width, rect.height).into(),
-                                self.flush.clone(),
                                 self.hldefs.clone(),
                                 self.metrics.clone(),
                                 self.font_description.clone(),
@@ -625,7 +625,6 @@ impl AppUpdate for AppModel {
                         self.vgrids.remove(grid);
                     }
                     RedrawEvent::Flush => {
-                        self.flush.store(true, atomic::Ordering::Relaxed);
                         self.vgrids.flush();
                     }
                     RedrawEvent::CursorGoto { grid, row, column } => {
@@ -635,8 +634,16 @@ impl AppUpdate for AppModel {
                             vgrid.textbuf().borrow().cell(row as usize, column as usize)
                         {
                             let metrics = self.metrics.get();
+                            log::info!(
+                                "cursor goto {}x{} of grid {}, gird at {}x{}",
+                                column,
+                                row,
+                                grid,
+                                vgrid_pos.x,
+                                vgrid_pos.y
+                            );
                             let x = metrics.width() * column as f64 + vgrid_pos.x;
-                            let y = metrics.height() * row as f64 + vgrid_pos.x;
+                            let y = metrics.height() * row as f64 + vgrid_pos.y;
                             self.cursor.borrow_mut().set_pos(x, y);
                             self.cursor.borrow_mut().set_cell(cell.clone());
                         } else {
@@ -685,7 +692,17 @@ impl AppUpdate for AppModel {
                         content,
                         replace_last,
                     } => {
-                        log::error!("showing message {:?} {:?}", kind, content);
+                        log::info!("showing message {:?} {:?}", kind, content);
+                        if replace_last && !self.messages.is_empty() {
+                            self.messages.pop();
+                        }
+                        self.messages.push(VimMessage::new(
+                            kind,
+                            content,
+                            self.hldefs.clone(),
+                            self.metrics.clone(),
+                            self.pctx.clone(),
+                        ))
                     }
                     RedrawEvent::MessageShowMode { content } => {
                         log::error!("message show mode: {:?}", content);
@@ -763,6 +780,33 @@ impl AppUpdate for AppModel {
                         vgrid.set_is_float(true);
                         vgrid.set_focusable(focusable);
                     }
+
+                    RedrawEvent::CommandLineShow {
+                        styled_content,
+                        position,
+                        first_character,
+                        prompt,
+                        indent,
+                        level,
+                    } => {
+                        components
+                            .cmd_prompt
+                            .send(VimCmdEvent::Show(
+                                styled_content,
+                                position,
+                                first_character,
+                                prompt,
+                                indent,
+                                level,
+                            ))
+                            .unwrap();
+                    }
+                    RedrawEvent::CommandLineHide => {
+                        components.cmd_prompt.send(VimCmdEvent::Hide).unwrap();
+                    }
+                    RedrawEvent::CommandLineBlockHide => {
+                        components.cmd_prompt.send(VimCmdEvent::BlockHide).unwrap();
+                    }
                     _ => {
                         log::error!("Unhandled RedrawEvent {:?}", event);
                     }
@@ -776,8 +820,7 @@ impl AppUpdate for AppModel {
 #[derive(relm4::Components)]
 pub struct AppComponents {
     messager: relm4::RelmMsgHandler<crate::messager::VimMessager, AppModel>,
-    messages: RelmComponent<VimNotifactions, AppModel>,
-    cmd_prompt: RelmComponent<VimCmdPrompt, AppModel>,
+    cmd_prompt: RelmComponent<VimCmdPrompts, AppModel>,
 }
 
 #[relm_macros::widget(pub)]
@@ -908,17 +951,23 @@ impl Widgets<AppModel, ()> for AppWidgets {
                             }
                         }
                     },
-                    add_overlay: messages_container = &gtk::Frame {
+                    add_overlay: messages_container = &gtk::Box {
                         set_widget_name: "messages-container",
-                        set_visible: false,
-                        set_hexpand: false,
-                        set_vexpand: false,
-                        set_child: Some(components.messages.root_widget()),
+                        set_opacity: 0.8,
+                        set_spacing: 5,
+                        set_visible: true,
+                        set_hexpand: true,
+                        // It dosenot matter.
+                        set_width_request: 0,
+                        set_homogeneous: false,
+                        set_focus_on_click: false,
+                        set_halign: gtk::Align::End,
+                        set_valign: gtk::Align::Start,
+                        set_overflow: gtk::Overflow::Visible,
+                        set_orientation: gtk::Orientation::Vertical,
+                        factory!(model.messages),
                     },
-                    add_overlay: commnad_prompt = &gtk::Frame {
-                        set_visible: false,
-                        set_child: Some(components.cmd_prompt.root_widget()),
-                    }
+                    add_overlay: components.cmd_prompt.root_widget() ,
                 }
             },
             connect_close_request[sender = sender.clone()] => move |_| {

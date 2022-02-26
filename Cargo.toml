@@ -27,17 +27,18 @@ clap = { version = "3", features = [ "derive" ] }
 chan = { version = "0.5", package = "crossbeam-channel" }
 nvim = { version = "0.4", package = "nvim-rs", features = [ "use_tokio" ] }
 
-relm4 = {  version = "0.4", features = [ "tokio-rt" ] } #, "libadwaita"
+relm4 = {  version = "0.4", features = [ "tokio-rt", "libadwaita" ] }
 relm-macros = { version = "0.4", package = "relm4-macros" }
 relm-components = { version = "0.4", package = "relm4-components" }
 
 tokio = { version = "1", features = ["process", "io-util", "sync", "rt", "time", "signal", "rt-multi-thread"] }
 tokio-util = { version = "0.7", features = ["compat"] }
 
-#[dependencies.adw]
+[dependencies.adw]
 #branch = "master"
-#package = "libadwaita"
+package = "libadwaita"
 #git = "https://gitlab.gnome.org/World/Rust/libadwaita-rs.git"
+version = "0.1"
 
 [dependencies.cairo]
 #git = "https://github.com/gtk-rs/gtk-rs-core.git"

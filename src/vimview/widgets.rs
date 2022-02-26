@@ -11,11 +11,10 @@ use relm4::*;
 
 use crate::app;
 use crate::bridge::{MouseAction, MouseButton, UiCommand};
-use crate::cursor::Cursor;
 use crate::pos::Position;
 use crate::rect::Rectangle;
 
-use super::grid::VimGridView;
+use super::gridview::VimGridView;
 use super::TextBuf;
 
 type HighlightDefinitions = Rc<RwLock<crate::vimview::HighlightDefinitions>>;
@@ -31,8 +30,6 @@ pub struct VimGrid {
     is_float: bool,
     focusable: bool,
     hldefs: HighlightDefinitions,
-    flush: Rc<atomic::AtomicBool>,
-    cursor: Option<Cursor>,
     metrics: Rc<Cell<crate::metrics::Metrics>>,
     font_description: Rc<RefCell<pango::FontDescription>>,
 
@@ -47,7 +44,6 @@ impl VimGrid {
         winid: u64,
         pos: Position,
         rect: Rectangle,
-        flush: Rc<atomic::AtomicBool>,
         hldefs: HighlightDefinitions,
         metrics: Rc<Cell<crate::metrics::Metrics>>,
         font_description: Rc<RefCell<pango::FontDescription>>,
@@ -63,10 +59,8 @@ impl VimGrid {
             height: rect.height as _,
             move_to: None.into(),
             hldefs: hldefs.clone(),
-            cursor: None.into(),
             is_float: false,
             focusable: true,
-            flush,
             metrics,
             textbuf,
             visible: true,
@@ -112,24 +106,6 @@ impl VimGrid {
 
     pub fn reset_cache(&mut self) {
         self.textbuf().borrow().reset_cache();
-    }
-
-    pub fn set_cursor(&mut self, cursor: Cursor) {
-        self.cursor.replace(cursor);
-    }
-
-    pub fn take_cursor(&mut self) -> Cursor {
-        self.cursor.take().unwrap()
-    }
-
-    pub fn cursor(&self) -> &Cursor {
-        self.cursor.as_ref().unwrap()
-        // unsafe { &*self.cursor.as_ptr() }.as_ref().unwrap()
-    }
-
-    pub fn cursor_mut(&mut self) -> &mut Cursor {
-        // unsafe { &mut *self.cursor.as_ptr() }.as_mut().unwrap()
-        self.cursor.as_mut().unwrap()
     }
 
     // content go up, view go down, eat head of rows.
@@ -222,9 +198,7 @@ impl factory::FactoryPrototype for VimGrid {
         view! {
             view = VimGridView::new(*grid, self.width as _, self.height as _) {
                 set_widget_name: &format!("vim-grid-{}-{}", self.win, grid),
-                set_hldefs: self.hldefs.clone(),
-                set_textbuf:self.textbuf.clone(),
-                set_metrics: self.metrics.clone(),
+                set_textbuf: self.textbuf.clone(),
 
                 set_visible: self.visible,
                 set_can_focus: true,
@@ -312,8 +286,6 @@ impl factory::FactoryPrototype for VimGrid {
             app::GridActived.store(grid_id, atomic::Ordering::Relaxed);
         });
 
-        // view.set_cursor(self.cursor.clone());
-
         VimGridWidgets { view }
     }
 
@@ -336,7 +308,6 @@ impl factory::FactoryPrototype for VimGrid {
         let view = &widgets.view;
 
         view.set_visible(self.visible);
-        view.set_cursor(self.cursor.clone());
         view.set_font_description(&self.font_description.borrow());
 
         let p_width = view.property::<u64>("width") as usize;

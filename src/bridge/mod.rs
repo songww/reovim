@@ -223,6 +223,8 @@ pub async fn start_neovim_runtime(
         }
     });
 
+    crate::app::NVIM.set(nvim).ok();
+
     // SETTINGS.read_initial_values(&nvim).await;
     // SETTINGS.setup_changed_listeners(&nvim).await;
 }

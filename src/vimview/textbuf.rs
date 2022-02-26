@@ -265,6 +265,14 @@ mod imp {
                 guard: self.inner.read().unwrap(),
             }
         }
+
+        pub(super) fn hldefs(&self) -> Option<Rc<RwLock<HighlightDefinitions>>> {
+            self.inner.read().unwrap().hldefs.clone()
+        }
+
+        pub(super) fn metrics(&self) -> Option<Rc<Cell<crate::metrics::Metrics>>> {
+            self.inner.read().unwrap().metrics.clone()
+        }
     }
 
     trait TextBufExt {
@@ -306,7 +314,13 @@ mod imp {
                 })
                 .collect();
 
-            log::debug!("buf cells resizing to {} rows from {}", rows, old_rows);
+            log::debug!(
+                "resizing buf cells from {}x{} to {}x{}",
+                old_cols,
+                old_rows,
+                cols,
+                rows
+            );
 
             self.cells = cells.into_boxed_slice();
         }
@@ -351,6 +365,14 @@ impl TextBuf {
 
     pub fn cols(&self) -> usize {
         self.imp().cols()
+    }
+
+    pub fn hldefs(&self) -> Option<Rc<RwLock<HighlightDefinitions>>> {
+        self.imp().hldefs()
+    }
+
+    pub fn metrics(&self) -> Option<Rc<Cell<crate::metrics::Metrics>>> {
+        self.imp().metrics()
     }
 
     pub fn set_cells(&self, row: usize, col: usize, cells: &[crate::bridge::GridLineCell]) {

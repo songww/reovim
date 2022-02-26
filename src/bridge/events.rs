@@ -59,7 +59,7 @@ pub struct GridLineCell {
 
 pub type StyledContent = Vec<(u64, String)>;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum MessageKind {
     Unknown,
     Confirm,
@@ -92,6 +92,25 @@ impl MessageKind {
             "search_count" => MessageKind::SearchCount,
             "wmsg" => MessageKind::Warning,
             _ => MessageKind::Unknown,
+        }
+    }
+}
+impl std::fmt::Display for MessageKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
+        match self {
+            MessageKind::Unknown => f.write_str("ynknown"),
+            MessageKind::Confirm => f.write_str("confirm"),
+            MessageKind::ConfirmSubstitute => f.write_str("confirm_sub"),
+            MessageKind::Error => f.write_str("emsg"),
+            MessageKind::Echo => f.write_str("echo"),
+            MessageKind::EchoMessage => f.write_str("echomsg"),
+            MessageKind::EchoError => f.write_str("echoerr"),
+            MessageKind::LuaError => f.write_str("lua_error"),
+            MessageKind::RpcError => f.write_str("rpc_error"),
+            MessageKind::ReturnPrompt => f.write_str("return_prompt"),
+            MessageKind::QuickFix => f.write_str("quickfix"),
+            MessageKind::SearchCount => f.write_str("search_count"),
+            MessageKind::Warning => f.write_str("wmsg"),
         }
     }
 }
@@ -237,7 +256,7 @@ pub enum RedrawEvent {
         line_count: f64,
     },
     CommandLineShow {
-        content: StyledContent,
+        styled_content: StyledContent,
         position: u64,
         first_character: String,
         prompt: String,
@@ -781,7 +800,7 @@ fn parse_cmdline_show(cmdline_show_arguments: Vec<Value>) -> Result<RedrawEvent>
         extract_values(cmdline_show_arguments)?;
 
     Ok(RedrawEvent::CommandLineShow {
-        content: parse_styled_content(content)?,
+        styled_content: parse_styled_content(content)?,
         position: parse_u64(position)?,
         first_character: parse_string(first_character)?,
         prompt: parse_string(prompt)?,
