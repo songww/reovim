@@ -1,21 +1,23 @@
+use std::{
+    io,
+    pin::Pin,
+    task::{Context, Poll},
+};
+
 use pin_project::pin_project;
-use std::io;
-use std::pin::Pin;
-use std::task::{Context, Poll};
 use tokio::{
     io::{AsyncWrite, WriteHalf},
     net::TcpStream,
     process::ChildStdin,
 };
 
-#[derive(Debug)]
 #[pin_project(project = TxProj)]
-pub enum Tx {
+pub enum TxWrapper {
     Child(#[pin] ChildStdin),
     Tcp(#[pin] WriteHalf<TcpStream>),
 }
 
-impl futures::io::AsyncWrite for Tx {
+impl futures::io::AsyncWrite for TxWrapper {
     fn poll_write(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -42,14 +44,18 @@ impl futures::io::AsyncWrite for Tx {
     }
 }
 
-impl From<ChildStdin> for Tx {
-    fn from(cs: ChildStdin) -> Tx {
-        Tx::Child(cs)
+pub trait WrapTx {
+    fn wrap_tx(self) -> TxWrapper;
+}
+
+impl WrapTx for ChildStdin {
+    fn wrap_tx(self) -> TxWrapper {
+        TxWrapper::Child(self)
     }
 }
 
-impl From<WriteHalf<TcpStream>> for Tx {
-    fn from(ts: WriteHalf<TcpStream>) -> Tx {
-        Tx::Tcp(ts)
+impl WrapTx for WriteHalf<TcpStream> {
+    fn wrap_tx(self) -> TxWrapper {
+        TxWrapper::Tcp(self)
     }
 }

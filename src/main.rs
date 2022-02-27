@@ -10,17 +10,20 @@ use clap::{IntoApp, Parser};
 
 mod app;
 mod bridge;
-mod channel;
 mod color;
 mod components;
 mod cursor;
 mod elements;
+mod event_aggregator;
 mod factory;
 mod keys;
+mod loggingchan;
 mod messager;
 mod metrics;
 mod pos;
 mod rect;
+mod running_tracker;
+mod settings;
 mod style;
 mod vimview;
 
@@ -88,10 +91,10 @@ impl Opts {
 
 fn main() {
     let mut opts: Opts = Opts::parse();
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("error")).init();
     log::trace!("command line options: {:?}", opts);
     let app = Opts::command().allow_missing_positional(true);
-    let title = app.get_bin_name().unwrap_or("relmvim");
+    let title = app.get_bin_name().unwrap_or("rv");
     opts.title = title.to_string();
     log::trace!("opts: {:?}", opts);
     let model = app::AppModel::new(opts);
@@ -119,16 +122,5 @@ fn main() {
     //     }
     //     -1
     // });
-    relm4::set_global_css(
-        b"\
-vim-message-echo { \
-    border: 10px solid #e5e7eb; \
-    margin-top: 10px;
-    margin-right: 10px;
-};
-.vim-message { \
-    background: blue; \
-};",
-    );
     relm.run_with_args(&[title]);
 }

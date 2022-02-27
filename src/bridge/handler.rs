@@ -1,44 +1,66 @@
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use log::trace;
 use nvim::{Handler, Neovim, Value};
-use tokio::sync::Mutex;
 
-use super::events::{parse_redraw_event, RedrawEvent};
-use super::ui_commands::UiCommand;
-use super::Tx;
-use crate::channel::LoggingTx;
+//use crate::bridge::clipboard::{get_remote_clipboard, set_remote_clipboard};
+#[cfg(windows)]
+use crate::bridge::ui_commands::{ParallelCommand, UiCommand};
+use crate::{
+    bridge::{events::parse_redraw_event, TxWrapper},
+    event_aggregator::EVENT_AGGREGATOR,
+    running_tracker::*,
+    settings::SETTINGS,
+};
 
 #[derive(Clone)]
-pub struct NeovimHandler {
-    ui_command_sender: Arc<Mutex<LoggingTx<UiCommand>>>,
-    redraw_event_sender: Arc<Mutex<LoggingTx<RedrawEvent>>>,
-}
+pub struct NeovimHandler {}
 
 impl NeovimHandler {
-    pub fn new(
-        ui_command_sender: LoggingTx<UiCommand>,
-        redraw_event_sender: LoggingTx<RedrawEvent>,
-    ) -> NeovimHandler {
-        NeovimHandler {
-            ui_command_sender: Arc::new(Mutex::new(ui_command_sender)),
-            redraw_event_sender: Arc::new(Mutex::new(redraw_event_sender)),
-        }
+    pub fn new() -> Self {
+        Self {}
     }
 }
 
 #[async_trait]
 impl Handler for NeovimHandler {
-    type Writer = Tx;
+    type Writer = TxWrapper;
 
-    async fn handle_notify(&self, event_name: String, arguments: Vec<Value>, neovim: Neovim<Tx>) {
+    async fn handle_request(
+        &self,
+        event_name: String,
+        _arguments: Vec<Value>,
+        _neovim: Neovim<TxWrapper>,
+    ) -> Result<Value, Value> {
+        trace!("Neovim request: {:?}", &event_name);
+
+        match event_name.as_ref() {
+            "neovide.get_clipboard" => {
+                // let endline_type = neovim
+                //     .command_output("set ff")
+                //     .await
+                //     .ok()
+                //     .and_then(|format| {
+                //         let mut s = format.split('=');
+                //         s.next();
+                //         s.next().map(String::from)
+                //     });
+
+                // get_remote_clipboard(endline_type.as_deref())
+                //     .map_err(|_| Value::from("cannot get remote clipboard content"))
+                Err(Value::from("get remote clipboard ignored."))
+            }
+            _ => Ok(Value::from("rpcrequest not handled")),
+        }
+    }
+
+    async fn handle_notify(
+        &self,
+        event_name: String,
+        arguments: Vec<Value>,
+        neovim: Neovim<TxWrapper>,
+    ) {
         trace!("Neovim notification: {:?}", &event_name);
 
-        #[cfg(windows)]
-        let ui_command_sender = self.ui_command_sender.clone();
-
-        let redraw_event_sender = self.redraw_event_sender.clone();
         match event_name.as_ref() {
             "redraw" => {
                 for events in arguments {
@@ -46,25 +68,32 @@ impl Handler for NeovimHandler {
                         .expect("Could not parse event from neovim");
 
                     for parsed_event in parsed_events {
-                        let redraw_event_sender = redraw_event_sender.lock().await;
-                        redraw_event_sender.send(parsed_event).ok();
+                        EVENT_AGGREGATOR.send(parsed_event);
                     }
                 }
             }
             "setting_changed" => {
-                // SETTINGS.handle_changed_notification(arguments);
+                SETTINGS.handle_changed_notification(arguments);
+            }
+            "neovide.quit" => {
+                let error_code = arguments[0]
+                    .as_i64()
+                    .expect("Could not parse error code from neovim");
+                RUNNING_TRACKER.quit_with_code(error_code as i32, "Quit from neovim");
             }
             #[cfg(windows)]
             "neovide.register_right_click" => {
-                let ui_command_sender = ui_command_sender.lock().await;
-                ui_command_sender.send(UiCommand::RegisterRightClick).ok();
+                EVENT_AGGREGATOR.send(UiCommand::Parallel(ParallelCommand::RegisterRightClick));
             }
             #[cfg(windows)]
             "neovide.unregister_right_click" => {
-                let ui_command_sender = ui_command_sender.lock().await;
-                ui_command_sender.send(UiCommand::UnregisterRightClick).ok();
+                EVENT_AGGREGATOR.send(UiCommand::Parallel(ParallelCommand::UnregisterRightClick));
+            }
+            "neovide.set_clipboard" => {
+                // set_remote_clipboard(arguments).ok();
+                log::error!("set remote clipboard ignored.")
             }
             _ => {}
-        };
+        }
     }
 }

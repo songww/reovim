@@ -1186,6 +1186,7 @@ dependencies = [
  "once_cell",
  "pango",
  "pangocairo",
+ "parking_lot",
  "pin-project",
  "relm4",
  "relm4-components",

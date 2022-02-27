@@ -9,20 +9,25 @@ use gtk::gdk::{self, ScrollDirection};
 use gtk::prelude::{
     BoxExt, DrawingAreaExt, DrawingAreaExtManual, EditableExt, EditableExtManual,
     EventControllerExt, FrameExt, GtkWindowExt, IMContextExt, IMContextExtManual,
-    IMMulticontextExt, OrientableExt, WidgetExt,
+    IMMulticontextExt, OrientableExt, SurfaceExt, WidgetExt,
 };
+use gtk::traits::NativeExt;
 use once_cell::sync::{Lazy, OnceCell};
 use pango::FontDescription;
 use relm4::factory::FactoryVec;
 use relm4::*;
 use rustc_hash::FxHashMap;
 
-use crate::bridge::{EditorMode, MessageKind, WindowAnchor};
+use crate::bridge::{
+    EditorMode, MessageKind, ParallelCommand, SerialCommand, TxWrapper, WindowAnchor,
+};
 use crate::components::{
     VimCmdEvent, VimCmdPromptWidgets, VimCmdPrompts, VimNotifactions, VimNotifactionsWidgets,
 };
 use crate::cursor::{Cursor, CursorMode, CursorShape};
+use crate::event_aggregator::EVENT_AGGREGATOR;
 use crate::keys::ToInput;
+use crate::running_tracker::RUNNING_TRACKER;
 use crate::vimview::{self, VimGrid, VimMessage};
 use crate::{
     bridge::{self, RedrawEvent, UiCommand},
@@ -30,7 +35,7 @@ use crate::{
     Opts,
 };
 
-pub(crate) static NVIM: OnceCell<Arc<nvim::Neovim<crate::bridge::Tx>>> = OnceCell::new();
+pub(crate) static NVIM: OnceCell<Arc<nvim::Neovim<TxWrapper>>> = OnceCell::new();
 
 #[allow(non_upper_case_globals)]
 pub static GridActived: Lazy<Arc<atomic::AtomicU64>> =
@@ -38,6 +43,7 @@ pub static GridActived: Lazy<Arc<atomic::AtomicU64>> =
 
 #[derive(Clone, Debug)]
 pub enum AppMessage {
+    Quit,
     UiCommand(UiCommand),
     RedrawEvent(RedrawEvent),
 }
@@ -104,6 +110,11 @@ impl AppModel {
             .enable_io()
             .build()
             .unwrap();
+        let handle = rt.handle().clone();
+        std::thread::spawn({
+            let opts = opts.clone();
+            move || handle.spawn(bridge::open(opts))
+        });
         let font_desc = FontDescription::from_string("monospace 11");
         AppModel {
             title: opts.title.clone(),
@@ -250,15 +261,17 @@ impl AppUpdate for AppModel {
         components: &AppComponents,
         _sender: Sender<AppMessage>,
     ) -> bool {
-        // log::info!("message at AppModel::update {:?}", message);
         match message {
             AppMessage::UiCommand(ui_command) => {
-                components
-                    .messager
-                    .sender()
-                    .send(ui_command)
-                    .expect("send failed");
+                log::trace!("ui-commad {:?}", ui_command);
+                EVENT_AGGREGATOR.send(ui_command);
+                // components
+                //     .messager
+                //     .sender()
+                //     .send(ui_command)
+                //     .expect("send failed");
             }
+            AppMessage::Quit => return false,
             AppMessage::RedrawEvent(event) => {
                 match event {
                     RedrawEvent::SetTitle { title } => {
@@ -528,7 +541,7 @@ impl AppUpdate for AppModel {
                         }
                         type RectResult = Result<Rect, Box<nvim::error::CallError>>;
                         async fn window_rectangle(
-                            window: &nvim::Window<crate::bridge::Tx>,
+                            window: &nvim::Window<crate::bridge::TxWrapper>,
                         ) -> RectResult {
                             let (x, y) = window.get_position().await?;
                             let width = window.get_width().await?;
@@ -541,7 +554,7 @@ impl AppUpdate for AppModel {
                             })
                         }
 
-                        log::info!(
+                        log::debug!(
                             "window {} viewport grid {} viewport: top({}) bottom({}) highlight-line({}) highlight-column({}) with {} lines",
                              winid, grid, top_line, bottom_line, current_line, current_column, line_count,
                         );
@@ -696,6 +709,15 @@ impl AppUpdate for AppModel {
                         if replace_last && !self.messages.is_empty() {
                             self.messages.pop();
                         }
+                        if matches!(kind, MessageKind::Echo) {
+                            if let Some((idx, _)) = self
+                                .messages
+                                .iter()
+                                .enumerate()
+                                .find(|(_, m)| matches!(m.kind(), MessageKind::Echo))
+                            {
+                            }
+                        }
                         self.messages.push(VimMessage::new(
                             kind,
                             content,
@@ -782,7 +804,7 @@ impl AppUpdate for AppModel {
                     }
 
                     RedrawEvent::CommandLineShow {
-                        styled_content,
+                        content,
                         position,
                         first_character,
                         prompt,
@@ -792,7 +814,7 @@ impl AppUpdate for AppModel {
                         components
                             .cmd_prompt
                             .send(VimCmdEvent::Show(
-                                styled_content,
+                                content,
                                 position,
                                 first_character,
                                 prompt,
@@ -819,7 +841,7 @@ impl AppUpdate for AppModel {
 
 #[derive(relm4::Components)]
 pub struct AppComponents {
-    messager: relm4::RelmMsgHandler<crate::messager::VimMessager, AppModel>,
+    _messager: relm4::RelmMsgHandler<crate::messager::VimMessager, AppModel>,
     cmd_prompt: RelmComponent<VimCmdPrompts, AppModel>,
 }
 
@@ -862,10 +884,10 @@ impl Widgets<AppModel, ()> for AppWidgets {
                             log::info!("da resizing rows: {} cols: {}", rows, cols);
                             sender
                                 .send(
-                                    UiCommand::Resize {
+                                    UiCommand::Parallel(ParallelCommand::Resize {
                                         width: cols as _,
                                         height: rows as _,
-                                    }
+                                    })
                                     .into(),
                                 )
                                 .unwrap();
@@ -953,7 +975,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
                     },
                     add_overlay: messages_container = &gtk::Box {
                         set_widget_name: "messages-container",
-                        set_opacity: 0.8,
+                        set_opacity: 0.95,
                         set_spacing: 5,
                         set_visible: true,
                         set_hexpand: true,
@@ -971,7 +993,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
                 }
             },
             connect_close_request[sender = sender.clone()] => move |_| {
-                sender.send(AppMessage::UiCommand(UiCommand::Quit)).ok();
+                sender.send(AppMessage::UiCommand(UiCommand::Parallel(ParallelCommand::Quit))).ok();
                 gtk::Inhibit(false)
             },
         }
@@ -980,6 +1002,12 @@ impl Widgets<AppModel, ()> for AppWidgets {
     fn post_init() {
         model.gtksettings.set(overlay.settings()).ok();
         model.recompute();
+        log::info!("widget scale factor {}", overlay.scale_factor());
+        // log::info!(
+        //     "surface scale factor {}",
+        //     main_window.surface().scale_factor()
+        // );
+        log::info!("settings dpi {}", overlay.settings().gtk_xft_dpi());
 
         let im_context = gtk::IMMulticontext::new();
         im_context.set_use_preedit(false);
@@ -1001,7 +1029,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
         im_context.connect_commit(glib::clone!(@strong sender => move |ctx, text| {
             log::debug!("im-context({}) commit '{}'", ctx.context_id(), text);
             sender
-                .send(UiCommand::Keyboard(text.replace("<", "<lt>").into()).into())
+                .send(UiCommand::Serial(SerialCommand::Keyboard(text.replace("<", "<lt>").into())).into())
                 .unwrap();
         }));
 
@@ -1030,6 +1058,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
             //         break;
             //     }
             // }
+            let modifier = event.modifier_state();
             let id = GridActived.load(atomic::Ordering::Relaxed);
             let direction = match event.direction() {
                 ScrollDirection::Up => {
@@ -1049,7 +1078,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
                 }
             };
             log::error!("scrolling grid {} x: {}, y: {} {}", id, x, y, &direction);
-            let command = UiCommand::Scroll { direction: direction.into(), grid_id: id, position: (0, 1) };
+            let command = UiCommand::Serial(SerialCommand::Scroll { direction: direction.into(), grid_id: id, position: (0, 1), modifier });
             sender.send(AppMessage::UiCommand(command)).unwrap();
             gtk::Inhibit(false)
         }));
@@ -1086,14 +1115,14 @@ impl Widgets<AppModel, ()> for AppWidgets {
             glib::clone!(@strong sender, @strong im_context => move |_| {
                 log::error!("FocusGained");
                 im_context.focus_in();
-                sender.send(UiCommand::FocusGained.into()).unwrap();
+                sender.send(UiCommand::Parallel(ParallelCommand::FocusGained).into()).unwrap();
             }),
         );
         focus_controller.connect_leave(
             glib::clone!(@strong sender, @strong im_context  => move |_| {
                 log::error!("FocusLost");
                 im_context.focus_out();
-                sender.send(UiCommand::FocusLost.into()).unwrap();
+                sender.send(UiCommand::Parallel(ParallelCommand::FocusLost).into()).unwrap();
             }),
         );
         main_window.add_controller(&focus_controller);
@@ -1107,16 +1136,16 @@ impl Widgets<AppModel, ()> for AppWidgets {
                 let event = c.current_event().unwrap();
 
                 if c.im_context().filter_keypress(&event) {
-                    log::debug!("keypress handled by im-context.");
+                    log::info!("keypress handled by im-context.");
                     return gtk::Inhibit(true)
                 }
                 let keypress = (keyval, modifier);
                 if let Some(keypress) = keypress.to_input() {
-                    log::debug!("keypress {} sent to neovim.", keypress);
-                    sender.send(UiCommand::Keyboard(keypress.into_owned()).into()).unwrap();
+                    log::info!("keypress {} sent to neovim.", keypress);
+                    sender.send(UiCommand::Serial(SerialCommand::Keyboard(keypress.into_owned())).into()).unwrap();
                     gtk::Inhibit(true)
                 } else {
-                    log::debug!("keypress ignored: {:?}", keyval.name());
+                    log::info!("keypress ignored: {:?}", keyval.name());
                     gtk::Inhibit(false)
                 }
             }),
@@ -1173,10 +1202,10 @@ impl Widgets<AppModel, ()> for AppWidgets {
             );
             sender
                 .send(
-                    UiCommand::Resize {
+                    UiCommand::Parallel(ParallelCommand::Resize {
                         width: cols as _,
                         height: rows as _,
-                    }
+                    })
                     .into(),
                 )
                 .unwrap();

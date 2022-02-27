@@ -1,10 +1,21 @@
 use std::ops::Deref;
+use std::sync::Arc;
 
-use gtk::gdk;
+#[cfg(windows)]
+use log::error;
 use log::trace;
-use nvim::Neovim;
 
-use crate::{bridge::Tx, keys::ToInput};
+use nvim::{call_args, rpc::model::IntoVal, Neovim};
+use tokio::sync::mpsc::unbounded_channel;
+
+#[cfg(windows)]
+use crate::windows_utils::{
+    register_rightclick_directory, register_rightclick_file, unregister_rightclick,
+};
+use crate::{
+    bridge::TxWrapper, event_aggregator::EVENT_AGGREGATOR, keys::ToInput,
+    running_tracker::RUNNING_TRACKER,
+};
 
 #[derive(Clone, Copy, Debug)]
 pub enum MouseAction {
@@ -49,6 +60,12 @@ impl Deref for MouseAction {
     }
 }
 
+impl std::fmt::Display for MouseAction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self)
+    }
+}
+
 #[derive(Copy, Clone, Debug)]
 pub enum MouseButton {
     Left,
@@ -77,28 +94,27 @@ impl Deref for MouseButton {
     }
 }
 
-impl ToString for MouseButton {
-    fn to_string(&self) -> String {
+impl std::fmt::Display for MouseButton {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::result::Result<(), std::fmt::Error> {
         match self {
-            MouseButton::Left => "left".to_string(),
-            MouseButton::Right => "right".to_string(),
-            MouseButton::Middle => "middle".to_string(),
+            MouseButton::Left => f.write_str("left"),
+            MouseButton::Right => f.write_str("right"),
+            MouseButton::Middle => f.write_str("middle"),
         }
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum UiCommand {
-    Quit,
-    Resize {
-        width: u64,
-        height: u64,
-    },
+// Serial commands are any commands which must complete before the next value is sent. This
+// includes keyboard and mouse input which would cause problems if sent out of order.
+//
+// When in doubt, use Parallel Commands.
+#[derive(Clone, Debug)]
+pub enum SerialCommand {
     Keyboard(String),
     MouseButton {
         action: MouseAction,
         button: MouseButton,
-        modifier: gdk::ModifierType,
+        modifier: gtk::gdk::ModifierType,
         grid_id: u64,
         position: (u32, u32),
     },
@@ -106,45 +122,43 @@ pub enum UiCommand {
         direction: String,
         grid_id: u64,
         position: (u32, u32),
+        modifier: gtk::gdk::ModifierType,
     },
     Drag {
+        button: MouseButton,
         grid_id: u64,
         position: (u32, u32),
+        modifier: gtk::gdk::ModifierType,
     },
-    FileDrop(String),
-    FocusLost,
-    FocusGained,
 }
 
-impl UiCommand {
-    pub async fn execute(self, nvim: &Neovim<Tx>) {
+impl SerialCommand {
+    async fn execute(self, nvim: &Neovim<TxWrapper>) {
         match self {
-            UiCommand::Quit => {
-                nvim.command("qa!").await.ok();
-            }
-            UiCommand::Resize { width, height } => nvim
-                .ui_try_resize(width.max(10) as i64, height.max(3) as i64)
-                .await
-                .expect(&format!(
-                    "Resize failed, trying resize to {}x{}",
-                    width.max(10) as i64,
-                    height.max(3) as i64
-                )),
-            UiCommand::Keyboard(input_command) => {
+            SerialCommand::Keyboard(input_command) => {
                 trace!("Keyboard Input Sent: {}", input_command);
                 nvim.input(&input_command).await.expect("Input failed");
             }
-            UiCommand::MouseButton {
+            SerialCommand::MouseButton {
                 action,
                 button,
                 modifier,
                 grid_id,
                 position: (grid_x, grid_y),
             } => {
+                log::info!(
+                    "input mouse button={} action={} modifier={} id={} x={} y={}",
+                    AsRef::<str>::as_ref(&button),
+                    AsRef::<str>::as_ref(&action),
+                    AsRef::<str>::as_ref(&modifier.to_input().unwrap()),
+                    grid_id,
+                    grid_x,
+                    grid_y
+                );
                 nvim.input_mouse(
                     &button,
                     &action,
-                    &modifier.to_input().unwrap().into_owned(),
+                    &modifier.to_input().unwrap(),
                     grid_id as i64,
                     grid_y as i64,
                     grid_x as i64,
@@ -152,15 +166,16 @@ impl UiCommand {
                 .await
                 .expect("Mouse Input Failed");
             }
-            UiCommand::Scroll {
+            SerialCommand::Scroll {
                 direction,
                 grid_id,
                 position: (grid_x, grid_y),
+                modifier,
             } => {
                 nvim.input_mouse(
                     "wheel",
                     &direction,
-                    "",
+                    &modifier.to_input().unwrap(),
                     grid_id as i64,
                     grid_y as i64,
                     grid_x as i64,
@@ -168,14 +183,16 @@ impl UiCommand {
                 .await
                 .expect("Mouse Scroll Failed");
             }
-            UiCommand::Drag {
+            SerialCommand::Drag {
+                button,
                 grid_id,
                 position: (grid_x, grid_y),
+                modifier,
             } => {
                 nvim.input_mouse(
-                    "left",
+                    &button,
                     "drag",
-                    "",
+                    &modifier.to_input().unwrap(),
                     grid_id as i64,
                     grid_y as i64,
                     grid_x as i64,
@@ -183,17 +200,176 @@ impl UiCommand {
                 .await
                 .expect("Mouse Drag Failed");
             }
-            UiCommand::FocusLost => nvim
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum ParallelCommand {
+    Quit,
+    Resize {
+        width: u64,
+        height: u64,
+    },
+    FileDrop(String),
+    FocusLost,
+    FocusGained,
+    DisplayAvailableFonts(Vec<String>),
+    #[cfg(windows)]
+    RegisterRightClick,
+    #[cfg(windows)]
+    UnregisterRightClick,
+}
+
+impl ParallelCommand {
+    async fn execute(self, nvim: &Neovim<TxWrapper>) {
+        match self {
+            ParallelCommand::Quit => {
+                nvim.command("qa!").await.ok();
+            }
+            ParallelCommand::Resize { width, height } => nvim
+                .ui_try_resize(width.max(10) as i64, height.max(3) as i64)
+                .await
+                .expect("Resize failed"),
+            ParallelCommand::FocusLost => nvim
                 .command("if exists('#FocusLost') | doautocmd <nomodeline> FocusLost | endif")
                 .await
                 .expect("Focus Lost Failed"),
-            UiCommand::FocusGained => nvim
+            ParallelCommand::FocusGained => nvim
                 .command("if exists('#FocusGained') | doautocmd <nomodeline> FocusGained | endif")
                 .await
                 .expect("Focus Gained Failed"),
-            UiCommand::FileDrop(path) => {
+            ParallelCommand::FileDrop(path) => {
                 nvim.command(format!("e {}", path).as_str()).await.ok();
+            }
+            ParallelCommand::DisplayAvailableFonts(fonts) => {
+                let mut content: Vec<String> = vec![
+                    "What follows are the font names available for guifont. You can try any of them with <CR> in normal mode.",
+                    "",
+                    "To switch to one of them, use one of them, type:",
+                    "",
+                    "    :set guifont=<font name>:h<font size>",
+                    "",
+                    "where <font name> is one of the following with spaces escaped",
+                    "and <font size> is the desired font size. As an example:",
+                    "",
+                    "    :set guifont=Cascadia\\ Code\\ PL:h12",
+                    "",
+                    "You may specify multiple fonts for fallback purposes separated by commas like so:",
+                    "",
+                    "    :set guifont=Cascadia\\ Code\\ PL,Delugia\\ Nerd\\ Font:h12",
+                    "",
+                    "Make sure to add the above command when you're happy with it to your .vimrc file or similar config to make it permanent.",
+                    "------------------------------",
+                    "Available Fonts on this System",
+                    "------------------------------",
+                ].into_iter().map(|text| text.to_owned()).collect();
+                content.extend(fonts);
+
+                nvim.command("split").await.ok();
+                nvim.command("noswapfile hide enew").await.ok();
+                nvim.command("setlocal buftype=nofile").await.ok();
+                nvim.command("setlocal bufhidden=hide").await.ok();
+                nvim.command("\"setlocal nobuflisted").await.ok();
+                nvim.command("\"lcd ~").await.ok();
+                nvim.command("file scratch").await.ok();
+                nvim.call(
+                    "nvim_buf_set_lines",
+                    call_args![0i64, 0i64, -1i64, false, content],
+                )
+                .await
+                .ok();
+                nvim.command(
+                    "nnoremap <buffer> <CR> <cmd>lua vim.opt.guifont=vim.fn.getline('.')<CR>",
+                )
+                .await
+                .ok();
+            }
+            #[cfg(windows)]
+            ParallelCommand::RegisterRightClick => {
+                if unregister_rightclick() {
+                    let msg =
+                        "Could not unregister previous menu item. Possibly already registered.";
+                    nvim.err_writeln(msg).await.ok();
+                    error!("{}", msg);
+                }
+                if !register_rightclick_directory() {
+                    let msg = "Could not register directory context menu item. Possibly already registered.";
+                    nvim.err_writeln(msg).await.ok();
+                    error!("{}", msg);
+                }
+                if !register_rightclick_file() {
+                    let msg =
+                        "Could not register file context menu item. Possibly already registered.";
+                    nvim.err_writeln(msg).await.ok();
+                    error!("{}", msg);
+                }
+            }
+            #[cfg(windows)]
+            ParallelCommand::UnregisterRightClick => {
+                if !unregister_rightclick() {
+                    let msg = "Could not remove context menu items. Possibly already removed.";
+                    nvim.err_writeln(msg).await.ok();
+                    error!("{}", msg);
+                }
             }
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub enum UiCommand {
+    Serial(SerialCommand),
+    Parallel(ParallelCommand),
+}
+
+impl From<SerialCommand> for UiCommand {
+    fn from(serial: SerialCommand) -> Self {
+        UiCommand::Serial(serial)
+    }
+}
+
+impl From<ParallelCommand> for UiCommand {
+    fn from(parallel: ParallelCommand) -> Self {
+        UiCommand::Parallel(parallel)
+    }
+}
+
+pub fn start_ui_command_handler(nvim: Arc<Neovim<TxWrapper>>) {
+    let (serial_tx, mut serial_rx) = unbounded_channel::<SerialCommand>();
+    let ui_command_nvim = nvim.clone();
+    tokio::spawn(async move {
+        let mut ui_command_receiver = EVENT_AGGREGATOR.register_event::<UiCommand>();
+        while RUNNING_TRACKER.is_running() {
+            match ui_command_receiver.recv().await {
+                Some(UiCommand::Serial(serial_command)) => serial_tx
+                    .send(serial_command)
+                    .expect("Could not send serial ui command"),
+                Some(UiCommand::Parallel(parallel_command)) => {
+                    let ui_command_nvim = ui_command_nvim.clone();
+                    tokio::spawn(async move {
+                        log::info!("aggregated parallel ui-command");
+                        parallel_command.execute(&ui_command_nvim).await;
+                    });
+                }
+                None => {
+                    RUNNING_TRACKER.quit("ui command channel failed");
+                }
+            }
+        }
+    });
+
+    tokio::spawn(async move {
+        while RUNNING_TRACKER.is_running() {
+            match serial_rx.recv().await {
+                Some(serial_command) => {
+                    log::info!("aggregated serial ui-command");
+                    serial_command.execute(&nvim).await;
+                }
+                None => {
+                    RUNNING_TRACKER.quit("serial ui command channel failed");
+                }
+            }
+        }
+    });
 }

@@ -283,6 +283,10 @@ impl VimMessage {
             pctx,
         }
     }
+
+    pub fn kind(&self) -> MessageKind {
+        self.kind
+    }
 }
 
 #[derive(Debug)]
@@ -313,18 +317,20 @@ impl FactoryPrototype for VimMessage {
         );
         view.set_margin_top(metrics.height() as _);
         view.set_margin_end(metrics.width() as _);
+        let fg = colors.foreground.unwrap();
         if matches!(self.kind, MessageKind::Echo) {
-            let fg = colors.foreground.unwrap();
-            let style = format!(
-                "border: 1px solid {}; padding: {}px {}px; background: {}",
-                fg.to_str(),
-                metrics.height() / 2.,
-                metrics.width(),
-                colors.background.unwrap().to_str()
-            );
-            log::info!("inline css for message: {}", &style);
-            view.inline_css(style.as_bytes());
+        } else {
+            //
         }
+        let style = format!(
+            "border: 1px solid {}; padding: {}px {}px; background: {};",
+            fg.to_str(),
+            metrics.height() / 2.,
+            metrics.width(),
+            colors.background.unwrap().to_str()
+        );
+        log::info!("inline css for message: {}", &style);
+        view.inline_css(style.as_bytes());
         MessageViewWidgets { view }
     }
 

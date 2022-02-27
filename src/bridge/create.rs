@@ -6,6 +6,7 @@ use std::{
     process::Stdio,
 };
 
+use nvim::{error::LoopError, neovim::Neovim, Handler};
 use tokio::{
     io::split,
     net::{TcpStream, ToSocketAddrs},
@@ -13,23 +14,22 @@ use tokio::{
     spawn,
     task::JoinHandle,
 };
-use tokio_util::compat::*;
-use nvim::{error::LoopError, Neovim, Handler};
+use tokio_util::compat::TokioAsyncReadCompatExt;
 
-use crate::bridge::Tx;
+use crate::bridge::{TxWrapper, WrapTx};
 
 /// Connect to a neovim instance via tcp
 pub async fn new_tcp<A, H>(
     addr: A,
     handler: H,
-) -> io::Result<(Neovim<Tx>, JoinHandle<Result<(), Box<LoopError>>>)>
+) -> io::Result<(Neovim<TxWrapper>, JoinHandle<Result<(), Box<LoopError>>>)>
 where
     A: ToSocketAddrs,
-    H: Handler<Writer = Tx>,
+    H: Handler<Writer = TxWrapper>,
 {
     let stream = TcpStream::connect(addr).await?;
     let (reader, writer) = split(stream);
-    let (neovim, io) = Neovim::<Tx>::new(reader.compat(), Tx::from(writer), handler);
+    let (neovim, io) = Neovim::<TxWrapper>::new(reader.compat(), writer.wrap_tx(), handler);
     let io_handle = spawn(io);
 
     Ok((neovim, io_handle))
@@ -41,21 +41,23 @@ where
 pub async fn new_child_cmd<H>(
     cmd: &mut Command,
     handler: H,
-) -> io::Result<(Neovim<Tx>, JoinHandle<Result<(), Box<LoopError>>>)>
+) -> io::Result<(Neovim<TxWrapper>, JoinHandle<Result<(), Box<LoopError>>>)>
 where
-    H: Handler<Writer = Tx>,
+    H: Handler<Writer = TxWrapper>,
 {
     let mut child = cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).spawn()?;
     let stdout = child
         .stdout
         .take()
-        .ok_or_else(|| Error::new(ErrorKind::Other, "Can't open stdout"))?;
+        .ok_or_else(|| Error::new(ErrorKind::Other, "Can't open stdout"))?
+        .compat();
     let stdin = child
         .stdin
         .take()
-        .ok_or_else(|| Error::new(ErrorKind::Other, "Can't open stdin"))?;
+        .ok_or_else(|| Error::new(ErrorKind::Other, "Can't open stdin"))?
+        .wrap_tx();
 
-    let (neovim, io) = Neovim::<Tx>::new(stdout.compat(), Tx::from(stdin), handler);
+    let (neovim, io) = Neovim::<TxWrapper>::new(stdout, stdin, handler);
     let io_handle = spawn(io);
 
     Ok((neovim, io_handle))

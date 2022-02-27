@@ -33,6 +33,7 @@ relm-components = { version = "0.4", package = "relm4-components" }
 
 tokio = { version = "1", features = ["process", "io-util", "sync", "rt", "time", "signal", "rt-multi-thread"] }
 tokio-util = { version = "0.7", features = ["compat"] }
+parking_lot = "0.12"
 
 [dependencies.adw]
 #branch = "master"
@@ -81,8 +82,3 @@ features = [ "v2_70" ]
 
 [profile.release]
 debug = true
-
-#[workspace]
-#members = [
-#    "textview"
-#]

@@ -10,7 +10,8 @@ use relm4::factory::positions::FixedPosition;
 use relm4::*;
 
 use crate::app;
-use crate::bridge::{MouseAction, MouseButton, UiCommand};
+use crate::bridge::{MouseAction, MouseButton, SerialCommand, UiCommand};
+use crate::event_aggregator::EVENT_AGGREGATOR;
 use crate::pos::Position;
 use crate::rect::Rectangle;
 
@@ -195,8 +196,9 @@ impl factory::FactoryPrototype for VimGrid {
     type Msg = app::AppMessage;
 
     fn init_view(&self, grid: &u64, sender: Sender<app::AppMessage>) -> VimGridWidgets {
+        let grid = *grid;
         view! {
-            view = VimGridView::new(*grid, self.width as _, self.height as _) {
+            view = VimGridView::new(grid, self.width as _, self.height as _) {
                 set_widget_name: &format!("vim-grid-{}-{}", self.win, grid),
                 set_textbuf: self.textbuf.clone(),
 
@@ -224,7 +226,6 @@ impl factory::FactoryPrototype for VimGrid {
             .build();
         click_listener.connect_pressed(
             glib::clone!(@strong sender, @strong self.metrics as metrics => move |c, n_press, x, y| {
-                let grid = 1;
                 let metrics = metrics.get();
                 let width = metrics.width();
                 let height = metrics.height();
@@ -232,18 +233,26 @@ impl factory::FactoryPrototype for VimGrid {
                 let rows = y as f64 / height;
                 log::info!("grid {} mouse pressed {} times at {}x{} -> {}x{}", grid, n_press, x, y, cols, rows);
                 let modifier = c.current_event_state().to_string();
-                log::info!("grid {} click button {} current_button {} modifier {}", grid, c.button(), c.current_button(), modifier);
-                let _btn = match c.current_button() {
+                let btn = match c.current_button() {
                     1 => MouseButton::Left,
                     2 => MouseButton::Middle,
                     3 => MouseButton::Right,
                     _ => { return; }
                 };
+                EVENT_AGGREGATOR.send(
+                    UiCommand::Serial(SerialCommand::MouseButton {
+                        action: MouseAction::Press,
+                        button: btn,
+                        modifier: c.current_event_state(),
+                        grid_id: grid,
+                        position: (cols.floor() as u32, rows.floor() as u32)
+                    })
+                );
+                log::info!("grid {} click button {} current_button {} modifier {}", grid, c.button(), c.current_button(), modifier);
             }),
         );
         click_listener.connect_released(
             glib::clone!(@strong sender, @strong self.metrics as metrics => move |c, n_press, x, y| {
-                let grid = 1;
                 let metrics = metrics.get();
                 let width = metrics.width();
                 let height = metrics.height();
@@ -251,37 +260,28 @@ impl factory::FactoryPrototype for VimGrid {
                 let rows = y as f64 / height;
                 log::info!("grid {} mouse released {} times at {}x{} -> {}x{}", grid, n_press, x, y, cols, rows);
                 let modifier = c.current_event_state().to_string();
-                log::info!("grid {} click button {} current_button {} modifier {}", grid, c.button(), c.current_button(), modifier);
                 let btn = match c.current_button() {
                     1 => MouseButton::Left,
                     2 => MouseButton::Middle,
                     3 => MouseButton::Right,
                     _ => { return; }
                 };
-                sender.send(
-                    UiCommand::MouseButton {
-                        action: MouseAction::Press,
-                        button: btn,
-                        modifier: c.current_event_state(),
-                        grid_id: grid,
-                        position: (cols.floor() as u32, rows.floor() as u32)
-                    }.into()
-                ).expect("Failed to send mouse press event");
-                sender.send(
-                    UiCommand::MouseButton {
+                EVENT_AGGREGATOR.send(
+                    UiCommand::Serial(SerialCommand::MouseButton {
                         action: MouseAction::Release,
                         button: btn,
                         modifier: c.current_event_state(),
                         grid_id: grid,
                         position: (cols.floor() as u32, rows.floor() as u32)
-                    }.into()
-                ).expect("Failed to send mouse event");
+                    })
+                );
+                log::info!("grid {} click button {} current_button {} modifier {}", grid, c.button(), c.current_button(), modifier);
             }),
         );
         view.add_controller(&click_listener);
 
         let motion_listener = gtk::EventControllerMotion::new();
-        let grid_id = *grid;
+        let grid_id = grid;
         motion_listener.connect_enter(move |_, _, _| {
             app::GridActived.store(grid_id, atomic::Ordering::Relaxed);
         });

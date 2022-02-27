@@ -1,13 +1,18 @@
-use std::error;
-use std::fmt;
-use std::fmt::Debug;
+use std::{
+    convert::TryInto,
+    error,
+    fmt::{self, Debug},
+};
 
 use log::debug;
 use nvim::Value;
 
-use crate::color::Color;
+use crate::color::{Color, ColorExt};
 use crate::cursor::{CursorMode, CursorShape};
 use crate::style::{Colors, Style};
+
+use super::TxWrapper;
+// use crate::editor::{Colors, CursorMode, CursorShape, Style};
 
 #[derive(Clone, Debug)]
 pub enum ParseError {
@@ -98,7 +103,7 @@ impl MessageKind {
 impl std::fmt::Display for MessageKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
         match self {
-            MessageKind::Unknown => f.write_str("ynknown"),
+            MessageKind::Unknown => f.write_str("unknown"),
             MessageKind::Confirm => f.write_str("confirm"),
             MessageKind::ConfirmSubstitute => f.write_str("confirm_sub"),
             MessageKind::Error => f.write_str("emsg"),
@@ -215,7 +220,7 @@ pub enum RedrawEvent {
     WindowPosition {
         grid: u64,
         #[derivative(Debug = "ignore")]
-        window: nvim::Window<super::Tx>,
+        window: nvim::Window<TxWrapper>,
         start_row: u64,
         start_column: u64,
         width: u64,
@@ -248,7 +253,7 @@ pub enum RedrawEvent {
     WindowViewport {
         grid: u64,
         #[derivative(Debug = "ignore")]
-        window: nvim::Window<super::Tx>,
+        window: nvim::Window<TxWrapper>,
         top_line: f64,
         bottom_line: f64,
         current_line: f64,
@@ -256,7 +261,7 @@ pub enum RedrawEvent {
         line_count: f64,
     },
     CommandLineShow {
-        styled_content: StyledContent,
+        content: StyledContent,
         position: u64,
         first_character: String,
         prompt: String,
@@ -347,12 +352,7 @@ fn unpack_color(packed_color: u64) -> Color {
     let r = ((packed_color & 0x00ff_0000) >> 16) as f32;
     let g = ((packed_color & 0xff00) >> 8) as f32;
     let b = (packed_color & 0xff) as f32;
-    Color::new(
-        /* r: */ r / 255.0,
-        /* g: */ g / 255.0,
-        /* b: */ b / 255.0,
-        /* a: */ 1.0,
-    )
+    Color::new(r / 255., g / 255., b / 255., 1.)
 }
 
 fn extract_values<const REQ: usize>(values: Vec<Value>) -> Result<[Value; REQ]> {
@@ -685,7 +685,7 @@ fn parse_grid_scroll(grid_scroll_arguments: Vec<Value>) -> Result<RedrawEvent> {
 
 fn parse_win_pos(
     win_pos_arguments: Vec<Value>,
-    neovim: nvim::Neovim<super::Tx>,
+    neovim: nvim::Neovim<TxWrapper>,
 ) -> Result<RedrawEvent> {
     let [grid, window, start_row, start_column, width, height] = extract_values(win_pos_arguments)?;
 
@@ -768,7 +768,7 @@ fn parse_msg_set_pos(msg_set_pos_arguments: Vec<Value>) -> Result<RedrawEvent> {
 
 fn parse_win_viewport(
     win_viewport_arguments: Vec<Value>,
-    neovim: nvim::Neovim<super::Tx>,
+    neovim: nvim::Neovim<TxWrapper>,
 ) -> Result<RedrawEvent> {
     let [grid, window, top_line, bottom_line, current_line, current_column, line_count] =
         extract_values(win_viewport_arguments)?;
@@ -800,7 +800,7 @@ fn parse_cmdline_show(cmdline_show_arguments: Vec<Value>) -> Result<RedrawEvent>
         extract_values(cmdline_show_arguments)?;
 
     Ok(RedrawEvent::CommandLineShow {
-        styled_content: parse_styled_content(content)?,
+        content: parse_styled_content(content)?,
         position: parse_u64(position)?,
         first_character: parse_string(first_character)?,
         prompt: parse_string(prompt)?,
@@ -903,7 +903,7 @@ fn parse_msg_history_show(msg_history_show_arguments: Vec<Value>) -> Result<Redr
 
 pub fn parse_redraw_event(
     event_value: Value,
-    neovim: nvim::Neovim<super::Tx>,
+    neovim: nvim::Neovim<TxWrapper>,
 ) -> Result<Vec<RedrawEvent>> {
     let mut event_contents = parse_array(event_value)?.into_iter();
     let event_name = event_contents
