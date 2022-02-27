@@ -1,10 +1,6 @@
 use std::ops::Deref;
 use std::sync::Arc;
 
-#[cfg(windows)]
-use log::error;
-use log::trace;
-
 use nvim::{call_args, rpc::model::IntoVal, Neovim};
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -136,7 +132,7 @@ impl SerialCommand {
     async fn execute(self, nvim: &Neovim<TxWrapper>) {
         match self {
             SerialCommand::Keyboard(input_command) => {
-                trace!("Keyboard Input Sent: {}", input_command);
+                log::error!("Keyboard Input Sent: {}", input_command);
                 nvim.input(&input_command).await.expect("Input failed");
             }
             SerialCommand::MouseButton {
@@ -146,19 +142,22 @@ impl SerialCommand {
                 grid_id,
                 position: (grid_x, grid_y),
             } => {
-                log::info!(
-                    "input mouse button={} action={} modifier={} id={} x={} y={}",
-                    AsRef::<str>::as_ref(&button),
-                    AsRef::<str>::as_ref(&action),
-                    AsRef::<str>::as_ref(&modifier.to_input().unwrap()),
+                let action: &str = &action;
+                let button: &str = &button;
+                let modifier: &str = &modifier.to_input().unwrap();
+                log::error!(
+                    "input mouse button='{}' action='{}' modifier='{}' {}<({}, {})>",
+                    button,
+                    action,
+                    modifier,
                     grid_id,
                     grid_x,
                     grid_y
                 );
                 nvim.input_mouse(
-                    &button,
-                    &action,
-                    &modifier.to_input().unwrap(),
+                    button,
+                    action,
+                    "",
                     grid_id as i64,
                     grid_y as i64,
                     grid_x as i64,
@@ -172,6 +171,13 @@ impl SerialCommand {
                 position: (grid_x, grid_y),
                 modifier,
             } => {
+                log::error!(
+                    "Mouse Wheel Sent: {} {}<{:?}> ({})",
+                    direction,
+                    grid_id,
+                    (grid_x, grid_y),
+                    AsRef::<str>::as_ref(&modifier.to_input().unwrap()),
+                );
                 nvim.input_mouse(
                     "wheel",
                     &direction,
@@ -291,18 +297,18 @@ impl ParallelCommand {
                     let msg =
                         "Could not unregister previous menu item. Possibly already registered.";
                     nvim.err_writeln(msg).await.ok();
-                    error!("{}", msg);
+                    log::error!("{}", msg);
                 }
                 if !register_rightclick_directory() {
                     let msg = "Could not register directory context menu item. Possibly already registered.";
                     nvim.err_writeln(msg).await.ok();
-                    error!("{}", msg);
+                    log::error!("{}", msg);
                 }
                 if !register_rightclick_file() {
                     let msg =
                         "Could not register file context menu item. Possibly already registered.";
                     nvim.err_writeln(msg).await.ok();
-                    error!("{}", msg);
+                    log::error!("{}", msg);
                 }
             }
             #[cfg(windows)]
@@ -310,7 +316,7 @@ impl ParallelCommand {
                 if !unregister_rightclick() {
                     let msg = "Could not remove context menu items. Possibly already removed.";
                     nvim.err_writeln(msg).await.ok();
-                    error!("{}", msg);
+                    log::error!("{}", msg);
                 }
             }
         }

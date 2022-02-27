@@ -50,13 +50,13 @@ pub async fn open(opts: Opts) {
     .expect("Could not locate or start neovim process");
 
     // Check the neovim version to ensure its high enough
-    match nvim.command_output("echo has('nvim-0.6')").await.as_deref() {
-        Ok("1") => {} // This is just a guard
-        _ => {
-            error!("Neovide requires nvim version 0.6 or higher. Download the latest version here https://github.com/neovim/neovim/wiki/Installing-Neovim");
-            exit(0);
-        }
-    }
+    //match nvim.command_output("echo has('nvim-0.6')").await.as_deref() {
+    //    Ok("1") => {} // This is just a guard
+    //    _ => {
+    //        error!("Neovide requires nvim version 0.6 or higher. Download the latest version here https://github.com/neovim/neovim/wiki/Installing-Neovim");
+    //        exit(0);
+    //    }
+    //}
 
     let mut is_remote = false;
     #[cfg(windows)]
@@ -90,6 +90,17 @@ pub async fn open(opts: Opts) {
     SETTINGS.read_initial_values(&nvim).await;
     SETTINGS.setup_changed_listeners(&nvim).await;
 
+    tokio::spawn({
+        let nvim = nvim.clone();
+        async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                let wins = nvim.list_wins().await.unwrap();
+                let no = wins[0].get_number().await.unwrap();
+                log::error!("window no: {}", no);
+            }
+        }
+    });
     match io_handler.await {
         Err(join_error) => error!("Error joining IO loop: '{}'", join_error),
         Ok(Err(error)) => {

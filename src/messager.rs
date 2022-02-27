@@ -4,7 +4,7 @@ use relm4::{MessageHandler, Sender};
 
 use crate::{
     app::AppMessage,
-    bridge::{RedrawEvent, UiCommand},
+    bridge::{self, RedrawEvent, UiCommand},
     event_aggregator::EVENT_AGGREGATOR,
     loggingchan::LoggingTx,
     running_tracker::RUNNING_TRACKER,
@@ -40,6 +40,7 @@ impl MessageHandler<crate::app::AppModel> for VimMessager {
             }
             parent_sender.send(AppMessage::Quit).unwrap();
         });
+        app_model.rt.spawn(bridge::open(app_model.opts.clone()));
         // app_model.rt.spawn(bridge::start_neovim_runtime(
         //     /* ui_command_sender */
         //     LoggingTx::attach(ui_command_sender.clone(), "chan-ui-commands".to_string()),

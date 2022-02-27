@@ -231,7 +231,7 @@ impl factory::FactoryPrototype for VimGrid {
                 let height = metrics.height();
                 let cols = x as f64 / width;
                 let rows = y as f64 / height;
-                log::info!("grid {} mouse pressed {} times at {}x{} -> {}x{}", grid, n_press, x, y, cols, rows);
+                log::trace!("grid {} mouse pressed {} times at {}x{} -> {}x{}", grid, n_press, x, y, cols, rows);
                 let modifier = c.current_event_state().to_string();
                 let btn = match c.current_button() {
                     1 => MouseButton::Left,
@@ -248,7 +248,7 @@ impl factory::FactoryPrototype for VimGrid {
                         position: (cols.floor() as u32, rows.floor() as u32)
                     })
                 );
-                log::info!("grid {} click button {} current_button {} modifier {}", grid, c.button(), c.current_button(), modifier);
+                log::trace!("grid {} release button {} current_button {} modifier {}", grid, c.button(), c.current_button(), modifier);
             }),
         );
         click_listener.connect_released(
@@ -258,7 +258,7 @@ impl factory::FactoryPrototype for VimGrid {
                 let height = metrics.height();
                 let cols = x as f64 / width;
                 let rows = y as f64 / height;
-                log::info!("grid {} mouse released {} times at {}x{} -> {}x{}", grid, n_press, x, y, cols, rows);
+                log::trace!("grid {} mouse released {} times at {}x{} -> {}x{}", grid, n_press, x, y, cols, rows);
                 let modifier = c.current_event_state().to_string();
                 let btn = match c.current_button() {
                     1 => MouseButton::Left,
@@ -275,7 +275,7 @@ impl factory::FactoryPrototype for VimGrid {
                         position: (cols.floor() as u32, rows.floor() as u32)
                     })
                 );
-                log::info!("grid {} click button {} current_button {} modifier {}", grid, c.button(), c.current_button(), modifier);
+                log::trace!("grid {} release button {} current_button {} modifier {}", grid, c.button(), c.current_button(), modifier);
             }),
         );
         view.add_controller(&click_listener);

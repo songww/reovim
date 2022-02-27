@@ -27,7 +27,6 @@ use crate::components::{
 use crate::cursor::{Cursor, CursorMode, CursorShape};
 use crate::event_aggregator::EVENT_AGGREGATOR;
 use crate::keys::ToInput;
-use crate::running_tracker::RUNNING_TRACKER;
 use crate::vimview::{self, VimGrid, VimMessage};
 use crate::{
     bridge::{self, RedrawEvent, UiCommand},
@@ -52,14 +51,6 @@ impl From<UiCommand> for AppMessage {
     fn from(cmd: UiCommand) -> Self {
         AppMessage::UiCommand(cmd)
     }
-}
-
-#[derive(Debug, Default)]
-pub struct GridWindow {
-    // window number
-    winid: u64,
-    // default grid
-    //default_grid: u64,
 }
 
 pub struct AppModel {
@@ -95,8 +86,6 @@ pub struct AppModel {
     pub background_changed: Rc<atomic::AtomicBool>,
 
     pub vgrids: crate::factory::FactoryMap<vimview::VimGrid>,
-    // relations about grid with window.
-    pub relationships: FxHashMap<u64, GridWindow>,
     pub messages: FactoryVec<vimview::VimMessage>,
 
     // pub floatwindows: crate::factory::FactoryMap<FloatWindow>,
@@ -110,11 +99,6 @@ impl AppModel {
             .enable_io()
             .build()
             .unwrap();
-        let handle = rt.handle().clone();
-        std::thread::spawn({
-            let opts = opts.clone();
-            move || handle.spawn(bridge::open(opts))
-        });
         let font_desc = FontDescription::from_string("monospace 11");
         AppModel {
             title: opts.title.clone(),
@@ -165,7 +149,6 @@ impl AppModel {
             background_changed: Rc::new(false.into()),
 
             vgrids: crate::factory::FactoryMap::new(),
-            relationships: FxHashMap::default(),
             messages: FactoryVec::new(),
 
             opts,
@@ -358,11 +341,6 @@ impl AppUpdate for AppModel {
                         cells,
                     } => {
                         // log::info!("grid line {}", grid);
-                        let winid = self
-                            .relationships
-                            .get(&grid)
-                            .map(|rel| rel.winid)
-                            .unwrap_or(0);
                         // let cells: Vec<_> = cells
                         //     .into_iter()
                         //     .map(|cell| vimview::TextCell {
@@ -374,9 +352,8 @@ impl AppUpdate for AppModel {
                         //     .collect();
 
                         log::debug!(
-                            "grid line {}/{} - {} cells at {}x{}",
+                            "grid {} line - {} cells at {}x{}",
                             grid,
-                            winid,
                             cells.len(),
                             row,
                             column_start
@@ -443,7 +420,6 @@ impl AppUpdate for AppModel {
                             );
                             vgrid.set_pango_context(self.pctx.clone());
                             self.vgrids.insert(grid, vgrid);
-                            self.relationships.insert(grid, GridWindow { winid: 0 });
                         };
                     }
 
@@ -455,10 +431,6 @@ impl AppUpdate for AppModel {
                         width,
                         height,
                     } => {
-                        let winid = self.rt.block_on(window.get_number()).unwrap();
-                        log::info!("window pos number: {}", winid);
-                        let winid = winid as u64;
-
                         self.focused.store(grid, atomic::Ordering::Relaxed);
 
                         let metrics = self.metrics.get();
@@ -469,7 +441,7 @@ impl AppUpdate for AppModel {
                             // dose not exists, create
                             let vgrid = VimGrid::new(
                                 grid,
-                                winid,
+                                0,
                                 (x.floor(), y.floor()).into(),
                                 (width, height).into(),
                                 self.hldefs.clone(),
@@ -478,11 +450,9 @@ impl AppUpdate for AppModel {
                             );
                             vgrid.set_pango_context(self.pctx.clone());
                             self.vgrids.insert(grid, vgrid);
-                            self.relationships.insert(grid, GridWindow { winid });
                             log::info!(
-                                "Add grid {} to window {} at {}x{} with {}x{}.",
+                                "Add grid {} at {}x{} with {}x{}.",
                                 grid,
-                                winid,
                                 x,
                                 y,
                                 height,
@@ -493,22 +463,19 @@ impl AppUpdate for AppModel {
                             vgrid.resize(width as _, height as _);
                             vgrid.set_pos(x.floor(), y.floor());
                             log::info!(
-                                "Move grid {} of window {} at {}x{} with {}x{}.",
+                                "Move grid {} to {}x{} with {}x{}.",
                                 grid,
-                                winid,
                                 x,
                                 y,
                                 height,
                                 width
                             );
-                            // make sure grid belongs right window.
-                            self.relationships.get_mut(&grid).unwrap().winid = winid;
                             vgrid.show();
                         }
 
                         log::info!(
-                            "window {} position grid {} row-start({}) col-start({}) width({}) height({})",
-                            winid, grid, start_row, start_column, width, height,
+                            "WindowPosition grid {} row-start({}) col-start({}) width({}) height({})",
+                            grid, start_row, start_column, width, height,
                         );
                     }
                     RedrawEvent::WindowViewport {
@@ -520,19 +487,6 @@ impl AppUpdate for AppModel {
                         current_column,
                         line_count,
                     } => {
-                        let number = self.rt.block_on(window.get_number());
-                        let winid = match number {
-                            Ok(number) => number,
-                            Err(err) => {
-                                log::error!(
-                                    "viewport grid {} dose not belongs any window: {:?}",
-                                    grid,
-                                    err
-                                );
-                                return true;
-                            }
-                        };
-
                         struct Rect {
                             x: f64,
                             y: f64,
@@ -555,25 +509,27 @@ impl AppUpdate for AppModel {
                         }
 
                         log::debug!(
-                            "window {} viewport grid {} viewport: top({}) bottom({}) highlight-line({}) highlight-column({}) with {} lines",
-                             winid, grid, top_line, bottom_line, current_line, current_column, line_count,
+                            "WindowViewport grid {} viewport: top({}) bottom({}) highlight-line({}) highlight-column({}) with {} lines",
+                             grid, top_line, bottom_line, current_line, current_column, line_count,
                         );
-
-                        let winid = winid as u64;
 
                         if self.vgrids.get(grid).is_none() {
                             // dose not exists, create
                             let rect: Rect = match self.rt.block_on(window_rectangle(&window)) {
                                 Ok(rect) => rect,
                                 Err(err) => {
-                                    log::error!("vim window {} disappeared on handling WindowViewport event: {}", winid, err);
+                                    log::error!(
+                                        "WindowViewport grid {} can not fetch rectangle: {}",
+                                        grid,
+                                        err
+                                    );
                                     return true;
                                 }
                             };
 
                             let vgrid = VimGrid::new(
                                 grid,
-                                winid,
+                                0,
                                 (rect.x, rect.y).into(),
                                 (rect.width, rect.height).into(),
                                 self.hldefs.clone(),
@@ -582,21 +538,12 @@ impl AppUpdate for AppModel {
                             );
                             vgrid.set_pango_context(self.pctx.clone());
                             self.vgrids.insert(grid, vgrid);
-                            self.relationships.insert(grid, GridWindow { winid });
-                            log::info!(
-                                "Add grid {} to window {} at {}x{}.",
-                                grid,
-                                winid,
-                                rect.height,
-                                rect.width
-                            );
+                            log::info!("Add grid {} at {}x{}.", grid, rect.height, rect.width);
                         } else {
                             let vgrid = self.vgrids.get_mut(grid).unwrap();
                             // vgrid.resize(width as _, height as _);
                             // vgrid.set_pos(x, y);
                             vgrid.show();
-                            // make sure grid belongs right window.
-                            self.relationships.get_mut(&grid).unwrap().winid = winid;
                         }
                     }
                     RedrawEvent::WindowHide { grid } => {
@@ -621,7 +568,6 @@ impl AppUpdate for AppModel {
                             )
                             .ok();
                         log::info!("removing relations {}", grid);
-                        self.relationships.remove(&grid);
                         self.vgrids.remove(grid);
                     }
                     RedrawEvent::Destroy { grid } => {
@@ -634,7 +580,6 @@ impl AppUpdate for AppModel {
                             )
                             .ok();
                         log::info!("destroying relations {}", grid);
-                        self.relationships.remove(&grid);
                         self.vgrids.remove(grid);
                     }
                     RedrawEvent::Flush => {
@@ -682,7 +627,7 @@ impl AppUpdate for AppModel {
                         self.cursor_mode = mode_index as _;
                         self.cursor_redraw.store(true, atomic::Ordering::Relaxed);
                         let cursor_mode = &self.cursor_modes[self.cursor_mode];
-                        log::error!("Mode Change to {:?} {:?}", &self.mode, cursor_mode);
+                        log::warn!("Mode Change to {:?} {:?}", &self.mode, cursor_mode);
                         let style = self.hldefs.read().unwrap();
 
                         self.cursor.borrow_mut().change_mode(cursor_mode, &style);
@@ -727,10 +672,10 @@ impl AppUpdate for AppModel {
                         ))
                     }
                     RedrawEvent::MessageShowMode { content } => {
-                        log::error!("message show mode: {:?}", content);
+                        log::warn!("message show mode: {:?}", content);
                     }
                     RedrawEvent::MessageRuler { content } => {
-                        log::error!("message ruler: {:?}", content);
+                        log::warn!("message ruler: {:?}", content);
                     }
                     RedrawEvent::MessageSetPosition {
                         grid,
@@ -738,7 +683,7 @@ impl AppUpdate for AppModel {
                         scrolled,
                         separator_character,
                     } => {
-                        log::error!(
+                        log::warn!(
                             "message set position: {} {} {} '{}'",
                             grid,
                             row,
@@ -747,13 +692,14 @@ impl AppUpdate for AppModel {
                         );
                     }
                     RedrawEvent::MessageShowCommand { content } => {
-                        log::error!("message show command: {:?}", content);
+                        log::warn!("message show command: {:?}", content);
                     }
                     RedrawEvent::MessageHistoryShow { entries } => {
-                        log::error!("message history: {:?}", entries);
+                        log::warn!("message history: {:?}", entries);
                     }
                     RedrawEvent::MessageClear => {
-                        log::error!("message clear all");
+                        log::warn!("message clear all");
+                        self.messages.clear();
                     }
 
                     RedrawEvent::WindowFloatPosition {
@@ -925,7 +871,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
                             let cell = cursor.cell();
                             let metrics = metrics.get();
                             let (x, y, width, height)  = cursor.rectangle(metrics.width(), metrics.height());
-                            log::error!("drawing cursor at {}x{}.", x, y);
+                            log::info!("drawing cursor at {}x{}.", x, y);
                             match cursor.shape {
                                 CursorShape::Block => {
                                     use pango::AttrType;
@@ -940,7 +886,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
                                             }, _ => None
                                         }
                                     }).for_each(|attr| attrs.insert(attr));
-                                    log::error!("cursor cell '{}' wide {}", cell.text, cursor.width);
+                                    log::info!("cursor cell '{}' wide {}", cell.text, cursor.width);
                                     let itemized = &pango::itemize(&pctx, &cell.text, 0, cell.text.len() as _, &attrs, None)[0];
                                     let mut glyph_string = pango::GlyphString::new();
                                     pango::shape(&cell.text, itemized.analysis(), &mut glyph_string);
@@ -952,7 +898,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
                                         let x_offset =geometry.x_offset() - (geometry.width() - width) / 2;
                                         geometry.set_width(width);
                                         geometry.set_x_offset(x_offset);
-                                        log::error!("cursor glyph width {}", width);
+                                        log::info!("cursor glyph width {}", width);
                                     }
                                     // 试试汉字
                                     cr.save().unwrap();
@@ -965,7 +911,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
                                     pangocairo::show_glyph_string(cr, &itemized.analysis().font(), &mut glyph_string);
                                 }
                                 _ => {
-                                    log::error!("drawing cursor with {}x{}", width, height);
+                                    log::info!("drawing cursor with {}x{}", width, height);
                                     cr.set_source_rgba(bg.red() as f64, bg.green() as f64, bg.blue() as f64, bg.alpha() as f64);
                                     cr.rectangle(x, y, width, height);
                                     cr.fill().unwrap();
@@ -1077,7 +1023,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
                     return gtk::Inhibit(false)
                 }
             };
-            log::error!("scrolling grid {} x: {}, y: {} {}", id, x, y, &direction);
+            log::info!("scrolling grid {} x: {}, y: {} {}", id, x, y, &direction);
             let command = UiCommand::Serial(SerialCommand::Scroll { direction: direction.into(), grid_id: id, position: (0, 1), modifier });
             sender.send(AppMessage::UiCommand(command)).unwrap();
             gtk::Inhibit(false)
@@ -1113,14 +1059,14 @@ impl Widgets<AppModel, ()> for AppWidgets {
             .build();
         focus_controller.connect_enter(
             glib::clone!(@strong sender, @strong im_context => move |_| {
-                log::error!("FocusGained");
+                log::info!("FocusGained");
                 im_context.focus_in();
                 sender.send(UiCommand::Parallel(ParallelCommand::FocusGained).into()).unwrap();
             }),
         );
         focus_controller.connect_leave(
             glib::clone!(@strong sender, @strong im_context  => move |_| {
-                log::error!("FocusLost");
+                log::info!("FocusLost");
                 im_context.focus_out();
                 sender.send(UiCommand::Parallel(ParallelCommand::FocusLost).into()).unwrap();
             }),
