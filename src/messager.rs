@@ -10,20 +10,13 @@ use crate::{
     running_tracker::RUNNING_TRACKER,
 };
 
-pub struct VimMessager {
-    // rt: Runtime,
-// bridge: Bridge,
-// sender: LoggingTx<UiCommand>,
-}
+pub struct VimMessager {}
 
 impl MessageHandler<crate::app::AppModel> for VimMessager {
     type Msg = RedrawEvent;
     type Sender = LoggingTx<UiCommand>;
 
     fn init(app_model: &crate::app::AppModel, parent_sender: Sender<AppMessage>) -> Self {
-        // let (sender, mut rx) = unbound::<RedrawEvent>();
-        // let (ui_command_sender, ui_command_receiver) = unbound::<UiCommand>();
-
         let mut rx = EVENT_AGGREGATOR.register_event::<RedrawEvent>();
         let sender = parent_sender.clone();
         app_model.rt.spawn(async move {
@@ -41,33 +34,12 @@ impl MessageHandler<crate::app::AppModel> for VimMessager {
             parent_sender.send(AppMessage::Quit).unwrap();
         });
         app_model.rt.spawn(bridge::open(app_model.opts.clone()));
-        // app_model.rt.spawn(bridge::start_neovim_runtime(
-        //     /* ui_command_sender */
-        //     LoggingTx::attach(ui_command_sender.clone(), "chan-ui-commands".to_string()),
-        //     ui_command_receiver,
-        //     /* redraw_event_sender */
-        //     LoggingTx::attach(sender, "chan-redraw-events".to_string()),
-        //     /* running */ std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
-        //     /* opts */ app_model.opts.clone(),
-        // ));
 
-        VimMessager {
-            // sender: LoggingTx::attach(ui_command_sender, "chan-ui-commands".to_string()),
-        }
+        VimMessager {}
     }
 
     fn send(&self, message: RedrawEvent) {
         EVENT_AGGREGATOR.send::<RedrawEvent>(message);
-        /*
-        match msg {
-            AppMsg::UiCommand(command) => {
-                self.bridge.rt.block_on(||async {
-                    self.sender.send(msg).unwrap();
-                });
-            }
-            _ => {}
-        }
-        */
     }
 
     fn sender(&self) -> Self::Sender {

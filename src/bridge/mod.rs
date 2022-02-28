@@ -90,17 +90,6 @@ pub async fn open(opts: Opts) {
     SETTINGS.read_initial_values(&nvim).await;
     SETTINGS.setup_changed_listeners(&nvim).await;
 
-    tokio::spawn({
-        let nvim = nvim.clone();
-        async move {
-            loop {
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                let wins = nvim.list_wins().await.unwrap();
-                let no = wins[0].get_number().await.unwrap();
-                log::error!("window no: {}", no);
-            }
-        }
-    });
     match io_handler.await {
         Err(join_error) => error!("Error joining IO loop: '{}'", join_error),
         Ok(Err(error)) => {

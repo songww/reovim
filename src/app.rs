@@ -2,28 +2,21 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{atomic, Arc, RwLock};
 
-use glib::ObjectExt;
-//use adw::prelude::*;
 use gtk::gdk::prelude::FontMapExt;
 use gtk::gdk::{self, ScrollDirection};
 use gtk::prelude::{
-    BoxExt, DrawingAreaExt, DrawingAreaExtManual, EditableExt, EditableExtManual,
-    EventControllerExt, FrameExt, GtkWindowExt, IMContextExt, IMContextExtManual,
-    IMMulticontextExt, OrientableExt, SurfaceExt, WidgetExt,
+    BoxExt, DrawingAreaExt, DrawingAreaExtManual, EventControllerExt, GtkWindowExt, IMContextExt,
+    IMContextExtManual, IMMulticontextExt, OrientableExt, WidgetExt,
 };
-use gtk::traits::NativeExt;
 use once_cell::sync::{Lazy, OnceCell};
 use pango::FontDescription;
 use relm4::factory::FactoryVec;
 use relm4::*;
-use rustc_hash::FxHashMap;
 
 use crate::bridge::{
-    EditorMode, MessageKind, ParallelCommand, SerialCommand, TxWrapper, WindowAnchor,
+    EditorMode, MessageKind, MouseButton, ParallelCommand, SerialCommand, TxWrapper, WindowAnchor,
 };
-use crate::components::{
-    VimCmdEvent, VimCmdPromptWidgets, VimCmdPrompts, VimNotifactions, VimNotifactionsWidgets,
-};
+use crate::components::{VimCmdEvent, VimCmdPrompts};
 use crate::cursor::{Cursor, CursorMode, CursorShape};
 use crate::event_aggregator::EVENT_AGGREGATOR;
 use crate::keys::ToInput;
@@ -88,8 +81,15 @@ pub struct AppModel {
     pub vgrids: crate::factory::FactoryMap<vimview::VimGrid>,
     pub messages: FactoryVec<vimview::VimMessage>,
 
-    // pub floatwindows: crate::factory::FactoryMap<FloatWindow>,
+    pub dragging: Rc<Cell<Option<Dragging>>>,
+
     pub rt: tokio::runtime::Runtime,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Dragging {
+    pub btn: MouseButton,
+    pub pos: (u32, u32),
 }
 
 impl AppModel {
@@ -151,6 +151,8 @@ impl AppModel {
             vgrids: crate::factory::FactoryMap::new(),
             messages: FactoryVec::new(),
 
+            dragging: Rc::new(Cell::new(None)),
+
             opts,
 
             rt,
@@ -170,8 +172,8 @@ impl AppModel {
             ""
         );
         let desc = self.font_description.borrow_mut();
-        log::error!(
-            "----------------------> font desc {} {} {} {}",
+        log::debug!(
+            "font desc {} {} {} {}",
             desc.family().unwrap(),
             desc.weight(),
             desc.style(),
@@ -415,6 +417,7 @@ impl AppUpdate for AppModel {
                                 (0., 0.).into(),
                                 (width, height).into(),
                                 self.hldefs.clone(),
+                                self.dragging.clone(),
                                 self.metrics.clone(),
                                 self.font_description.clone(),
                             );
@@ -425,7 +428,7 @@ impl AppUpdate for AppModel {
 
                     RedrawEvent::WindowPosition {
                         grid,
-                        window,
+                        window: _,
                         start_row,
                         start_column,
                         width,
@@ -445,6 +448,7 @@ impl AppUpdate for AppModel {
                                 (x.floor(), y.floor()).into(),
                                 (width, height).into(),
                                 self.hldefs.clone(),
+                                self.dragging.clone(),
                                 self.metrics.clone(),
                                 self.font_description.clone(),
                             );
@@ -533,6 +537,7 @@ impl AppUpdate for AppModel {
                                 (rect.x, rect.y).into(),
                                 (rect.width, rect.height).into(),
                                 self.hldefs.clone(),
+                                self.dragging.clone(),
                                 self.metrics.clone(),
                                 self.font_description.clone(),
                             );
@@ -541,8 +546,6 @@ impl AppUpdate for AppModel {
                             log::info!("Add grid {} at {}x{}.", grid, rect.height, rect.width);
                         } else {
                             let vgrid = self.vgrids.get_mut(grid).unwrap();
-                            // vgrid.resize(width as _, height as _);
-                            // vgrid.set_pos(x, y);
                             vgrid.show();
                         }
                     }

@@ -3,13 +3,11 @@ use std::rc::Rc;
 use std::sync::{atomic, RwLock};
 use std::usize;
 
-use glib::subclass::prelude::*;
 use gtk::prelude::*;
-use gtk::subclass::prelude::*;
 use relm4::factory::positions::FixedPosition;
 use relm4::*;
 
-use crate::app;
+use crate::app::{self, Dragging};
 use crate::bridge::{MouseAction, MouseButton, SerialCommand, UiCommand};
 use crate::event_aggregator::EVENT_AGGREGATOR;
 use crate::pos::Position;
@@ -30,9 +28,9 @@ pub struct VimGrid {
     height: usize,
     is_float: bool,
     focusable: bool,
-    hldefs: HighlightDefinitions,
     metrics: Rc<Cell<crate::metrics::Metrics>>,
     font_description: Rc<RefCell<pango::FontDescription>>,
+    dragging: Rc<Cell<Option<Dragging>>>,
 
     textbuf: TextBuf,
 
@@ -46,6 +44,7 @@ impl VimGrid {
         pos: Position,
         rect: Rectangle,
         hldefs: HighlightDefinitions,
+        dragging: Rc<Cell<Option<Dragging>>>,
         metrics: Rc<Cell<crate::metrics::Metrics>>,
         font_description: Rc<RefCell<pango::FontDescription>>,
     ) -> VimGrid {
@@ -59,7 +58,7 @@ impl VimGrid {
             width: rect.width as _,
             height: rect.height as _,
             move_to: None.into(),
-            hldefs: hldefs.clone(),
+            dragging,
             is_float: false,
             focusable: true,
             metrics,
@@ -225,13 +224,14 @@ impl factory::FactoryPrototype for VimGrid {
             .name("click-listener")
             .build();
         click_listener.connect_pressed(
-            glib::clone!(@strong sender, @strong self.metrics as metrics => move |c, n_press, x, y| {
+            glib::clone!(@strong sender, @strong self.dragging as dragging, @strong self.metrics as metrics => move |c, n_press, x, y| {
                 let metrics = metrics.get();
                 let width = metrics.width();
                 let height = metrics.height();
                 let cols = x as f64 / width;
                 let rows = y as f64 / height;
                 log::trace!("grid {} mouse pressed {} times at {}x{} -> {}x{}", grid, n_press, x, y, cols, rows);
+                let position = (cols.floor() as u32, rows.floor() as u32);
                 let modifier = c.current_event_state().to_string();
                 let btn = match c.current_button() {
                     1 => MouseButton::Left,
@@ -239,20 +239,21 @@ impl factory::FactoryPrototype for VimGrid {
                     3 => MouseButton::Right,
                     _ => { return; }
                 };
+                dragging.set(Dragging{ btn, pos: position}.into());
                 EVENT_AGGREGATOR.send(
                     UiCommand::Serial(SerialCommand::MouseButton {
                         action: MouseAction::Press,
                         button: btn,
                         modifier: c.current_event_state(),
                         grid_id: grid,
-                        position: (cols.floor() as u32, rows.floor() as u32)
+                        position
                     })
                 );
                 log::trace!("grid {} release button {} current_button {} modifier {}", grid, c.button(), c.current_button(), modifier);
             }),
         );
         click_listener.connect_released(
-            glib::clone!(@strong sender, @strong self.metrics as metrics => move |c, n_press, x, y| {
+            glib::clone!(@strong sender, @strong self.dragging as dragging, @strong self.metrics as metrics => move |c, n_press, x, y| {
                 let metrics = metrics.get();
                 let width = metrics.width();
                 let height = metrics.height();
@@ -260,6 +261,7 @@ impl factory::FactoryPrototype for VimGrid {
                 let rows = y as f64 / height;
                 log::trace!("grid {} mouse released {} times at {}x{} -> {}x{}", grid, n_press, x, y, cols, rows);
                 let modifier = c.current_event_state().to_string();
+                dragging.set(None);
                 let btn = match c.current_button() {
                     1 => MouseButton::Left,
                     2 => MouseButton::Middle,
@@ -285,6 +287,31 @@ impl factory::FactoryPrototype for VimGrid {
         motion_listener.connect_enter(move |_, _, _| {
             app::GridActived.store(grid_id, atomic::Ordering::Relaxed);
         });
+        motion_listener.connect_motion(glib::clone!(@strong sender, @strong self.dragging as dragging, @strong self.metrics as metrics => move |c, x, y| {
+            log::trace!("cursor motion {} {}", x, y);
+            if let Some(Dragging { btn, pos }) = dragging.get() {
+                let metrics = metrics.get();
+                let width = metrics.width();
+                let height = metrics.height();
+                let cols = x as f64 / width;
+                let rows = y as f64 / height;
+                let position = (cols.floor() as u32, rows.floor() as u32);
+                log::trace!("Dragging {} from {:?} to {:?}", btn, pos, position);
+                if pos != position {
+                    EVENT_AGGREGATOR.send(
+                        UiCommand::Serial(SerialCommand::Drag {
+                            button: btn,
+                            modifier: c.current_event_state(),
+                            grid_id: grid,
+                            position,
+                        })
+                    );
+                    dragging.set(Dragging { btn, pos: position }.into());
+                }
+            }
+
+        }));
+        view.add_controller(&motion_listener);
 
         VimGridWidgets { view }
     }
