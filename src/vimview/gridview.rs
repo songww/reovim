@@ -153,7 +153,7 @@ mod imp {
                 let alpha = (100 - blend) as f32 / 100.;
                 background.set_alpha(alpha);
             }
-            // snapshot.append_color(&background, &rect);
+            snapshot.append_color(&background, &rect);
 
             let cr = snapshot.append_cairo(&rect);
 
