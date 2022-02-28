@@ -49,6 +49,10 @@ pub struct Opts {
     #[clap(short, long, parse(from_occurrences))]
     verbose: i32,
 
+    /// files to open.
+    #[clap(value_name = "FILES")]
+    files: Vec<String>,
+
     /// Arguments that are passed to nvim.
     #[clap(value_name = "ARGS", last = true)]
     nvim_args: Vec<String>,

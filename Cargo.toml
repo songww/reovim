@@ -68,6 +68,3 @@ features = [ "v4_6" ]
 version = "0.15"
 package = "glib"
 features = [ "v2_70" ]
-
-[profile.release]
-debug = true

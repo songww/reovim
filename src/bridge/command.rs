@@ -33,15 +33,17 @@ fn set_windows_creation_flags(cmd: &mut TokioCommand) {
 }
 
 fn build_nvim_cmd(opts: &Opts) -> TokioCommand {
+    let mut args = opts.nvim_args.to_vec();
+    args.extend_from_slice(&opts.files);
     if let Some(ref path) = opts.nvim_path {
         if platform_exists(path) {
-            return build_nvim_cmd_with_args(path, &opts.nvim_args);
+            return build_nvim_cmd_with_args(path, &args);
         } else {
             warn!("NVIM is invalid falling back to first bin in PATH");
         }
     }
     if let Some(path) = platform_which("nvim") {
-        build_nvim_cmd_with_args(&path, &opts.nvim_args)
+        build_nvim_cmd_with_args(&path, &args)
     } else {
         error!("nvim not found!");
         std::process::exit(1);

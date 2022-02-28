@@ -830,7 +830,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
                             let cell = cursor.cell();
                             let metrics = metrics.get();
                             let (x, y, width, height)  = cursor.rectangle(metrics.width(), metrics.height());
-                            log::info!("drawing cursor at {}x{}.", x, y);
+                            log::debug!("drawing cursor at {}x{}.", x, y);
                             match cursor.shape {
                                 CursorShape::Block => {
                                     use pango::AttrType;
@@ -1008,13 +1008,13 @@ impl Widgets<AppModel, ()> for AppWidgets {
                 let event = c.current_event().unwrap();
 
                 if c.im_context().filter_keypress(&event) {
-                    log::info!("keypress handled by im-context.");
+                    log::debug!("keypress handled by im-context.");
                     return gtk::Inhibit(true)
                 }
                 let keypress = (keyval, modifier);
-                log::info!("keypress : {:?}", keypress);
+                log::debug!("keypress : {:?}", keypress);
                 if let Some(keypress) = keypress.to_input() {
-                    log::info!("keypress {} sent to neovim.", keypress);
+                    log::debug!("keypress {} sent to neovim.", keypress);
                     sender.send(UiCommand::Serial(SerialCommand::Keyboard(keypress)).into()).unwrap();
                     gtk::Inhibit(true)
                 } else {
@@ -1058,7 +1058,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
             atomic::Ordering::Acquire,
             atomic::Ordering::Relaxed,
         ) {
-            log::info!(
+            log::debug!(
                 "default font name: {}",
                 model.font_description.borrow().to_str()
             );
