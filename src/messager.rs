@@ -4,7 +4,7 @@ use relm4::{MessageHandler, Sender};
 
 use crate::{
     app::AppMessage,
-    bridge::{self, RedrawEvent, UiCommand},
+    bridge::{RedrawEvent, UiCommand},
     event_aggregator::EVENT_AGGREGATOR,
     loggingchan::LoggingTx,
     running_tracker::RUNNING_TRACKER,

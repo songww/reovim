@@ -49,7 +49,7 @@ fn build_nvim_cmd(opts: &Opts) -> TokioCommand {
 }
 
 // Creates a shell command if needed on this platform (wsl or macos)
-fn create_platform_shell_command(command: String) -> Option<StdCommand> {
+fn create_platform_shell_command(_command: String) -> Option<StdCommand> {
     #[cfg(target_os = "windows")]
     if SETTINGS.get::<CmdLineSettings>().wsl {
         let mut result = StdCommand::new("wsl");

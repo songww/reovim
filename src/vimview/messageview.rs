@@ -9,12 +9,12 @@ use relm4::{
 };
 
 use crate::{
-    app::{AppMessage, AppModel},
-    bridge::{MessageKind, RedrawEvent, StyledContent},
+    app::{AppMessage},
+    bridge::{MessageKind, StyledContent},
     metrics::Metrics,
 };
 
-use super::{HighlightDefinitions, VimGridView};
+use super::{HighlightDefinitions};
 
 mod imp {
     use std::{cell::Cell, rc::Rc};
@@ -27,7 +27,7 @@ mod imp {
     use crate::{
         bridge::{GridLineCell, MessageKind, StyledContent},
         metrics::Metrics,
-        vimview::{HighlightDefinitions, TextBuf, VimGridView},
+        vimview::{HighlightDefinitions, VimGridView},
     };
 
     // #[derive(Derivative)]
@@ -102,7 +102,7 @@ mod imp {
             &self,
             _obj: &Self::Type,
             _id: usize,
-            value: &glib::Value,
+            _value: &glib::Value,
             pspec: &glib::ParamSpec,
         ) {
             match pspec.name() {

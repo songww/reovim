@@ -435,9 +435,9 @@ impl Default for TextCell {
 impl TextCell {
     fn reset_attrs(
         &mut self,
-        pctx: &pango::Context,
+        _pctx: &pango::Context,
         hldefs: &HighlightDefinitions,
-        metrics: &crate::metrics::Metrics,
+        _metrics: &crate::metrics::Metrics,
     ) {
         const U16MAX: f32 = u16::MAX as f32;
         const PANGO_SCALE: f64 = pango::SCALE as f64;

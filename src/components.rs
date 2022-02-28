@@ -11,7 +11,7 @@ use relm4::{
 use crate::{
     app::{AppMessage, AppModel},
     bridge::{MessageKind, StyledContent},
-    vimview::{self, HighlightDefinitions, VimGridView},
+    vimview::{self, HighlightDefinitions},
 };
 
 #[derive(Debug)]
@@ -66,11 +66,11 @@ impl FactoryPrototype for VimMessage {
     fn view(
         &self,
         _: &<Self::Factory as relm4::factory::Factory<Self, Self::View>>::Key,
-        widgets: &Self::Widgets,
+        _widgets: &Self::Widgets,
     ) {
         match self.kind {
             MessageKind::Echo => {
-                let mut message = String::new();
+                let _message = String::new();
                 //
                 /*
                 for (idx, text) in self.content.iter() {

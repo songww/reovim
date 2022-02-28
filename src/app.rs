@@ -16,7 +16,7 @@ use relm4::*;
 use rustc_hash::FxHashMap;
 
 use crate::bridge::{
-    EditorMode, MessageKind, MouseButton, ParallelCommand, SerialCommand, TxWrapper, WindowAnchor,
+    EditorMode, MessageKind, MouseButton, ParallelCommand, SerialCommand, WindowAnchor,
 };
 use crate::components::{VimCmdEvent, VimCmdPrompts};
 use crate::cursor::{Cursor, CursorMode, CursorShape};
@@ -573,7 +573,7 @@ impl AppUpdate for AppModel {
                             self.messages.pop();
                         }
                         if matches!(kind, MessageKind::Echo) {
-                            if let Some((idx, _)) = self
+                            if let Some((_idx, _)) = self
                                 .messages
                                 .iter()
                                 .enumerate()

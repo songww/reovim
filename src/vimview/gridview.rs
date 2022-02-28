@@ -251,7 +251,7 @@ mod imp {
                 */
                 unsafe {
                     let mut isfirst = true;
-                    let baseline = pango::ffi::pango_layout_get_baseline(layout.to_glib_none().0);
+                    let _baseline = pango::ffi::pango_layout_get_baseline(layout.to_glib_none().0);
                     let layoutline = pango::ffi::pango_layout_get_line(layout.to_glib_none().0, 0);
                     let mut runs = (*layoutline).runs;
                     loop {
