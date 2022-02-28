@@ -67,16 +67,16 @@ impl Handler for NeovimHandler {
                     let parsed_events = parse_redraw_event(events, neovim.clone())
                         .expect("Could not parse event from neovim");
 
-                    log::error!(
-                        "RedrawEvents: {:?}",
-                        parsed_events
-                            .iter()
-                            .map(|event| {
-                                let s = format!("{:?}", event);
-                                s.split_once(" {").map(|s| s.0).unwrap_or(&s).to_string()
-                            })
-                            .collect::<Vec<_>>()
-                    );
+                    // log::error!(
+                    //     "RedrawEvents: {:?}",
+                    //     parsed_events
+                    //         .iter()
+                    //         .map(|event| {
+                    //             let s = format!("{:?}", event);
+                    //             s.split_once(" {").map(|s| s.0).unwrap_or(&s).to_string()
+                    //         })
+                    //         .collect::<Vec<_>>()
+                    // );
                     for parsed_event in parsed_events {
                         EVENT_AGGREGATOR.send(parsed_event);
                     }

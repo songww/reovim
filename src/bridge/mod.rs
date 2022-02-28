@@ -7,7 +7,6 @@ mod setup;
 mod tx_wrapper;
 mod ui_commands;
 
-use std::process::exit;
 use std::sync::Arc;
 
 use log::{error, info};
@@ -73,7 +72,7 @@ pub async fn open(opts: Opts) {
     options
         .set_rgb(true)
         .set_hlstate_external(true)
-        .set_messages_external(true)
+        // .set_messages_external(true)
         .set_linegrid_external(true)
         .set_multigrid_external(true);
 

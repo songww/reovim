@@ -132,7 +132,7 @@ impl SerialCommand {
     async fn execute(self, nvim: &Neovim<TxWrapper>) {
         match self {
             SerialCommand::Keyboard(input_command) => {
-                log::error!("Keyboard Input Sent: {}", input_command);
+                log::trace!("Keyboard Input Sent: {}", input_command);
                 nvim.input(&input_command).await.expect("Input failed");
             }
             SerialCommand::MouseButton {
@@ -145,7 +145,7 @@ impl SerialCommand {
                 let action: &str = &action;
                 let button: &str = &button;
                 let modifier: &str = &modifier.to_input().unwrap();
-                log::error!(
+                log::trace!(
                     "input mouse button='{}' action='{}' modifier='{}' {}<({}, {})>",
                     button,
                     action,
@@ -171,7 +171,7 @@ impl SerialCommand {
                 position: (grid_x, grid_y),
                 modifier,
             } => {
-                log::error!(
+                log::trace!(
                     "Mouse Wheel Sent: {} {}<{:?}> ({})",
                     direction,
                     grid_id,
@@ -354,7 +354,7 @@ pub fn start_ui_command_handler(nvim: Arc<Neovim<TxWrapper>>) {
                 Some(UiCommand::Parallel(parallel_command)) => {
                     let ui_command_nvim = ui_command_nvim.clone();
                     tokio::spawn(async move {
-                        log::info!("aggregated parallel ui-command");
+                        log::trace!("aggregated parallel ui-command");
                         parallel_command.execute(&ui_command_nvim).await;
                     });
                 }
@@ -369,7 +369,7 @@ pub fn start_ui_command_handler(nvim: Arc<Neovim<TxWrapper>>) {
         while RUNNING_TRACKER.is_running() {
             match serial_rx.recv().await {
                 Some(serial_command) => {
-                    log::info!("aggregated serial ui-command");
+                    log::trace!("aggregated serial ui-command");
                     serial_command.execute(&nvim).await;
                 }
                 None => {

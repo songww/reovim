@@ -68,7 +68,7 @@ impl Cursor {
 
     pub fn rectangle(&self, width: f64, height: f64) -> (f64, f64, f64, f64) {
         let percentage = self.cell_percentage.unwrap_or(1.);
-        log::error!(
+        log::debug!(
             "cursor percentage {:?} {}",
             self.cell_percentage,
             percentage

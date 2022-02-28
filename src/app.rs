@@ -338,6 +338,7 @@ impl AppUpdate for AppModel {
                     }
                     RedrawEvent::HighlightGroupSet { name, id } => {
                         self.hlgroups.write().insert(name, id);
+                        log::trace!("current highlight groups: {:?}", self.hlgroups.read());
                     }
                     RedrawEvent::Clear { grid } => {
                         log::debug!("cleared grid {}", grid);
@@ -700,6 +701,11 @@ impl AppUpdate for AppModel {
                             scrolled,
                             separator_character
                         );
+                        let metrics = self.metrics.get();
+                        let y = row as f64 * metrics.height(); //;
+                        let vgrid = self.vgrids.get_mut(grid).unwrap();
+                        vgrid.set_pos(0., y);
+                        vgrid.show();
                     }
                     RedrawEvent::MessageShowCommand { content } => {
                         log::warn!("message show command: {:?}", content);
@@ -848,6 +854,16 @@ impl Widgets<AppModel, ()> for AppWidgets {
                                 )
                                 .unwrap();
                         },
+                        set_draw_func[hldefs = model.hldefs.clone()] => move |_da, cr, w, h| {
+                            let hldefs = hldefs.read();
+                            let default_colors = hldefs.defaults().unwrap();
+                            log::info!("drawing default background.");
+                            if let Some(bg) = default_colors.background {
+                                cr.rectangle(0., 0., w.into(), h.into());
+                                cr.set_source_rgb(bg.red() as _, bg.green() as _, bg.blue() as _);
+                                cr.paint().unwrap();
+                            }
+                        }
                     },
                     add_overlay: grids_container = &gtk::Fixed {
                         set_widget_name: "grids-container",
