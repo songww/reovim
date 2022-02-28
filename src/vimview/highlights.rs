@@ -7,7 +7,6 @@ mod imp {
 
     use rustc_hash::FxHashMap;
 
-    use glib::prelude::*;
     use glib::subclass::prelude::*;
 
     #[derive(Debug)]

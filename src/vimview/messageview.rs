@@ -4,23 +4,23 @@ use glib::subclass::prelude::*;
 use gtk::prelude::*;
 use parking_lot::RwLock;
 use relm4::{
-    factory::{Factory, FactoryPrototype, FactoryVec, FactoryView},
+    factory::{Factory, FactoryPrototype, FactoryVec},
     WidgetPlus,
 };
 
 use crate::{
-    app::{AppMessage},
+    app::AppMessage,
     bridge::{MessageKind, StyledContent},
     metrics::Metrics,
 };
 
-use super::{HighlightDefinitions};
+use super::HighlightDefinitions;
 
 mod imp {
     use std::{cell::Cell, rc::Rc};
 
     use glib::{ffi::g_unichar_iswide, translate::from_glib};
-    use gtk::{gdk::prelude::*, prelude::*, subclass::prelude::*};
+    use gtk::{prelude::*, subclass::prelude::*};
     use once_cell::sync::OnceCell;
     use parking_lot::RwLock;
 

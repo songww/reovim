@@ -9,10 +9,8 @@ use super::highlights::HighlightDefinitions;
 
 mod imp {
     use std::cell::Cell;
-
     use std::rc::Rc;
 
-    use glib::prelude::*;
     use glib::subclass::prelude::*;
     use parking_lot::{RwLock, RwLockReadGuard};
 
@@ -440,7 +438,6 @@ impl TextCell {
         _metrics: &crate::metrics::Metrics,
     ) {
         const U16MAX: f32 = u16::MAX as f32;
-        const PANGO_SCALE: f64 = pango::SCALE as f64;
 
         self.attrs.clear();
         let attrs = pango::AttrList::new();

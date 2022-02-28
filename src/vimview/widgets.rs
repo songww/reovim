@@ -18,7 +18,6 @@ use super::TextBuf;
 
 type HighlightDefinitions = Rc<RwLock<crate::vimview::HighlightDefinitions>>;
 
-// #[derive(Debug)]
 pub struct VimGrid {
     win: u64,
     grid: u64,
@@ -84,14 +83,6 @@ impl VimGrid {
         &self.pos
     }
 
-    pub fn is_float(&self) -> bool {
-        self.is_float
-    }
-
-    pub fn focusable(&self) -> bool {
-        self.focusable
-    }
-
     pub fn hide(&mut self) {
         self.visible = false;
     }
@@ -118,15 +109,6 @@ impl VimGrid {
         rows: usize,
         // cols: usize,
     ) {
-        // log::error!(
-        //     "Scroll Region Text Up top {} bottom {} left {} right {} rows {} cols {}",
-        //     top,
-        //     bottom,
-        //     left,
-        //     right,
-        //     rows,
-        //     cols
-        // );
         log::debug!("scroll-region {} rows moved up.", rows);
         log::debug!(
             "Origin Region {:?} {}x{}",
@@ -139,17 +121,8 @@ impl VimGrid {
 
     // content go down, view go up, eat tail of rows.
     pub fn down(&mut self, rows: usize) {
-        // log::error!(
-        //     "Scroll Region Text Down top {} bottom {} left {} right {} rows {} cols {}",
-        //     top,
-        //     bottom,
-        //     left,
-        //     right,
-        //     rows,
-        //     cols
-        // );
-        log::error!("scroll-region {} rows moved down.", rows);
-        log::error!(
+        log::debug!("scroll-region {} rows moved down.", rows);
+        log::debug!(
             "Origin Region {:?} {}x{}",
             self.pos,
             self.width,

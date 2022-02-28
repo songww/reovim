@@ -48,7 +48,9 @@ impl From<UiCommand> for AppMessage {
 
 pub struct AppModel {
     pub opts: Opts,
+
     pub title: String,
+    pub size: Rc<Cell<(i32, i32)>>,
     pub default_width: i32,
     pub default_height: i32,
 
@@ -100,7 +102,9 @@ impl AppModel {
             .build()
             .unwrap();
         let font_desc = FontDescription::from_string("monospace 11");
+        let size = Rc::new(Cell::new((opts.width, opts.height)));
         AppModel {
+            size,
             title: opts.title.clone(),
             default_width: opts.width,
             default_height: opts.height,
@@ -178,7 +182,6 @@ impl AppModel {
             desc.style(),
             desc.size() / pango::SCALE,
         );
-        // self.pctx.set_font_description(&desc);
         let layout = pango::Layout::new(&self.pctx);
         layout.set_font_description(Some(&desc));
         let mut tabs = pango::TabArray::new(1, false);
@@ -188,7 +191,6 @@ impl AppModel {
         let mut max_height = 1;
 
         (0x21u8..0x7f).for_each(|c| {
-            // char_
             let text = unsafe { String::from_utf8_unchecked(vec![c]) };
             layout.set_text(&text);
             let (_ink, logical) = layout.extents();
@@ -197,7 +199,6 @@ impl AppModel {
         });
 
         layout.set_text(SINGLE_WIDTH_CHARS);
-        // let logical = layout.extents().1;
         let ascent = layout.baseline() as f64 / PANGO_SCALE;
         let font_metrics = self.pctx.metrics(Some(&desc), None).unwrap();
         let fm_width = font_metrics.approximate_digit_width();
@@ -214,7 +215,6 @@ impl AppModel {
         } else {
             max_height as f64 / PANGO_SCALE
         };
-        // max_height as f64 / PANGO_SCALE;
         if metrics.charheight() == charheight
             && metrics.charwidth() == charwidth
             && metrics.width() == width
@@ -277,20 +277,21 @@ impl AppUpdate for AppModel {
                                     &guifont.replace(":h", " "),
                                 );
 
+                                self.pctx.set_font_description(&desc);
                                 self.gtksettings.get().map(|settings| {
                                     settings.set_gtk_font_name(Some(&desc.to_str()));
                                 });
-                                self.pctx.set_font_description(&desc);
 
                                 self.guifont.replace(guifont);
                                 self.font_description.replace(desc);
 
                                 self.calculate();
-                                self.font_changed.store(true, atomic::Ordering::Relaxed);
 
                                 self.vgrids
                                     .iter_mut()
                                     .for_each(|(_, vgrid)| vgrid.reset_cache());
+
+                                self.font_changed.store(true, atomic::Ordering::Relaxed);
                             }
                         }
                         bridge::GuiOption::GuiFontSet(guifontset) => {
@@ -769,8 +770,9 @@ impl Widgets<AppModel, ()> for AppWidgets {
                         set_vexpand: true,
                         set_focus_on_click: false,
                         set_overflow: gtk::Overflow::Hidden,
-                        connect_resize[sender = sender.clone(), metrics = model.metrics.clone()] => move |da, width, height| {
+                        connect_resize[sender = sender.clone(), metrics = model.metrics.clone(), size = model.size.clone()] => move |da, width, height| {
                             log::info!("da resizing width: {}, height: {}", width, height);
+                            size.set((width, height));
                             let metrics = metrics.get();
                             let rows = da.height() as f64 / metrics.height(); //  + metrics.linespace
                             let cols = da.width() as f64 / metrics.width();
@@ -785,7 +787,6 @@ impl Widgets<AppModel, ()> for AppWidgets {
                                 )
                                 .unwrap();
                         },
-                        connect_realize: move |_da| { log::warn!("da realized");},
                         set_draw_func[hldefs = model.hldefs.clone()] => move |_da, cr, w, h| {
                             let hldefs = hldefs.read();
                             let default_colors = hldefs.defaults().unwrap();
@@ -844,7 +845,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
                                             }, _ => None
                                         }
                                     }).for_each(|attr| attrs.insert(attr));
-                                    log::info!("cursor cell '{}' wide {}", cell.text, cursor.width);
+                                    log::debug!("cursor cell '{}' wide {}", cell.text, cursor.width);
                                     let itemized = &pango::itemize(&pctx, &cell.text, 0, cell.text.len() as _, &attrs, None)[0];
                                     let mut glyph_string = pango::GlyphString::new();
                                     pango::shape(&cell.text, itemized.analysis(), &mut glyph_string);
@@ -912,6 +913,9 @@ impl Widgets<AppModel, ()> for AppWidgets {
         let mut opts = model.opts.clone();
         opts.size.replace((cols, rows));
         model.rt.spawn(bridge::open(opts));
+        da.queue_allocate();
+        da.queue_resize();
+        da.queue_draw();
 
         let im_context = gtk::IMMulticontext::new();
         im_context.set_use_preedit(false);
@@ -1057,15 +1061,16 @@ impl Widgets<AppModel, ()> for AppWidgets {
                 "default font name: {}",
                 model.font_description.borrow().to_str()
             );
+            let (width, height) = model.size.get();
             let metrics = model.metrics.get();
-            let rows = self.da.height() as f64 / metrics.height();
-            let cols = self.da.width() as f64 / metrics.width();
+            let rows = height as f64 / metrics.height();
+            let cols = width as f64 / metrics.width();
             log::info!(
-                "trying to resize to {}x{} original {}x{} {:?}",
+                "trying resize nvim to {}x{} original {}x{} {:?}",
                 rows,
                 cols,
-                self.da.width(),
-                self.da.height(),
+                width,
+                height,
                 metrics
             );
             sender
