@@ -1,4 +1,4 @@
-mod commandview;
+//mod commandview;
 mod gridview;
 mod highlights;
 mod messageview;

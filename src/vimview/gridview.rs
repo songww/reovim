@@ -3,7 +3,7 @@ mod imp {
     use std::cell::{Cell, Ref};
     use std::rc::Rc;
 
-    use glib::translate::ToGlibPtr;
+    use glib::translate::{FromGlibPtrNone, ToGlibPtr};
     use gtk::{gdk::prelude::*, graphene::Rect, subclass::prelude::*};
     use parking_lot::RwLock;
 
@@ -153,7 +153,7 @@ mod imp {
                 let alpha = (100 - blend) as f32 / 100.;
                 background.set_alpha(alpha);
             }
-            snapshot.append_color(&background, &rect);
+            // snapshot.append_color(&background, &rect);
 
             let cr = snapshot.append_cairo(&rect);
 
@@ -167,143 +167,101 @@ mod imp {
             pctx.set_round_glyph_positions(true);
             let layout = pango::Layout::new(&pctx);
             layout.set_font_description(desc.as_ref());
-            pangocairo::update_layout(&cr, &layout);
+            let textbuf = self.textbuf();
+            let lines = textbuf.lines();
             for lineno in 0..rows {
                 cr.move_to(0., y);
                 y += metrics.height();
                 text.clear();
-                let attrs = pango::AttrList::new();
-                for col in 0..cols {
-                    let cell = self
-                        .textbuf()
-                        .cell(lineno, col)
-                        .expect("Invalid cols and rows");
-                    if cell.start_index == cell.end_index {
-                        continue;
-                    }
-                    text.push_str(&cell.text);
-                    cell.attrs
-                        .clone()
-                        .into_iter()
-                        .for_each(|attr| attrs.insert(attr));
-                }
-                layout.set_text(&text);
-                layout.set_attributes(Some(&attrs));
-                let unknown_glyphs = layout.unknown_glyphs_count();
-                log::trace!(
-                    "grid {} line {} baseline {} line-height {} space {} char-height {} unknown_glyphs {}",
-                    self.id.get(),
-                    lineno,
-                    layout.baseline(),
-                    layout.line_readonly(0).unwrap().height(),
-                    metrics.linespace(),
-                    metrics.charheight() * PANGO_SCALE as f64,
-                    unknown_glyphs
-                );
-
-                /*
-                if let Some(mut iter) = layout.iter() {
-                    loop {
-                        if let Some(run) = iter.run() {
-                            let mut glyph_string = run.glyph_string();
-                            let c_glyph_string = glyph_string.to_glib_none();
-                            let log_clusters = unsafe {
-                                let ptr = (*c_glyph_string.0).log_clusters;
-                                std::slice::from_raw_parts(ptr, glyph_string.num_glyphs() as usize)
-                            };
-
-                            for (glyph, log_cluster) in
-                                glyph_string.glyph_info_mut().iter_mut().zip(log_clusters)
-                            {
-                                let index = (run.item().offset() + log_cluster) as usize;
-                                let col = text[..index].chars().count();
-                                let cell = self.textbuf().cell(lineno, col).unwrap();
-                                let width = if cell.double_width {
-                                    metrics.charwidth() * 2.
-                                } else {
-                                    metrics.charwidth()
-                                } * PANGO_SCALE;
-                                let width = width.ceil() as i32;
-                                let geo_width = glyph.geometry().width();
-                                if geo_width > 0 && geo_width != width {
-                                    let geometry = glyph.geometry_mut();
-                                    geometry.set_width(width);
-                                    let x_offset = (geo_width - width) / 2;
-                                    //log::error!(
-                                    //    "adjusting {}x{}  width {}->{}  x-offset {}->{}",
-                                    //    lineno,
-                                    //    col,
-                                    //    geo_width,
-                                    //    width,
-                                    //    geometry.x_offset(),
-                                    //    x_offset
-                                    //);
-                                    geometry.set_x_offset(x_offset);
-                                }
-                            }
+                let line = lines.get(lineno).unwrap();
+                let to_render = if let Some(layoutline) = line.cache() {
+                    layoutline
+                } else {
+                    let attrs = pango::AttrList::new();
+                    for col in 0..cols {
+                        let cell = line.get(col).expect("Invalid cols and rows");
+                        if cell.start_index == cell.end_index {
+                            continue;
                         }
-
-                        if !iter.next_run() {
-                            break;
-                        }
+                        text.push_str(&cell.text);
+                        cell.attrs
+                            .clone()
+                            .into_iter()
+                            .for_each(|attr| attrs.insert(attr));
                     }
-                }
-                */
-                unsafe {
-                    let mut isfirst = true;
-                    let _baseline = pango::ffi::pango_layout_get_baseline(layout.to_glib_none().0);
-                    let layoutline = pango::ffi::pango_layout_get_line(layout.to_glib_none().0, 0);
-                    let mut runs = (*layoutline).runs;
-                    loop {
-                        let run = (*runs).data as *mut pango::ffi::PangoLayoutRun;
-                        let item = (*run).item;
-                        let font = (*item).analysis.font;
-                        let glyph_string = (*run).glyphs;
-                        let num_glyphs = (*glyph_string).num_glyphs as usize;
-                        let log_clusters = {
-                            std::slice::from_raw_parts((*glyph_string).log_clusters, num_glyphs)
-                        };
-                        let glyphs =
-                            { std::slice::from_raw_parts_mut((*glyph_string).glyphs, num_glyphs) };
-                        let ink_rect = std::ptr::null_mut();
-                        let mut logical_rect = pango::ffi::PangoRectangle {
-                            x: 0,
-                            y: 0,
-                            width: 0,
-                            height: 0,
-                        };
-                        pango::ffi::pango_glyph_string_extents(
-                            glyph_string,
-                            font,
-                            ink_rect,
-                            &mut logical_rect,
-                        );
-                        for (glyph, log_cluster) in glyphs.iter_mut().zip(log_clusters) {
-                            let index = ((*item).offset + log_cluster) as usize;
-                            let c = text[index..].chars().next().unwrap();
-                            let width = if glib::ffi::g_unichar_iswide(c as u32) == 1 {
-                                2.
-                            } else if glib::ffi::g_unichar_iszerowidth(c as u32) == 1 {
-                                0.
-                            } else {
-                                1.
+                    layout.set_text(&text);
+                    layout.set_attributes(Some(&attrs));
+                    let unknown_glyphs = layout.unknown_glyphs_count();
+                    log::trace!(
+                        "grid {} line {} baseline {} line-height {} space {} char-height {} unknown_glyphs {}",
+                        self.id.get(),
+                        lineno,
+                        layout.baseline(),
+                        layout.line_readonly(0).unwrap().height(),
+                        metrics.linespace(),
+                        metrics.charheight() * PANGO_SCALE as f64,
+                        unknown_glyphs
+                    );
+                    log::debug!("{}", text);
+
+                    let layoutline = unsafe {
+                        let mut isfirst = true;
+                        let _baseline =
+                            pango::ffi::pango_layout_get_baseline(layout.to_glib_none().0);
+                        let layoutline =
+                            pango::ffi::pango_layout_get_line(layout.to_glib_none().0, 0);
+                        let mut runs = (*layoutline).runs;
+                        loop {
+                            let run = (*runs).data as *mut pango::ffi::PangoLayoutRun;
+                            let item = (*run).item;
+                            let font = (*item).analysis.font;
+                            let glyph_string = (*run).glyphs;
+                            let num_glyphs = (*glyph_string).num_glyphs as usize;
+                            let log_clusters = {
+                                std::slice::from_raw_parts((*glyph_string).log_clusters, num_glyphs)
                             };
-                            let width = metrics.charwidth() * width * PANGO_SCALE;
-                            let width = width.ceil() as i32;
-                            let geometry = &mut glyph.geometry;
-                            if geometry.width > 0 && geometry.width != width {
-                                let x_offset = if isfirst {
-                                    geometry.x_offset
+                            let glyphs = {
+                                std::slice::from_raw_parts_mut((*glyph_string).glyphs, num_glyphs)
+                            };
+                            let ink_rect = std::ptr::null_mut();
+                            let mut logical_rect = pango::ffi::PangoRectangle {
+                                x: 0,
+                                y: 0,
+                                width: 0,
+                                height: 0,
+                            };
+                            pango::ffi::pango_glyph_string_extents(
+                                glyph_string,
+                                font,
+                                ink_rect,
+                                &mut logical_rect,
+                            );
+                            for (glyph, log_cluster) in glyphs.iter_mut().zip(log_clusters) {
+                                let index = ((*item).offset + log_cluster) as usize;
+                                let c = text[index..].chars().next().unwrap();
+                                let width = if glib::ffi::g_unichar_iswide(c as u32) == 1 {
+                                    2.
+                                } else if glib::ffi::g_unichar_iszerowidth(c as u32) == 1 {
+                                    0.
                                 } else {
-                                    geometry.x_offset - (geometry.width - width) / 2
+                                    1.
                                 };
-                                let y_offset = geometry.y_offset
-                                    - (logical_rect.height / pango::SCALE
-                                        - metrics.height() as i32)
-                                        / 2;
-                                isfirst = false;
-                                // 啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊
-                                log::debug!(
+                                let width = metrics.charwidth() * width * PANGO_SCALE;
+                                let width = width.ceil() as i32;
+                                let geometry = &mut glyph.geometry;
+                                if geometry.width > 0 && geometry.width != width {
+                                    let x_offset = if isfirst {
+                                        geometry.x_offset
+                                    } else {
+                                        geometry.x_offset - (geometry.width - width) / 2
+                                    };
+                                    let y_offset = geometry.y_offset
+                                        - (logical_rect.height / pango::SCALE
+                                            - metrics.height() as i32)
+                                            / 2;
+                                    isfirst = false;
+                                    // 啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊
+                                    log::debug!(
                                     "adjusting {} ({})  width {}->{}  x-offset {}->{} y-offset {} -> {}",
                                     lineno,
                                     c,
@@ -314,20 +272,25 @@ mod imp {
                                     geometry.y_offset,
                                     y_offset
                                 );
-                                geometry.width = width;
-                                geometry.x_offset = x_offset;
-                                // geometry.y_offset = y_offset;
+                                    geometry.width = width;
+                                    geometry.x_offset = x_offset;
+                                    // geometry.y_offset = y_offset;
+                                }
+                            }
+                            runs = (*runs).next;
+                            if runs.is_null() {
+                                break;
                             }
                         }
-                        runs = (*runs).next;
-                        if runs.is_null() {
-                            break;
-                        }
-                    }
-                    pangocairo::ffi::pango_cairo_show_layout_line(cr.to_raw_none(), layoutline);
-                }
-
-                log::debug!("{}", text);
+                        // pangocairo::ffi::pango_cairo_show_layout_line(cr.to_raw_none(), layoutline);
+                        (*layoutline).layout = layout.clone().to_glib_none().0;
+                        pango::LayoutLine::from_glib_none(layoutline)
+                    };
+                    line.set_cache((layoutline.clone(), layout.clone()));
+                    (layoutline, layout.clone())
+                };
+                pangocairo::update_layout(&cr, &to_render.1);
+                pangocairo::show_layout_line(&cr, &to_render.0);
             }
         }
 

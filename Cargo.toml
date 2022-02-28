@@ -2,8 +2,10 @@
 name = "rv"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.56"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/songww/relmvim"
+repository = "https://github.com/songww/reovim"
+description = "This is a graphical user interface for Neovim, powered by gtk4-rs and reml4."
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -36,48 +38,35 @@ tokio-util = { version = "0.7", features = ["compat"] }
 parking_lot = "0.12"
 
 [dependencies.adw]
-#branch = "master"
 package = "libadwaita"
-#git = "https://gitlab.gnome.org/World/Rust/libadwaita-rs.git"
 version = "0.1"
 
 [dependencies.cairo]
-#git = "https://github.com/gtk-rs/gtk-rs-core.git"
 version = "0.15"
 package = "cairo-rs"
-#branch = "master"
 features = [ "v1_16", "png" ]
 
 [dependencies.pango]
-#git = "https://github.com/songww/gtk-rs-core.git"
 version = "0.15"
 package = "pango"
-#branch = "master"
 features = [ "v1_50" ]
 
 [dependencies.pangocairo]
-#git = "https://github.com/gtk-rs/gtk-rs-core.git"
 version = "0.15"
 package = "pangocairo"
-#branch = "master"
 
 [dependencies.graphene]
-#git = "https://github.com/gtk-rs/gtk-rs-core.git"
 version = "0.15"
 package = "graphene-rs"
-#branch = "master"
 
 [dependencies.gtk]
-#git = "https://github.com/gtk-rs/gtk4-rs.git"
 version = "0.4"
 package = "gtk4"
 features = [ "v4_6" ]
 
 [dependencies.glib]
-#git = "https://github.com/gtk-rs/gtk-rs-core.git"
 version = "0.15"
 package = "glib"
-#branch = "master"
 features = [ "v2_70" ]
 
 [profile.release]

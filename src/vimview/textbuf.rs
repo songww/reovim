@@ -21,6 +21,8 @@ mod imp {
     pub struct _TextBuf {
         rows: usize,
         cols: usize,
+
+        #[derivative(Debug = "ignore")]
         cells: Box<[super::TextLine]>,
         metrics: Option<Rc<Cell<crate::metrics::Metrics>>>,
 
@@ -89,6 +91,7 @@ mod imp {
                 return;
             }
             let line = &self.cells[row];
+            line.cache.set(None);
             let pctx = self.pctx.as_ref().unwrap();
             let hldefs = self.hldefs.as_ref().unwrap().read();
             let metrics = self.metrics.as_ref().unwrap().get();
@@ -306,7 +309,7 @@ mod imp {
                             start_index += 1;
                         });
                     }
-                    super::TextLine(tl.into_boxed_slice())
+                    super::TextLine::from(tl.into_boxed_slice())
                 })
                 .collect();
 
@@ -322,17 +325,18 @@ mod imp {
         }
     }
 
-    pub(super) struct Lines<'a> {
+    pub struct Lines<'a> {
         guard: RwLockReadGuard<'a, _TextBuf>,
-        // at: usize,
     }
 
     impl<'a> Lines<'a> {
-        pub(super) fn get(&self, no: usize) -> Option<&super::TextLine> {
+        pub fn get(&self, no: usize) -> Option<&super::TextLine> {
             self.guard.cells.get(no)
         }
     }
 }
+
+pub use imp::Lines;
 
 glib::wrapper! {
     pub struct TextBuf(ObjectSubclass<imp::TextBuf>);
@@ -369,6 +373,10 @@ impl TextBuf {
 
     pub fn metrics(&self) -> Option<Rc<Cell<crate::metrics::Metrics>>> {
         self.imp().metrics()
+    }
+
+    pub fn lines(&self) -> Lines {
+        self.imp().lines()
     }
 
     pub fn set_cells(&self, row: usize, col: usize, cells: &[crate::bridge::GridLineCell]) {
@@ -534,8 +542,20 @@ impl TextCell {
     }
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct TextLine(Box<[TextCell]>);
+#[derive(Default)]
+pub struct TextLine {
+    boxed: Box<[TextCell]>,
+    cache: Cell<Option<(pango::LayoutLine, pango::Layout)>>,
+}
+
+impl Clone for TextLine {
+    fn clone(&self) -> Self {
+        TextLine {
+            boxed: self.boxed.clone(),
+            cache: Cell::new(unsafe { &*self.cache.as_ptr() }.clone()),
+        }
+    }
+}
 
 impl TextLine {
     fn new(cols: usize) -> TextLine {
@@ -545,7 +565,18 @@ impl TextLine {
             cell.start_index = start_index;
             cell.end_index = start_index + 1;
         });
-        Self(line.into_boxed_slice())
+        Self {
+            boxed: line.into_boxed_slice(),
+            cache: Cell::new(None),
+        }
+    }
+
+    pub fn cache(&self) -> Option<(pango::LayoutLine, pango::Layout)> {
+        unsafe { &*self.cache.as_ptr() }.clone()
+    }
+
+    pub fn set_cache(&self, cache: (pango::LayoutLine, pango::Layout)) {
+        self.cache.set(cache.into());
     }
 }
 
@@ -553,42 +584,45 @@ impl Deref for TextLine {
     type Target = [TextCell];
 
     fn deref(&self) -> &[TextCell] {
-        &self.0
+        &self.boxed
     }
 }
 
 impl DerefMut for TextLine {
     fn deref_mut(&mut self) -> &mut [TextCell] {
-        &mut self.0
+        &mut self.boxed
     }
 }
 
 impl AsRef<[TextCell]> for TextLine {
     fn as_ref(&self) -> &[TextCell] {
-        &self.0
+        &self.boxed
     }
 }
 
 impl AsMut<[TextCell]> for TextLine {
     fn as_mut(&mut self) -> &mut [TextCell] {
-        &mut self.0
+        &mut self.boxed
     }
 }
 
 impl From<Box<[TextCell]>> for TextLine {
     fn from(boxed: Box<[TextCell]>) -> Self {
-        Self(boxed)
+        TextLine {
+            boxed,
+            ..Default::default()
+        }
     }
 }
 
 impl Into<Box<[TextCell]>> for TextLine {
     fn into(self) -> Box<[TextCell]> {
-        self.0
+        self.boxed
     }
 }
 
 impl TextLine {
     fn into_inner(self) -> Box<[TextCell]> {
-        self.0
+        self.boxed
     }
 }

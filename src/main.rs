@@ -1,12 +1,7 @@
-#![feature(new_uninit)]
-#![feature(maybe_uninit_write_slice)]
-#![feature(round_char_boundary)]
 #[macro_use]
 extern crate derive_new;
 #[macro_use]
 extern crate derivative;
-
-
 
 use clap::{IntoApp, Parser};
 
@@ -27,24 +22,6 @@ mod running_tracker;
 mod settings;
 mod style;
 mod vimview;
-
-#[macro_export]
-macro_rules! cloned {
-    (@param _) => ( _ );
-    (@param $x:ident) => ( $x );
-    ($($n:ident),+ => move || $body:expr) => (
-        {
-            $( let $n = $n.clone(); )+
-            move || $body
-        }
-    );
-    ($($n:ident),+ => move |$($p:tt),+| $body:expr) => (
-        {
-            $( let $n = $n.clone(); )+
-            move |$(cloned!(@param $p),)+| $body
-        }
-    );
-}
 
 enum ConnectionMode {
     Child,
@@ -103,28 +80,6 @@ fn main() {
     log::trace!("opts: {:?}", opts);
     let model = app::AppModel::new(opts);
     let relm = relm4::RelmApp::new(model);
-    // app.connect_startup(f)
-    // app.connect_window_added(|_, win| {
-    //     WIN.set(Fragile::new(win.clone()))
-    //         .expect("WIN was alredy set");
-    //     log::info!("window add: {}", win);
-    // });
-    // app.set_flags(ApplicationFlags::NON_UNIQUE | ApplicationFlags::HANDLES_OPEN);
-    // app.set_flags(ApplicationFlags::HANDLES_OPEN);
-    // app.set_option_context_parameter_string(Some("Some Param"));
-    // app.set_option_context_description(Some("Some Desc"));
-    // app.set_option_context_summary(Some(&message));
-    // app.connect_command_line(|_, cl| {print!("---- command line {:?}", cl.arguments()); 0});
-    // app.connect_handle_local_options(move |_, opts| {
-    //     opts.remove("nvim");
-    //     for arg in opts_.nvim_args.iter() {
-    //         opts.remove(arg);
-    //     }
-    //     for f in opts_.files.iter() {
-    //         println!("Removing {}", f);
-    //         opts.remove(f);
-    //     }
-    //     -1
-    // });
+
     relm.run_with_args(&[title]);
 }
