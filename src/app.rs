@@ -924,15 +924,15 @@ impl Widgets<AppModel, ()> for AppWidgets {
         im_context.set_input_purpose(gtk::InputPurpose::Terminal);
 
         im_context.set_cursor_location(&gdk::Rectangle::new(0, 0, 5, 10));
-        im_context.connect_preedit_start(|_| {
-            log::debug!("preedit started.");
-        });
-        im_context.connect_preedit_end(|im_context| {
-            log::debug!("preedit done, '{}'", im_context.preedit_string().0);
-        });
-        im_context.connect_preedit_changed(|im_context| {
-            log::debug!("preedit changed, '{}'", im_context.preedit_string().0);
-        });
+        // im_context.connect_preedit_start(|_| {
+        //     log::debug!("preedit started.");
+        // });
+        // im_context.connect_preedit_end(|im_context| {
+        //     log::debug!("preedit done, '{}'", im_context.preedit_string().0);
+        // });
+        // im_context.connect_preedit_changed(|im_context| {
+        //     log::debug!("preedit changed, '{}'", im_context.preedit_string().0);
+        // });
 
         im_context.connect_commit(glib::clone!(@strong sender => move |ctx, text| {
             log::debug!("im-context({}) commit '{}'", ctx.context_id(), text);
@@ -1012,9 +1012,10 @@ impl Widgets<AppModel, ()> for AppWidgets {
                     return gtk::Inhibit(true)
                 }
                 let keypress = (keyval, modifier);
+                log::info!("keypress : {:?}", keypress);
                 if let Some(keypress) = keypress.to_input() {
                     log::info!("keypress {} sent to neovim.", keypress);
-                    sender.send(UiCommand::Serial(SerialCommand::Keyboard(keypress.into_owned())).into()).unwrap();
+                    sender.send(UiCommand::Serial(SerialCommand::Keyboard(keypress)).into()).unwrap();
                     gtk::Inhibit(true)
                 } else {
                     log::info!("keypress ignored: {:?}", keyval.name());

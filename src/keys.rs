@@ -1,24 +1,10 @@
-/*
-pub struct KeyEvent {
-    keyval: gdk::keys::Key,
-    state: gdk::ModifierType,
-}
-
-impl From<(gdk::keys::Key, gdk::ModifierType)> for KeyEvent {
-    fn from((keyval, state): (gdk::keys::Key, gdk::ModifierType)) -> Self {
-        Self { keyval, state }
-    }
-}*/
-
-use std::borrow::Cow;
-
 use gtk::gdk;
 
 pub trait ToInput {
-    fn to_input(&self) -> Option<Cow<'_, str>>;
+    fn to_input(&self) -> Option<String>;
 }
 
-fn map_keyname(keyname: String) -> Cow<'static, str> {
+fn map_keyname(keyname: String) -> Option<&'static str> {
     // Originally sourced from python-gui.
     match keyname.as_ref() {
         "asciicircum" => "^".into(), // fix #137
@@ -75,12 +61,12 @@ fn map_keyname(keyname: String) -> Cow<'static, str> {
         "F10" => "F10".into(),
         "F11" => "F11".into(),
         "F12" => "F12".into(),
-        _ => Cow::from(keyname),
+        _ => None,
     }
 }
 
 impl ToInput for gdk::ModifierType {
-    fn to_input(&self) -> Option<Cow<'_, str>> {
+    fn to_input(&self) -> Option<String> {
         let mut input = String::with_capacity(8);
 
         if self.contains(gdk::ModifierType::SHIFT_MASK) {
@@ -101,22 +87,19 @@ impl ToInput for gdk::ModifierType {
 }
 
 impl ToInput for (gdk::Key, gdk::ModifierType) {
-    fn to_input(&self) -> Option<Cow<'_, str>> {
-        let mut input = self.1.to_input()?.into_owned();
-
-        if self.1.is_empty() {
-            input.push(self.0.to_unicode()?);
-            return Some(input.into());
-        }
-
+    fn to_input(&self) -> Option<String> {
+        let modkey = self.1.to_input()?;
         let keyname = self.0.name().unwrap();
 
         if keyname.chars().count() > 1 {
-            input.push_str(map_keyname(keyname.to_string()).as_ref());
+            format!("<{}{}>", modkey, map_keyname(keyname.to_string())?).into()
         } else {
-            input.push(self.0.to_unicode().unwrap());
+            let k = self.0.to_unicode().unwrap();
+            if !self.1.is_empty() {
+                format!("<{}{}>", modkey, k).into()
+            } else {
+                k.to_string().into()
+            }
         }
-
-        Some(format!("<{}>", input).into())
     }
 }
