@@ -1,9 +1,9 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::sync::{atomic, RwLock};
-use std::usize;
+use std::sync::atomic;
 
 use gtk::prelude::*;
+use parking_lot::RwLock;
 use relm4::factory::positions::FixedPosition;
 use relm4::*;
 

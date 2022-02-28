@@ -1,6 +1,6 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::sync::{atomic, Arc, RwLock};
+use std::sync::{atomic, Arc};
 
 use gtk::gdk::prelude::FontMapExt;
 use gtk::gdk::{self, ScrollDirection};
@@ -10,8 +10,10 @@ use gtk::prelude::{
 };
 use once_cell::sync::{Lazy, OnceCell};
 use pango::FontDescription;
+use parking_lot::RwLock;
 use relm4::factory::FactoryVec;
 use relm4::*;
+use rustc_hash::FxHashMap;
 
 use crate::bridge::{
     EditorMode, MessageKind, MouseButton, ParallelCommand, SerialCommand, TxWrapper, WindowAnchor,
@@ -74,6 +76,7 @@ pub struct AppModel {
     pub im_context: OnceCell<gtk::IMMulticontext>,
 
     pub hldefs: Rc<RwLock<vimview::HighlightDefinitions>>,
+    pub hlgroups: Rc<RwLock<FxHashMap<String, u64>>>,
 
     pub focused: Rc<atomic::AtomicU64>,
     pub background_changed: Rc<atomic::AtomicBool>,
@@ -144,6 +147,7 @@ impl AppModel {
             font_changed: Rc::new(false.into()),
 
             hldefs: Rc::new(RwLock::new(vimview::HighlightDefinitions::new())),
+            hlgroups: Rc::new(RwLock::new(FxHashMap::default())),
 
             focused: Rc::new(1.into()),
             background_changed: Rc::new(false.into()),
@@ -327,10 +331,13 @@ impl AppUpdate for AppModel {
                     RedrawEvent::DefaultColorsSet { colors } => {
                         self.background_changed
                             .store(true, atomic::Ordering::Relaxed);
-                        self.hldefs.write().unwrap().set_defaults(colors);
+                        self.hldefs.write().set_defaults(colors);
                     }
                     RedrawEvent::HighlightAttributesDefine { id, style } => {
-                        self.hldefs.write().unwrap().set(id, style);
+                        self.hldefs.write().set(id, style);
+                    }
+                    RedrawEvent::HighlightGroupSet { name, id } => {
+                        self.hlgroups.write().insert(name, id);
                     }
                     RedrawEvent::Clear { grid } => {
                         log::debug!("cleared grid {}", grid);
@@ -622,7 +629,7 @@ impl AppUpdate for AppModel {
                         self.cursor_redraw.store(true, atomic::Ordering::Relaxed);
 
                         let mode = &self.cursor_modes[self.cursor_mode];
-                        let style = self.hldefs.read().unwrap();
+                        let style = self.hldefs.read();
                         self.cursor.borrow_mut().change_mode(mode, &style);
                     }
                     RedrawEvent::ModeChange { mode, mode_index } => {
@@ -631,7 +638,7 @@ impl AppUpdate for AppModel {
                         self.cursor_redraw.store(true, atomic::Ordering::Relaxed);
                         let cursor_mode = &self.cursor_modes[self.cursor_mode];
                         log::warn!("Mode Change to {:?} {:?}", &self.mode, cursor_mode);
-                        let style = self.hldefs.read().unwrap();
+                        let style = self.hldefs.read();
 
                         self.cursor.borrow_mut().change_mode(cursor_mode, &style);
                     }
@@ -866,7 +873,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
                                       cursor = model.cursor.clone(),
                                       metrics = model.metrics.clone(),
                                       pctx = model.pctx.clone()] => move |_da, cr, _, _| {
-                            let hldefs = hldefs.read().unwrap();
+                            let hldefs = hldefs.read();
                             let default_colors = hldefs.defaults().unwrap();
                             let cursor = cursor.borrow();
                             let fg = cursor.background(default_colors);

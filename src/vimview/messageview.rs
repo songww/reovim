@@ -1,8 +1,8 @@
-use std::{cell::Cell, rc::Rc, sync::RwLock};
+use std::{cell::Cell, rc::Rc};
 
 use glib::subclass::prelude::*;
 use gtk::prelude::*;
-use once_cell::sync::OnceCell;
+use parking_lot::RwLock;
 use relm4::{
     factory::{Factory, FactoryPrototype, FactoryVec, FactoryView},
     WidgetPlus,
@@ -17,11 +17,12 @@ use crate::{
 use super::{HighlightDefinitions, VimGridView};
 
 mod imp {
-    use std::{cell::Cell, rc::Rc, slice::SliceIndex, sync::RwLock};
+    use std::{cell::Cell, rc::Rc};
 
     use glib::{ffi::g_unichar_iswide, translate::from_glib};
     use gtk::{gdk::prelude::*, prelude::*, subclass::prelude::*};
     use once_cell::sync::OnceCell;
+    use parking_lot::RwLock;
 
     use crate::{
         bridge::{GridLineCell, MessageKind, StyledContent},
@@ -33,9 +34,7 @@ mod imp {
     #[derive(Debug)]
     pub struct VimMessageView {
         kind: Cell<MessageKind>,
-        // styled_content: StyledContent,
         view: VimGridView,
-        // hldefs: OnceCell<Rc<RwLock<HighlightDefinitions>>>,
         metrics: OnceCell<Rc<Cell<crate::metrics::Metrics>>>,
     }
 
@@ -305,7 +304,7 @@ impl FactoryPrototype for VimMessage {
         _key: &<Self::Factory as Factory<Self, Self::View>>::Key,
         _sender: relm4::Sender<AppMessage>,
     ) -> Self::Widgets {
-        let guard = self.hldefs.read().unwrap();
+        let guard = self.hldefs.read();
         let colors = guard.defaults().unwrap();
         let metrics = self.metrics.get();
         let view = VimMessageView::new(
@@ -336,7 +335,7 @@ impl FactoryPrototype for VimMessage {
 
     fn position(&self, _: &usize) {}
     fn view(&self, _: &usize, widgets: &Self::Widgets) {
-        // let guard = self.hldefs.read().unwrap();
+        // let guard = self.hldefs.read();
         // let colors = guard.defaults().unwrap();
         // widgets.view.inline_css(
         //     format!("border 1px solid {}", colors.foreground.unwrap().to_str()).as_bytes(),

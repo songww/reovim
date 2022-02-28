@@ -1,7 +1,8 @@
-use std::{cell::Cell, collections::LinkedList, rc::Rc, sync::RwLock};
+use std::{cell::Cell, collections::LinkedList, rc::Rc};
 
 use gtk::prelude::*;
 use once_cell::sync::OnceCell;
+use parking_lot::RwLock;
 use relm4::{
     factory::{FactoryPrototype, FactoryVec},
     ComponentUpdate, Model, Sender, WidgetPlus, Widgets,
@@ -73,7 +74,7 @@ impl FactoryPrototype for VimMessage {
                 //
                 /*
                 for (idx, text) in self.content.iter() {
-                    let guard = self.hldefs.read().unwrap();
+                    let guard = self.hldefs.read();
                     let style = guard.get(*idx).unwrap();
                     let default_colors = guard.defaults().unwrap();
                     message.len() as u32;
@@ -330,7 +331,7 @@ impl ComponentUpdate<AppModel> for VimCmdPrompts {
 
                 prompt.position = position;
 
-                let hldefs = self.hldefs.read().unwrap();
+                let hldefs = self.hldefs.read();
                 let defaults = hldefs.defaults().unwrap();
                 let attrs = &prompt.attrs;
                 for (hldef, s) in styled_content {
@@ -560,7 +561,7 @@ impl Widgets<CursorModel, AppModel> for CursorWidgets {
                           cursor = model.cursor.clone(),
                           metrics = model.metrics.clone(),
                           pctx = model.pctx.clone()] => move |_da, cr, _, _| {
-                let hldefs = hldefs.read().unwrap();
+                let hldefs = hldefs.read();
                 let default_colors = hldefs.defaults().unwrap();
                 let cursor = cursor.borrow();
                 let bg = cursor.background(default_colors);

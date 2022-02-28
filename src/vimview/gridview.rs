@@ -2,10 +2,10 @@ mod imp {
     use core::f32;
     use std::cell::{Cell, Ref};
     use std::rc::Rc;
-    use std::sync::RwLock;
 
     use glib::translate::ToGlibPtr;
     use gtk::{gdk::prelude::*, graphene::Rect, subclass::prelude::*};
+    use parking_lot::RwLock;
 
     use super::super::highlights::HighlightDefinitions;
     use super::super::TextBuf;
@@ -136,7 +136,7 @@ mod imp {
             let (width, height) = self.size_required();
 
             let hldefs = textbuf.hldefs().unwrap();
-            let hldefs = hldefs.read().unwrap();
+            let hldefs = hldefs.read();
 
             let metrics = textbuf.metrics().unwrap().get();
 
@@ -514,10 +514,10 @@ mod imp {
 
 use std::cell::{Cell, Ref};
 use std::rc::Rc;
-use std::sync::RwLock;
 
 use glib::subclass::prelude::*;
 use gtk::prelude::*;
+use parking_lot::RwLock;
 
 use super::{HighlightDefinitions, TextBuf};
 

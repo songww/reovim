@@ -191,6 +191,10 @@ pub enum RedrawEvent {
         id: u64,
         style: Style,
     },
+    HighlightGroupSet {
+        id: u64,
+        name: String,
+    },
     GridLine {
         grid: u64,
         row: u64,
@@ -579,6 +583,14 @@ fn parse_hl_attr_define(hl_attr_define_arguments: Vec<Value>) -> Result<RedrawEv
     })
 }
 
+fn parse_hl_group_set(values: Vec<Value>) -> Result<RedrawEvent> {
+    let [name, id] = extract_values(values)?;
+    Ok(RedrawEvent::HighlightGroupSet {
+        name: parse_string(name)?,
+        id: parse_u64(id)?,
+    })
+}
+
 fn parse_grid_line_cell(grid_line_cell: Value) -> Result<GridLineCell> {
     fn take_value(val: &mut Value) -> Value {
         std::mem::replace(val, Value::Nil)
@@ -930,6 +942,7 @@ pub fn parse_redraw_event(
             "grid_resize" => Some(parse_grid_resize(event_parameters)?),
             "default_colors_set" => Some(parse_default_colors(event_parameters)?),
             "hl_attr_define" => Some(parse_hl_attr_define(event_parameters)?),
+            "hl_group_set" => Some(parse_hl_group_set(event_parameters)?),
             "grid_line" => Some(parse_grid_line(event_parameters)?),
             "grid_clear" => Some(parse_grid_clear(event_parameters)?),
             "grid_destroy" => Some(parse_grid_destroy(event_parameters)?),

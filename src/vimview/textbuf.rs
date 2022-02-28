@@ -1,11 +1,9 @@
 use std::cell::Cell;
 use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
-use std::sync::RwLock;
 
 use glib::subclass::prelude::*;
-
-use vector_map::VecMap;
+use parking_lot::RwLock;
 
 use super::highlights::HighlightDefinitions;
 
@@ -13,10 +11,10 @@ mod imp {
     use std::cell::Cell;
 
     use std::rc::Rc;
-    use std::sync::{RwLock, RwLockReadGuard};
 
     use glib::prelude::*;
     use glib::subclass::prelude::*;
+    use parking_lot::{RwLock, RwLockReadGuard};
 
     use crate::vimview::HighlightDefinitions;
 
@@ -60,7 +58,7 @@ mod imp {
 
         fn reset_cache(&mut self) {
             let pctx = self.pctx.as_ref().unwrap();
-            let hldefs = self.hldefs.as_ref().unwrap().read().unwrap();
+            let hldefs = self.hldefs.as_ref().unwrap().read();
             let metrics = self.metrics.as_ref().unwrap().get();
             self.cells.iter_mut().for_each(|line| {
                 line.iter_mut().for_each(|cell| {
@@ -94,7 +92,7 @@ mod imp {
             }
             let line = &self.cells[row];
             let pctx = self.pctx.as_ref().unwrap();
-            let hldefs = self.hldefs.as_ref().unwrap().read().unwrap();
+            let hldefs = self.hldefs.as_ref().unwrap().read();
             let metrics = self.metrics.as_ref().unwrap().get();
             let mut expands = Vec::with_capacity(line.len());
             let mut start_index = line.get(col).map(|cell| cell.start_index).unwrap_or(0);
@@ -200,10 +198,10 @@ mod imp {
 
     impl TextBuf {
         pub(super) fn up(&self, rows: usize) {
-            self.inner.write().unwrap().up(rows);
+            self.inner.write().up(rows);
         }
         pub(super) fn down(&self, rows: usize) {
-            self.inner.write().unwrap().down(rows);
+            self.inner.write().down(rows);
         }
 
         pub(super) fn set_cells(
@@ -212,23 +210,23 @@ mod imp {
             col: usize,
             cells: &[crate::bridge::GridLineCell],
         ) {
-            self.inner.write().unwrap().set_cells(row, col, cells);
+            self.inner.write().set_cells(row, col, cells);
         }
 
         pub(super) fn set_hldefs(&self, hldefs: Rc<RwLock<HighlightDefinitions>>) {
-            self.inner.write().unwrap().set_hldefs(hldefs);
+            self.inner.write().set_hldefs(hldefs);
         }
 
         pub(super) fn set_metrics(&self, metrics: Rc<Cell<crate::metrics::Metrics>>) {
-            self.inner.write().unwrap().set_metrics(metrics);
+            self.inner.write().set_metrics(metrics);
         }
 
         pub(super) fn set_pango_context(&self, pctx: Rc<pango::Context>) {
-            self.inner.write().unwrap().set_pango_context(pctx);
+            self.inner.write().set_pango_context(pctx);
         }
 
         pub(super) fn pango_context(&self) -> Rc<pango::Context> {
-            self.inner.write().unwrap().pango_context()
+            self.inner.write().pango_context()
         }
 
         pub fn cell(&self, row: usize, col: usize) -> Option<super::TextCell> {
@@ -240,38 +238,38 @@ mod imp {
 
         pub(super) fn reset_cache(&self) {
             log::warn!("textbuf rebuild cache");
-            self.inner.write().unwrap().reset_cache();
+            self.inner.write().reset_cache();
         }
 
         pub(super) fn clear(&self) {
             log::warn!("textbuf cleared");
-            self.inner.write().unwrap().clear();
+            self.inner.write().clear();
         }
 
         pub(super) fn resize(&self, rows: usize, cols: usize) {
-            self.inner.write().unwrap().resize(rows, cols);
+            self.inner.write().resize(rows, cols);
         }
 
         pub(super) fn rows(&self) -> usize {
-            self.inner.read().unwrap().rows
+            self.inner.read().rows
         }
 
         pub(super) fn cols(&self) -> usize {
-            self.inner.read().unwrap().cols
+            self.inner.read().cols
         }
 
         pub(super) fn lines(&self) -> Lines {
             Lines {
-                guard: self.inner.read().unwrap(),
+                guard: self.inner.read(),
             }
         }
 
         pub(super) fn hldefs(&self) -> Option<Rc<RwLock<HighlightDefinitions>>> {
-            self.inner.read().unwrap().hldefs.clone()
+            self.inner.read().hldefs.clone()
         }
 
         pub(super) fn metrics(&self) -> Option<Rc<Cell<crate::metrics::Metrics>>> {
-            self.inner.read().unwrap().metrics.clone()
+            self.inner.read().metrics.clone()
         }
     }
 
@@ -505,12 +503,6 @@ impl TextCell {
         // attr.set_end_index(end_index as _);
         // attrs.insert(attr);
         if let Some(fg) = hldef.colors.foreground.or(default_colors.foreground) {
-            // log::info!(
-            //     "foreground #{:.2x}{:.2x}{:.2x}",
-            //     (fg.red() * U16MAX) as u16,
-            //     (fg.green() * U16MAX) as u16,
-            //     (fg.blue() * U16MAX) as u16
-            // );
             let mut attr = pango::AttrColor::new_foreground(
                 (fg.red() * U16MAX).round() as u16,
                 (fg.green() * U16MAX).round() as u16,
@@ -521,12 +513,6 @@ impl TextCell {
             attrs.insert(attr);
         }
         if let Some(bg) = background {
-            // log::info!(
-            //     "background #{:.2x}{:.2x}{:.2x}",
-            //     (bg.red() * U16MAX) as u16,
-            //     (bg.green() * U16MAX) as u16,
-            //     (bg.blue() * U16MAX) as u16
-            // );
             let mut attr = pango::AttrColor::new_background(
                 (bg.red() * U16MAX).round() as u16,
                 (bg.green() * U16MAX).round() as u16,
@@ -547,71 +533,6 @@ impl TextCell {
             attrs.insert(attr);
         }
 
-        /*
-        let item =
-            pango::itemize(&pctx, &self.text, 0, self.text.len() as i32, &attrs, None).remove(0);
-        let mut glyphs = pango::GlyphString::new();
-        pango::shape(&self.text, item.analysis(), &mut glyphs);
-        let (ink, logi) = glyphs.extents(&item.analysis().font());
-        let double_charwidth = metrics.charwidth() * 2. * PANGO_SCALE;
-        let double_cell_width = metrics.width() * 2. * PANGO_SCALE;
-        let (charwidth, width) = if self.double_width {
-            (double_charwidth, double_cell_width)
-        } else {
-            (
-                metrics.charwidth() * PANGO_SCALE,
-                metrics.width() * PANGO_SCALE,
-            )
-        };
-        let logiwidth = logi.width() as f64;
-        let inkwidth = ink.width() as f64;
-        // let charwidth = metrics.charwidth() * PANGO_SCALE;
-        if !self.double_width
-            // && inkwidth > charwidth
-            && inkwidth >= charwidth
-        {
-            let factor = charwidth / inkwidth;
-            let mut attr = pango::AttrFloat::new_scale(factor);
-            attr.set_start_index(start_index);
-            attr.set_end_index(end_index);
-            attrs.insert(attr);
-            log::info!(
-                "applying size scale {} for '{}' {}-{}",
-                factor,
-                &self.text,
-                self.start_index,
-                self.end_index,
-            );
-            let mut attr = pango::AttrInt::new_letter_spacing(
-                (-metrics.charwidth() * PANGO_SCALE * 0.2).round() as i32,
-            );
-            attr.set_start_index(start_index);
-            attr.set_end_index(end_index);
-            attrs.insert(attr);
-        } else if (logiwidth - charwidth).abs() > 1. {
-            let letter_spacing = width.round() as i32 - logi.width();
-
-            log::info!(
-                "letter '{}' logical width {} use {} cells absolute width {} absolute logical {}",
-                &self.text,
-                logi.width(),
-                if self.double_width { 2 } else { 1 },
-                width,
-                charwidth as i32 - logi.width()
-            );
-            log::info!(
-                "applying letter spacing {} for '{}' {}-{}",
-                letter_spacing,
-                &self.text,
-                self.start_index,
-                self.end_index,
-            );
-            let mut attr = pango::AttrInt::new_letter_spacing(letter_spacing);
-            attr.set_start_index(start_index);
-            attr.set_end_index(end_index);
-            attrs.insert(attr);
-        }
-        */
         self.attrs = attrs.attributes();
     }
 }
