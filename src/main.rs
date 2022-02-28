@@ -6,6 +6,8 @@ extern crate derive_new;
 #[macro_use]
 extern crate derivative;
 
+use std::cell::Cell;
+
 use clap::{IntoApp, Parser};
 
 mod app;
@@ -76,6 +78,9 @@ pub struct Opts {
 
     #[clap(skip)]
     title: String,
+
+    #[clap(skip)]
+    size: Option<(i64, i64)>,
 }
 
 impl Opts {

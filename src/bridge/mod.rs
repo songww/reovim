@@ -23,21 +23,6 @@ pub use ui_commands::{
     start_ui_command_handler, MouseAction, MouseButton, ParallelCommand, SerialCommand, UiCommand,
 };
 
-/*
-enum ConnectionMode {
-    Child,
-    RemoteTcp(String),
-}
-
-fn connection_mode(opts: &Opts) -> ConnectionMode {
-    if let Some(arg) = opts.remote_tcp.clone() {
-        ConnectionMode::RemoteTcp(arg)
-    } else {
-        ConnectionMode::Child
-    }
-}
-*/
-
 pub async fn open(opts: Opts) {
     let handler = NeovimHandler::new();
     let (nvim, io_handler) = match opts.connection_mode() {
@@ -49,13 +34,13 @@ pub async fn open(opts: Opts) {
     .expect("Could not locate or start neovim process");
 
     // Check the neovim version to ensure its high enough
-    //match nvim.command_output("echo has('nvim-0.6')").await.as_deref() {
-    //    Ok("1") => {} // This is just a guard
-    //    _ => {
-    //        error!("Neovide requires nvim version 0.6 or higher. Download the latest version here https://github.com/neovim/neovim/wiki/Installing-Neovim");
-    //        exit(0);
-    //    }
-    //}
+    match nvim.command_output("echo has('nvim-0.6')").await.as_deref() {
+        Ok("1") => {} // This is just a guard
+        _ => {
+            error!("Neovide requires nvim version 0.6 or higher. Download the latest version here https://github.com/neovim/neovim/wiki/Installing-Neovim");
+            std::process::exit(0);
+        }
+    }
 
     let mut is_remote = false;
     #[cfg(windows)]
@@ -76,8 +61,9 @@ pub async fn open(opts: Opts) {
         .set_linegrid_external(true)
         .set_multigrid_external(true);
 
+    let (cols, rows) = opts.size.unwrap();
     // Triggers loading the user's config
-    nvim.ui_attach(opts.width as i64, opts.height as i64, &options)
+    nvim.ui_attach(cols, rows, &options)
         .await
         .expect("Could not attach ui to neovim process");
 

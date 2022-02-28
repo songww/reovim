@@ -37,7 +37,7 @@ fn build_nvim_cmd(opts: &Opts) -> TokioCommand {
         if platform_exists(path) {
             return build_nvim_cmd_with_args(path, &opts.nvim_args);
         } else {
-            warn!("NVIM_BIN is invalid falling back to first bin in PATH");
+            warn!("NVIM is invalid falling back to first bin in PATH");
         }
     }
     if let Some(path) = platform_which("nvim") {

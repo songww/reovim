@@ -33,7 +33,6 @@ impl MessageHandler<crate::app::AppModel> for VimMessager {
             }
             parent_sender.send(AppMessage::Quit).unwrap();
         });
-        app_model.rt.spawn(bridge::open(app_model.opts.clone()));
 
         VimMessager {}
     }

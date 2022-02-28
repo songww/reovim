@@ -116,7 +116,7 @@ mod imp {
                         end_index,
                     };
                     cell.reset_attrs(pctx, &hldefs, &metrics);
-                    log::debug!(
+                    log::trace!(
                         "Setting cell {}x{} start_index {} end_index {}",
                         row,
                         col + expands.len(),
@@ -237,12 +237,12 @@ mod imp {
         }
 
         pub(super) fn reset_cache(&self) {
-            log::warn!("textbuf rebuild cache");
+            log::debug!("textbuf rebuild cache");
             self.inner.write().reset_cache();
         }
 
         pub(super) fn clear(&self) {
-            log::warn!("textbuf cleared");
+            log::debug!("textbuf cleared");
             self.inner.write().clear();
         }
 

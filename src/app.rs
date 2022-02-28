@@ -29,8 +29,6 @@ use crate::{
     Opts,
 };
 
-pub(crate) static NVIM: OnceCell<Arc<nvim::Neovim<TxWrapper>>> = OnceCell::new();
-
 #[allow(non_upper_case_globals)]
 pub static GridActived: Lazy<Arc<atomic::AtomicU64>> =
     Lazy::new(|| Arc::new(atomic::AtomicU64::new(0)));
@@ -78,7 +76,6 @@ pub struct AppModel {
     pub hldefs: Rc<RwLock<vimview::HighlightDefinitions>>,
     pub hlgroups: Rc<RwLock<FxHashMap<String, u64>>>,
 
-    pub focused: Rc<atomic::AtomicU64>,
     pub background_changed: Rc<atomic::AtomicBool>,
 
     pub vgrids: crate::factory::FactoryMap<vimview::VimGrid>,
@@ -132,7 +129,6 @@ impl AppModel {
                     options.as_mut().map(|options| {
                         options.set_antialias(cairo::Antialias::Subpixel);
                         options.set_hint_style(cairo::HintStyle::Full);
-                        // options.set_hint_metrics(cairo::HintMetrics::On);
                     });
                     pangocairo::context_set_font_options(&ctx, options.as_ref());
                     ctx
@@ -149,7 +145,6 @@ impl AppModel {
             hldefs: Rc::new(RwLock::new(vimview::HighlightDefinitions::new())),
             hlgroups: Rc::new(RwLock::new(FxHashMap::default())),
 
-            focused: Rc::new(1.into()),
             background_changed: Rc::new(false.into()),
 
             vgrids: crate::factory::FactoryMap::new(),
@@ -163,7 +158,7 @@ impl AppModel {
         }
     }
 
-    pub fn recompute(&self) {
+    pub fn calculate(&self) {
         const PANGO_SCALE: f64 = pango::SCALE as f64;
         const SINGLE_WIDTH_CHARS: &'static str = concat!(
             " ! \" # $ % & ' ( ) * + , - . / ",
@@ -208,9 +203,9 @@ impl AppModel {
         let fm_width = font_metrics.approximate_digit_width();
         let fm_height = font_metrics.height();
         let fm_ascent = font_metrics.ascent();
-        log::error!("font-metrics widht: {}", fm_width as f64 / PANGO_SCALE);
-        log::error!("font-metrics height: {}", fm_height as f64 / PANGO_SCALE);
-        log::error!("font-metrics ascent: {}", fm_ascent as f64 / PANGO_SCALE);
+        log::info!("font-metrics width: {}", fm_width as f64 / PANGO_SCALE);
+        log::info!("font-metrics height: {}", fm_height as f64 / PANGO_SCALE);
+        log::info!("font-metrics ascent: {}", fm_ascent as f64 / PANGO_SCALE);
         let mut metrics = self.metrics.get();
         let charwidth = max_width as f64 / PANGO_SCALE;
         let width = charwidth;
@@ -230,9 +225,9 @@ impl AppModel {
         metrics.set_ascent(ascent.ceil());
         metrics.set_charwidth(charwidth.ceil());
         metrics.set_charheight(charheight.ceil());
-        log::error!("char-width {:?}", metrics.charwidth());
-        log::error!("char-height {:?}", metrics.charheight());
-        log::error!("char-ascent {:?}", metrics.ascent());
+        log::info!("char-width {:?}", metrics.charwidth());
+        log::info!("char-height {:?}", metrics.charheight());
+        log::info!("char-ascent {:?}", metrics.ascent());
         self.metrics.replace(metrics);
     }
 }
@@ -254,11 +249,6 @@ impl AppUpdate for AppModel {
             AppMessage::UiCommand(ui_command) => {
                 log::trace!("ui-commad {:?}", ui_command);
                 EVENT_AGGREGATOR.send(ui_command);
-                // components
-                //     .messager
-                //     .sender()
-                //     .send(ui_command)
-                //     .expect("send failed");
             }
             AppMessage::Quit => return false,
             AppMessage::RedrawEvent(event) => {
@@ -295,7 +285,7 @@ impl AppUpdate for AppModel {
                                 self.guifont.replace(guifont);
                                 self.font_description.replace(desc);
 
-                                self.recompute();
+                                self.calculate();
                                 self.font_changed.store(true, atomic::Ordering::Relaxed);
 
                                 self.vgrids
@@ -350,17 +340,6 @@ impl AppUpdate for AppModel {
                         column_start,
                         cells,
                     } => {
-                        // log::info!("grid line {}", grid);
-                        // let cells: Vec<_> = cells
-                        //     .into_iter()
-                        //     .map(|cell| vimview::TextCell {
-                        //         text: cell.text,
-                        //         hldef: cell.hldef,
-                        //         repeat: cell.repeat,
-                        //         double_width: cell.double_width,
-                        //     })
-                        //     .collect();
-
                         log::debug!(
                             "grid {} line - {} cells at {}x{}",
                             grid,
@@ -409,7 +388,7 @@ impl AppUpdate for AppModel {
                         width,
                         height,
                     } => {
-                        self.focused.store(grid, atomic::Ordering::Relaxed);
+                        log::info!("Resizing grid {} to {}x{}.", grid, width, height);
 
                         let exists = self.vgrids.get(grid).is_some();
                         if exists {
@@ -442,8 +421,6 @@ impl AppUpdate for AppModel {
                         width,
                         height,
                     } => {
-                        self.focused.store(grid, atomic::Ordering::Relaxed);
-
                         let metrics = self.metrics.get();
                         let x = start_column as f64 * metrics.width();
                         let y = start_row as f64 * metrics.height(); //;
@@ -492,105 +469,35 @@ impl AppUpdate for AppModel {
                     }
                     RedrawEvent::WindowViewport {
                         grid,
-                        window,
+                        window: _,
                         top_line,
                         bottom_line,
                         current_line,
                         current_column,
                         line_count,
                     } => {
-                        struct Rect {
-                            x: f64,
-                            y: f64,
-                            width: usize,
-                            height: usize,
-                        }
-                        type RectResult = Result<Rect, Box<nvim::error::CallError>>;
-                        async fn window_rectangle(
-                            window: &nvim::Window<crate::bridge::TxWrapper>,
-                        ) -> RectResult {
-                            let (x, y) = window.get_position().await?;
-                            let width = window.get_width().await?;
-                            let height = window.get_height().await?;
-                            Ok(Rect {
-                                x: x as f64,
-                                y: y as f64,
-                                width: width as usize,
-                                height: height as usize,
-                            })
-                        }
-
                         log::debug!(
                             "WindowViewport grid {} viewport: top({}) bottom({}) highlight-line({}) highlight-column({}) with {} lines",
                              grid, top_line, bottom_line, current_line, current_column, line_count,
                         );
 
                         if self.vgrids.get(grid).is_none() {
-                            // dose not exists, create
-                            let rect: Rect = match self.rt.block_on(window_rectangle(&window)) {
-                                Ok(rect) => rect,
-                                Err(err) => {
-                                    log::error!(
-                                        "WindowViewport grid {} can not fetch rectangle: {}",
-                                        grid,
-                                        err
-                                    );
-                                    return true;
-                                }
-                            };
-
-                            let vgrid = VimGrid::new(
-                                grid,
-                                0,
-                                (rect.x, rect.y).into(),
-                                (rect.width, rect.height).into(),
-                                self.hldefs.clone(),
-                                self.dragging.clone(),
-                                self.metrics.clone(),
-                                self.font_description.clone(),
-                            );
-                            vgrid.set_pango_context(self.pctx.clone());
-                            self.vgrids.insert(grid, vgrid);
-                            log::info!("Add grid {} at {}x{}.", grid, rect.height, rect.width);
+                            log::warn!("WindowViewport before create grid {}.", grid);
                         } else {
                             let vgrid = self.vgrids.get_mut(grid).unwrap();
                             vgrid.show();
                         }
                     }
                     RedrawEvent::WindowHide { grid } => {
-                        self.focused
-                            .compare_exchange(
-                                grid,
-                                1,
-                                atomic::Ordering::Acquire,
-                                atomic::Ordering::Relaxed,
-                            )
-                            .ok();
-                        log::info!("hide {}", grid);
+                        log::info!("hide grid {}", grid);
                         self.vgrids.get_mut(grid).unwrap().hide();
                     }
                     RedrawEvent::WindowClose { grid } => {
-                        self.focused
-                            .compare_exchange(
-                                grid,
-                                1,
-                                atomic::Ordering::Acquire,
-                                atomic::Ordering::Relaxed,
-                            )
-                            .ok();
-                        log::info!("removing relations {}", grid);
+                        log::info!("grid {} closed", grid);
                         self.vgrids.remove(grid);
                     }
                     RedrawEvent::Destroy { grid } => {
-                        self.focused
-                            .compare_exchange(
-                                grid,
-                                1,
-                                atomic::Ordering::Acquire,
-                                atomic::Ordering::Relaxed,
-                            )
-                            .ok();
-                        log::info!("destroying relations {}", grid);
+                        log::info!("grid {} destroyed", grid);
                         self.vgrids.remove(grid);
                     }
                     RedrawEvent::Flush => {
@@ -638,7 +545,7 @@ impl AppUpdate for AppModel {
                         self.cursor_mode = mode_index as _;
                         self.cursor_redraw.store(true, atomic::Ordering::Relaxed);
                         let cursor_mode = &self.cursor_modes[self.cursor_mode];
-                        log::warn!("Mode Change to {:?} {:?}", &self.mode, cursor_mode);
+                        log::debug!("Mode Change to {:?} {:?}", &self.mode, cursor_mode);
                         let style = self.hldefs.read();
 
                         self.cursor.borrow_mut().change_mode(cursor_mode, &style);
@@ -694,7 +601,7 @@ impl AppUpdate for AppModel {
                         scrolled,
                         separator_character,
                     } => {
-                        log::warn!(
+                        log::info!(
                             "message set position: {} {} {} '{}'",
                             grid,
                             row,
@@ -703,9 +610,33 @@ impl AppUpdate for AppModel {
                         );
                         let metrics = self.metrics.get();
                         let y = row as f64 * metrics.height(); //;
-                        let vgrid = self.vgrids.get_mut(grid).unwrap();
-                        vgrid.set_pos(0., y);
-                        vgrid.show();
+                        let width = self.vgrids.get(1).map(|vgrid| vgrid.width()).unwrap();
+                        if let Some(vgrid) = self.vgrids.get_mut(grid) {
+                            log::info!(
+                                "moving message grid to 0x{} size {}x{}",
+                                y,
+                                width,
+                                vgrid.height()
+                            );
+                            vgrid.set_pos(0., y);
+                            vgrid.resize(width, vgrid.height());
+                            vgrid.show();
+                        } else {
+                            log::info!("creating message grid at 0x{} size {}x{}", y, width, 1);
+                            let mut vgrid = VimGrid::new(
+                                grid,
+                                0,
+                                (0., y).into(),
+                                (width, 1).into(),
+                                self.hldefs.clone(),
+                                self.dragging.clone(),
+                                self.metrics.clone(),
+                                self.font_description.clone(),
+                            );
+                            vgrid.set_pango_context(self.pctx.clone());
+                            vgrid.show();
+                            self.vgrids.insert(grid, vgrid);
+                        }
                     }
                     RedrawEvent::MessageShowCommand { content } => {
                         log::warn!("message show command: {:?}", content);
@@ -854,10 +785,11 @@ impl Widgets<AppModel, ()> for AppWidgets {
                                 )
                                 .unwrap();
                         },
+                        connect_realize: move |_da| { log::warn!("da realized");},
                         set_draw_func[hldefs = model.hldefs.clone()] => move |_da, cr, w, h| {
                             let hldefs = hldefs.read();
                             let default_colors = hldefs.defaults().unwrap();
-                            log::info!("drawing default background.");
+                            log::info!("drawing default background {}x{}.", w, h);
                             if let Some(bg) = default_colors.background {
                                 cr.rectangle(0., 0., w.into(), h.into());
                                 cr.set_source_rgb(bg.red() as _, bg.green() as _, bg.blue() as _);
@@ -972,14 +904,14 @@ impl Widgets<AppModel, ()> for AppWidgets {
     }
 
     fn post_init() {
+        model.calculate();
         model.gtksettings.set(overlay.settings()).ok();
-        model.recompute();
-        log::info!("widget scale factor {}", overlay.scale_factor());
-        // log::info!(
-        //     "surface scale factor {}",
-        //     main_window.surface().scale_factor()
-        // );
-        log::info!("settings dpi {}", overlay.settings().gtk_xft_dpi());
+        let metrics = model.metrics.get();
+        let rows = (model.opts.height as f64 / metrics.height()).ceil() as i64;
+        let cols = (model.opts.width as f64 / metrics.width()).ceil() as i64;
+        let mut opts = model.opts.clone();
+        opts.size.replace((cols, rows));
+        model.rt.spawn(bridge::open(opts));
 
         let im_context = gtk::IMMulticontext::new();
         im_context.set_use_preedit(false);
@@ -1017,19 +949,6 @@ impl Widgets<AppModel, ()> for AppWidgets {
                 return gtk::Inhibit(false)
             }
             let event = c.current_event().unwrap().downcast::<gdk::ScrollEvent>().unwrap();
-            // let (x, y) = event.position().unwrap();
-            // let vgrid = grids_container.first_child().unwrap();
-            // let mut id = if vgrid.is_visible() && vgrid.contains(x, y) {
-            //     vgrid.property::<u64>("id")
-            // } else {
-            //     1
-            // };
-            // while let Some(widget) = vgrid.next_sibling() {
-            //     if widget.is_visible() && widget.contains(x, y) {
-            //         id = widget.property::<u64>("id");
-            //         break;
-            //     }
-            // }
             let modifier = event.modifier_state();
             let id = GridActived.load(atomic::Ordering::Relaxed);
             let direction = match event.direction() {
@@ -1054,30 +973,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
             sender.send(AppMessage::UiCommand(command)).unwrap();
             gtk::Inhibit(false)
         }));
-        listener.connect_decelerate(|_c, _vel_x, _vel_y| {
-            // let id: u64 = c
-            //     .widget()
-            //     .dynamic_cast_ref::<VimGridView>()
-            //     .unwrap()
-            //     .property("id");
-            // log::error!("scrolling decelerate grid {} x:{} y:{}.", id, vel_x, vel_y);
-        });
-        listener.connect_scroll_begin(|_c| {
-            // let id: u64 = c
-            //     .widget()
-            //     .dynamic_cast_ref::<VimGridView>()
-            //     .unwrap()
-            //     .property("id");
-            // log::error!("scrolling begin grid {}.", id);
-        });
-        listener.connect_scroll_end(|_c| {
-            // let id: u64 = c
-            //     .widget()
-            //     .dynamic_cast_ref::<VimGridView>()
-            //     .unwrap()
-            //     .property("id");
-            // log::error!("scrolling end grid {}.", id);
-        });
+
         main_window.add_controller(&listener);
 
         let focus_controller = gtk::EventControllerFocus::builder()
@@ -1164,7 +1060,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
             let metrics = model.metrics.get();
             let rows = self.da.height() as f64 / metrics.height();
             let cols = self.da.width() as f64 / metrics.width();
-            log::debug!(
+            log::info!(
                 "trying to resize to {}x{} original {}x{} {:?}",
                 rows,
                 cols,

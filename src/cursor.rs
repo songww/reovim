@@ -1,8 +1,4 @@
-use glib::ffi::{g_unichar_iswide, g_unichar_iswide_cjk, g_unichar_iszerowidth};
-use glib::translate::from_glib;
-
 use crate::color::Color;
-
 use crate::style::{Colors, Style};
 use crate::vimview::{HighlightDefinitions, TextCell};
 
@@ -34,7 +30,7 @@ pub struct CursorMode {
     pub blinkoff: Option<u64>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct Cursor {
     pub pos: (f64, f64),
     pub grid: u64,

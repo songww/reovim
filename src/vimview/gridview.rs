@@ -190,7 +190,7 @@ mod imp {
                 layout.set_text(&text);
                 layout.set_attributes(Some(&attrs));
                 let unknown_glyphs = layout.unknown_glyphs_count();
-                log::debug!(
+                log::trace!(
                     "grid {} line {} baseline {} line-height {} space {} char-height {} unknown_glyphs {}",
                     self.id.get(),
                     lineno,
@@ -329,123 +329,6 @@ mod imp {
 
                 log::debug!("{}", text);
             }
-            // log::info!("{}", text);
-            // let font_desc = pango::FontDescription::from_string("Monaco Nerd Font Mono 12");
-            // let fm = pangocairo::FontMap::default().unwrap();
-            // let pctx = fm.create_context().unwrap();
-            // pctx.set_language(&pango::Language::default());
-            // pctx.set_base_dir(pango::Direction::Ltr);
-            // pctx.set_font_description(&font_desc);
-            // pctx.set_round_glyph_positions(true);
-            //let layout = pango::Layout::new(&pctx);
-            //layout.set_text(&text);
-            //let style_context = widget.style_context();
-            //snapshot.render_layout(&style_context, 0., 0., &layout);
-
-            // drawing cursor.
-            /*
-            if let Some(ref cursor) = *self.cursor.borrow() {
-                let (rows, cols) = cursor.pos;
-
-                let lineno = rows as usize;
-
-                let cell = match self.textbuf().cell(lineno, cols as usize) {
-                    Some(cell) => cell,
-                    None => {
-                        log::error!(
-                            "cursor pos {}x{} of grid {} dose not exists.",
-                            cols,
-                            lineno,
-                            self.id.get()
-                        );
-                        return;
-                    }
-                };
-                let text = &cell.text;
-                let y = rows as f64 * metrics.height();
-                let x = cols as f64 * metrics.width();
-
-                let guard = self.hldefs.get().unwrap().read().unwrap();
-                let default_hldef = guard.get(0).unwrap();
-                let default_colors = guard.defaults().unwrap();
-                let mut hldef = default_hldef;
-                if let Some(ref id) = cell.hldef {
-                    let style = hldefs.get(*id);
-                    if let Some(style) = style {
-                        hldef = style;
-                    }
-                }
-                let end_index = text.len() as u32;
-                let attrs = pango::AttrList::new();
-                if hldef.italic {
-                    let mut attr = pango::AttrInt::new_style(pango::Style::Italic);
-                    attr.set_start_index(0);
-                    attr.set_end_index(end_index);
-                    attrs.insert(attr);
-                }
-                if hldef.bold {
-                    let mut attr = pango::AttrInt::new_weight(pango::Weight::Bold);
-                    attr.set_start_index(0);
-                    attr.set_end_index(end_index);
-                    attrs.insert(attr);
-                }
-                const U16MAX: f32 = u16::MAX as f32 + 1.;
-                // FIXME: bad color selection.
-                let background = cursor.background(default_colors);
-                let mut attr = pango::AttrColor::new_background(
-                    (background.red() * U16MAX) as _,
-                    (background.green() * U16MAX) as _,
-                    (background.blue() * U16MAX) as _,
-                );
-                attr.set_start_index(0);
-                attr.set_end_index(end_index);
-                attrs.insert(attr);
-                let mut attr =
-                    pango::AttrInt::new_background_alpha((background.alpha() * U16MAX) as u16);
-                attr.set_start_index(0);
-                attr.set_end_index(end_index);
-                attrs.insert(attr);
-                let foreground = cursor.foreground(default_colors);
-                let mut attr = pango::AttrColor::new_foreground(
-                    (foreground.red() * U16MAX) as _,
-                    (foreground.green() * U16MAX) as _,
-                    (foreground.blue() * U16MAX) as _,
-                );
-                attr.set_start_index(0);
-                attr.set_end_index(end_index);
-                attrs.insert(attr);
-                let mut attr =
-                    pango::AttrInt::new_foreground_alpha((foreground.alpha() * U16MAX) as u16);
-                attr.set_start_index(0);
-                attr.set_end_index(end_index);
-                attrs.insert(attr);
-
-                let cursor_layout = pango::Layout::new(&pctx);
-                // FIXME: Fix letter-spacing
-
-                cursor_layout.set_text(&text);
-                cursor_layout.set_attributes(Some(&attrs));
-                let pos = cursor_layout.index_to_pos(0);
-                let (cursor_width, cursor_height) =
-                    cursor.size(pos.width() as f32, pos.height() as f32);
-                let bounds = Rect::new(
-                    (x) as f32,
-                    (y) as f32,
-                    (cursor_width) / PANGO_SCALE,
-                    (cursor_height) / PANGO_SCALE,
-                );
-                log::info!(
-                    "Drawing cursor<'{}'> color {} bounds {:?}",
-                    &text,
-                    background.to_str(),
-                    bounds
-                );
-
-                cr.move_to(x, y);
-                pangocairo::update_layout(&cr, &cursor_layout);
-                pangocairo::show_layout(&cr, &cursor_layout)
-            }
-                */
         }
 
         fn measure(
