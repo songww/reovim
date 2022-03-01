@@ -545,7 +545,7 @@ impl TextCell {
 #[derive(Default)]
 pub struct TextLine {
     boxed: Box<[TextCell]>,
-    cache: Cell<Option<(pango::LayoutLine, pango::Layout)>>,
+    cache: Cell<Option<(pango::Layout, pango::LayoutLine)>>,
 }
 
 impl Clone for TextLine {
@@ -571,12 +571,12 @@ impl TextLine {
         }
     }
 
-    pub fn cache(&self) -> Option<(pango::LayoutLine, pango::Layout)> {
+    pub fn cache(&self) -> Option<(pango::Layout, pango::LayoutLine)> {
         unsafe { &*self.cache.as_ptr() }.clone()
     }
 
-    pub fn set_cache(&self, cache: (pango::LayoutLine, pango::Layout)) {
-        self.cache.set(cache.into());
+    pub fn set_cache(&self, layout: pango::Layout, line: pango::LayoutLine) {
+        self.cache.set((layout, line).into());
     }
 }
 

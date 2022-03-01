@@ -660,7 +660,7 @@ impl AppUpdate for AppModel {
                         focusable,
                         sort_order: _,
                     } => {
-                        log::debug!(
+                        log::info!(
                             "grid {} is float window exists in vgrids {} anchor {} {:?} pos {}x{} focusable {}",
                             grid,
                             self.vgrids.get(grid).is_some(),
@@ -670,6 +670,9 @@ impl AppUpdate for AppModel {
                             anchor_row,
                             focusable
                         );
+                        // 避免负值,导致窗口溢出
+                        let anchor_column = anchor_column.max(0.);
+                        let anchor_row = anchor_row.max(0.);
                         let basepos = self.vgrids.get(anchor_grid).unwrap().pos();
                         let (left, top) = (basepos.x, basepos.y);
 
