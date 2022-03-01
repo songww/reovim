@@ -31,30 +31,30 @@ enum ConnectionMode {
 #[derive(Parser, Clone, Debug, Default, PartialEq)]
 pub struct Opts {
     /// Path to neovim binary
-    #[clap(long = "nvim", value_name = "PATH")]
+    #[clap(long = "nvim", env = "NVIM", value_name = "NVIM")]
     nvim_path: Option<String>,
 
     /// Remote nvim via tcp
-    #[clap(long = "remote", value_name = "HOST:PORT")]
+    #[clap(long = "remote", env = "REMOTE", value_name = "HOST:PORT")]
     remote_tcp: Option<String>,
 
     // initial window width
-    #[clap(long = "window-width", default_value_t = 800)]
+    #[clap(long = "window-width", env = "WIDTH", default_value_t = 800)]
     width: i32,
     // initial window height
-    #[clap(long = "window-height", default_value_t = 600)]
+    #[clap(long = "window-height", env = "HEIGHT", default_value_t = 600)]
     height: i32,
 
-    /// A level of verbosity, and can be used multiple times
-    #[clap(short, long, parse(from_occurrences))]
+    /// A level of log, see: https://docs.rs/env_logger/latest/env_logger/#enabling-logging
+    #[clap(short, long, value_name = "RUST_LOG", parse(from_occurrences))]
     verbose: i32,
 
     /// files to open.
-    #[clap(value_name = "FILES")]
+    #[clap(env = "FILES", value_name = "FILES")]
     files: Vec<String>,
 
     /// Arguments that are passed to nvim.
-    #[clap(value_name = "ARGS", last = true)]
+    #[clap(env = "ARGS", value_name = "ARGS", last = true)]
     nvim_args: Vec<String>,
 
     #[clap(skip)]
@@ -76,7 +76,15 @@ impl Opts {
 
 fn main() {
     let mut opts: Opts = Opts::parse();
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    let level = match opts.verbose {
+        0 => "error",
+        1 => "warn",
+        2 => "info",
+        3 => "debug",
+        _ => "trace",
+    };
+    let env = env_logger::Env::default().default_filter_or(level);
+    env_logger::Builder::from_env(env).init();
     log::trace!("command line options: {:?}", opts);
     let app = Opts::command().allow_missing_positional(true);
     let title = app.get_bin_name().unwrap_or("rv");

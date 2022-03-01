@@ -3,7 +3,7 @@ mod imp {
     use std::cell::{Cell, Ref};
     use std::rc::Rc;
 
-    use glib::translate::{FromGlibPtrNone, ToGlibPtr};
+    use glib::translate::{from_glib_none, FromGlibPtrNone, ToGlibPtr};
     use gtk::{gdk::prelude::*, graphene::Rect, subclass::prelude::*};
     use parking_lot::RwLock;
 
@@ -174,7 +174,7 @@ mod imp {
                 y += metrics.height();
                 text.clear();
                 let line = lines.get(lineno).unwrap();
-                let to_render = if let Some(layoutline) = line.cache() {
+                let pair = if let Some(layoutline) = line.cache() {
                     layoutline
                 } else {
                     let attrs = pango::AttrList::new();
@@ -204,7 +204,7 @@ mod imp {
                     );
                     log::debug!("{}", text);
 
-                    let layoutline = unsafe {
+                    let layoutline: pango::LayoutLine = unsafe {
                         let mut isfirst = true;
                         let _baseline =
                             pango::ffi::pango_layout_get_baseline(layout.to_glib_none().0);
@@ -262,16 +262,16 @@ mod imp {
                                     isfirst = false;
                                     // 啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊
                                     log::debug!(
-                                    "adjusting {} ({})  width {}->{}  x-offset {}->{} y-offset {} -> {}",
-                                    lineno,
-                                    c,
-                                    geometry.width,
-                                    width,
-                                    geometry.x_offset,
-                                    x_offset,
-                                    geometry.y_offset,
-                                    y_offset
-                                );
+                                        "adjusting {} ({})  width {}->{}  x-offset {}->{} y-offset {} -> {}",
+                                        lineno,
+                                        c,
+                                        geometry.width,
+                                        width,
+                                        geometry.x_offset,
+                                        x_offset,
+                                        geometry.y_offset,
+                                        y_offset
+                                    );
                                     geometry.width = width;
                                     geometry.x_offset = x_offset;
                                     // geometry.y_offset = y_offset;
@@ -282,15 +282,20 @@ mod imp {
                                 break;
                             }
                         }
-                        // pangocairo::ffi::pango_cairo_show_layout_line(cr.to_raw_none(), layoutline);
-                        (*layoutline).layout = layout.clone().to_glib_none().0;
-                        pango::LayoutLine::from_glib_none(layoutline)
+                        from_glib_none(layoutline)
+                        // <pango::LayoutLine as glib::translate::FromGlibPtrNone<
+                        //     *mut pango::ffi::PangoLayoutLine,
+                        // >>::from_glib_none(layoutline)
                     };
-                    line.set_cache((layoutline.clone(), layout.clone()));
+                    line.set_cache((layoutline.clone(), layout.copy().unwrap()));
                     (layoutline, layout.clone())
                 };
-                pangocairo::update_layout(&cr, &to_render.1);
-                pangocairo::show_layout_line(&cr, &to_render.0);
+                unsafe {
+                    let layout: *mut pango::ffi::PangoLayout = pair.1.to_glib_full();
+                    (*pair.0.to_glib_none().0).layout = layout;
+                };
+                pangocairo::update_layout(&cr, &pair.1);
+                pangocairo::show_layout_line(&cr, &pair.0);
             }
         }
 

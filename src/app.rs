@@ -359,6 +359,7 @@ impl AppUpdate for AppModel {
                             .textbuf()
                             .borrow()
                             .set_cells(row as _, column_start as _, &cells);
+                        // self.cursor.borrow_mut().pos()
                     }
                     RedrawEvent::Scroll {
                         grid,
@@ -840,9 +841,10 @@ impl Widgets<AppModel, ()> for AppWidgets {
                                             AttrType::Family | AttrType::Style | AttrType::Weight | AttrType::Variant | AttrType::Underline | AttrType::Strikethrough | AttrType::Overline => {
                                                 let mut attr = attr.clone();
                                                 attr.set_start_index(0);
-                                                attr.set_end_index(0);
+                                                attr.set_end_index(pango::ATTR_INDEX_TO_TEXT_END);
                                                 Some(attr)
-                                            }, _ => None
+                                            },
+                                            _ => None
                                         }
                                     }).for_each(|attr| attrs.insert(attr));
                                     log::debug!("cursor cell '{}' wide {}", cell.text, cursor.width);
