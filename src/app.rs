@@ -69,7 +69,7 @@ pub struct AppModel {
     pub cursor: Rc<RefCell<Cursor>>,
     pub cursor_mode: usize,
     pub cursor_modes: Vec<CursorMode>,
-    pub cursor_redraw: atomic::AtomicBool,
+    pub cursor_changed: atomic::AtomicBool,
 
     pub pctx: Rc<pango::Context>,
     pub gtksettings: OnceCell<gtk::Settings>,
@@ -119,7 +119,7 @@ impl AppModel {
             cursor: Rc::new(RefCell::new(Cursor::new())),
             cursor_mode: 0,
             cursor_modes: Vec::new(),
-            cursor_redraw: atomic::AtomicBool::new(false),
+            cursor_changed: atomic::AtomicBool::new(false),
 
             pctx: pangocairo::FontMap::default()
                 .unwrap()
@@ -350,16 +350,31 @@ impl AppUpdate for AppModel {
                         );
 
                         let grids: Vec<_> = self.vgrids.iter().map(|(k, _)| *k).collect();
-                        self.vgrids
-                            .get_mut(grid)
-                            .expect(&format!(
-                                "grid {} not found, valid grids {:?}",
-                                grid, &grids
-                            ))
+                        let vgrid = self.vgrids.get_mut(grid).expect(&format!(
+                            "grid {} not found, valid grids {:?}",
+                            grid, &grids
+                        ));
+                        vgrid
                             .textbuf()
                             .borrow()
                             .set_cells(row as _, column_start as _, &cells);
-                        // self.cursor.borrow_mut().pos()
+                        let row = row as f64;
+                        let leftop = vgrid.coord();
+                        let mut cursor = self.cursor.borrow_mut();
+                        let coord = cursor.coord();
+                        let cursor_grid = cursor.grid();
+                        if cursor_grid == grid && coord.row == leftop.row + row {
+                            let cell = vgrid
+                                .textbuf()
+                                .borrow()
+                                .cell(
+                                    (coord.row - leftop.row).floor() as usize,
+                                    (coord.col - leftop.col).floor() as usize,
+                                )
+                                .unwrap();
+                            cursor.set_cell(cell);
+                            self.cursor_changed.store(true, atomic::Ordering::Relaxed);
+                        }
                     }
                     RedrawEvent::Scroll {
                         grid,
@@ -374,7 +389,6 @@ impl AppUpdate for AppModel {
                         if rows.is_positive() {
                             vgrid.up(rows.abs() as _);
                         } else if rows.is_negative() {
-                            //
                             vgrid.down(rows.abs() as _);
                         } else if columns.is_positive() {
                             unimplemented!("scroll left.");
@@ -382,7 +396,25 @@ impl AppUpdate for AppModel {
                             unimplemented!("scroll right.");
                         } else {
                             // rows and columns are both zero.
-                            unimplemented!("why here.");
+                            unimplemented!("could not be there.");
+                        }
+                        let mut cursor = self.cursor.borrow_mut();
+                        let cursor_grid = cursor.grid();
+                        log::debug!("scrolling grid {} cursor at {}", grid, cursor_grid);
+                        if cursor_grid == grid {
+                            let leftop = vgrid.coord();
+                            let coord = cursor.coord();
+                            let cell = vgrid
+                                .textbuf()
+                                .borrow()
+                                .cell(
+                                    (coord.row - leftop.row).floor() as usize,
+                                    (coord.col - leftop.col).floor() as usize,
+                                )
+                                .unwrap();
+                            log::debug!("cursor character change to {}", cell.text);
+                            cursor.set_cell(cell);
+                            self.cursor_changed.store(true, atomic::Ordering::Relaxed);
                         }
                     }
                     RedrawEvent::Resize {
@@ -390,7 +422,7 @@ impl AppUpdate for AppModel {
                         width,
                         height,
                     } => {
-                        log::info!("Resizing grid {} to {}x{}.", grid, width, height);
+                        log::debug!("Resizing grid {} to {}x{}.", grid, width, height);
 
                         let exists = self.vgrids.get(grid).is_some();
                         if exists {
@@ -399,7 +431,7 @@ impl AppUpdate for AppModel {
                                 .unwrap()
                                 .resize(width as _, height as _);
                         } else {
-                            log::info!("Add grid {} to default window at left top.", grid);
+                            log::debug!("Add grid {} to default window at left top.", grid);
                             let vgrid = VimGrid::new(
                                 grid,
                                 0,
@@ -418,21 +450,21 @@ impl AppUpdate for AppModel {
                     RedrawEvent::WindowPosition {
                         grid,
                         window: _,
-                        start_row,
-                        start_column,
+                        start_row: row,
+                        start_column: column,
                         width,
                         height,
                     } => {
                         let metrics = self.metrics.get();
-                        let x = start_column as f64 * metrics.width();
-                        let y = start_row as f64 * metrics.height(); //;
+                        // let x = start_column as f64 * metrics.width();
+                        // let y = start_row as f64 * metrics.height(); //;
 
                         if self.vgrids.get(grid).is_none() {
                             // dose not exists, create
                             let vgrid = VimGrid::new(
                                 grid,
                                 0,
-                                (x.floor(), y.floor()).into(),
+                                (column as usize, row as usize).into(),
                                 (width, height).into(),
                                 self.hldefs.clone(),
                                 self.dragging.clone(),
@@ -441,32 +473,32 @@ impl AppUpdate for AppModel {
                             );
                             vgrid.set_pango_context(self.pctx.clone());
                             self.vgrids.insert(grid, vgrid);
-                            log::info!(
+                            log::debug!(
                                 "Add grid {} at {}x{} with {}x{}.",
                                 grid,
-                                x,
-                                y,
+                                column,
+                                row,
                                 height,
                                 width
                             );
                         } else {
                             let vgrid = self.vgrids.get_mut(grid).unwrap();
                             vgrid.resize(width as _, height as _);
-                            vgrid.set_pos(x.floor(), y.floor());
-                            log::info!(
+                            vgrid.set_coord(column as _, row as _);
+                            log::debug!(
                                 "Move grid {} to {}x{} with {}x{}.",
                                 grid,
-                                x,
-                                y,
+                                column,
+                                row,
                                 height,
                                 width
                             );
                             vgrid.show();
                         }
 
-                        log::info!(
+                        log::debug!(
                             "WindowPosition grid {} row-start({}) col-start({}) width({}) height({})",
-                            grid, start_row, start_column, width, height,
+                            grid, row, column, width, height,
                         );
                     }
                     RedrawEvent::WindowViewport {
@@ -507,23 +539,24 @@ impl AppUpdate for AppModel {
                     }
                     RedrawEvent::CursorGoto { grid, row, column } => {
                         let vgrid = self.vgrids.get(grid).unwrap();
-                        let vgrid_pos = vgrid.pos();
-                        if let Some(cell) =
-                            vgrid.textbuf().borrow().cell(row as usize, column as usize)
-                        {
-                            let metrics = self.metrics.get();
-                            log::info!(
+                        let leftop = vgrid.coord();
+                        let row = row as usize;
+                        let column = column as usize;
+                        if let Some(cell) = vgrid.textbuf().borrow().cell(row, column) {
+                            // let metrics = self.metrics.get();
+                            log::debug!(
                                 "cursor goto {}x{} of grid {}, gird at {}x{}",
                                 column,
                                 row,
                                 grid,
-                                vgrid_pos.x,
-                                vgrid_pos.y
+                                leftop.col,
+                                leftop.row
                             );
-                            let x = metrics.width() * column as f64 + vgrid_pos.x;
-                            let y = metrics.height() * row as f64 + vgrid_pos.y;
-                            self.cursor.borrow_mut().set_pos(x, y);
-                            self.cursor.borrow_mut().set_cell(cell.clone());
+                            // let x = metrics.width() * column as f64 + vgrid_pos.x;
+                            // let y = metrics.height() * row as f64 + vgrid_pos.y;
+                            let mut cursor = self.cursor.borrow_mut();
+                            cursor.set_cell(cell.clone());
+                            cursor.set_coord(leftop.col + column as f64, leftop.row + row as f64);
                         } else {
                             log::warn!(
                                 "Cursor pos {}x{} of grid {} dose not exists",
@@ -532,11 +565,12 @@ impl AppUpdate for AppModel {
                                 grid
                             );
                         }
-                        self.cursor_redraw.store(true, atomic::Ordering::Relaxed);
+                        self.cursor.borrow_mut().set_grid(grid);
+                        self.cursor_changed.store(true, atomic::Ordering::Relaxed);
                     }
                     RedrawEvent::ModeInfoSet { cursor_modes } => {
                         self.cursor_modes = cursor_modes;
-                        self.cursor_redraw.store(true, atomic::Ordering::Relaxed);
+                        self.cursor_changed.store(true, atomic::Ordering::Relaxed);
 
                         let mode = &self.cursor_modes[self.cursor_mode];
                         let style = self.hldefs.read();
@@ -545,7 +579,7 @@ impl AppUpdate for AppModel {
                     RedrawEvent::ModeChange { mode, mode_index } => {
                         self.mode = mode;
                         self.cursor_mode = mode_index as _;
-                        self.cursor_redraw.store(true, atomic::Ordering::Relaxed);
+                        self.cursor_changed.store(true, atomic::Ordering::Relaxed);
                         let cursor_mode = &self.cursor_modes[self.cursor_mode];
                         log::debug!("Mode Change to {:?} {:?}", &self.mode, cursor_mode);
                         let style = self.hldefs.read();
@@ -570,7 +604,7 @@ impl AppUpdate for AppModel {
                         content,
                         replace_last,
                     } => {
-                        log::info!("showing message {:?} {:?}", kind, content);
+                        log::debug!("showing message {:?} {:?}", kind, content);
                         if replace_last && !self.messages.is_empty() {
                             self.messages.pop();
                         }
@@ -603,40 +637,41 @@ impl AppUpdate for AppModel {
                         scrolled,
                         separator_character,
                     } => {
-                        log::info!(
+                        log::debug!(
                             "message set position: {} {} {} '{}'",
                             grid,
                             row,
                             scrolled,
                             separator_character
                         );
-                        let metrics = self.metrics.get();
-                        let y = row as f64 * metrics.height(); //;
+                        // let metrics = self.metrics.get();
+                        // let y = row as f64 * metrics.height(); //;
                         let width = self.vgrids.get(1).map(|vgrid| vgrid.width()).unwrap();
                         if let Some(vgrid) = self.vgrids.get_mut(grid) {
-                            log::info!(
+                            log::debug!(
                                 "moving message grid to 0x{} size {}x{}",
-                                y,
+                                row,
                                 width,
                                 vgrid.height()
                             );
-                            vgrid.set_pos(0., y);
+                            vgrid.set_coord(0., row as f64);
                             vgrid.resize(width, vgrid.height());
                             vgrid.show();
                         } else {
-                            log::info!("creating message grid at 0x{} size {}x{}", y, width, 1);
+                            log::debug!("creating message grid at 0x{} size {}x{}", row, width, 1);
+                            let row = row as usize;
                             let mut vgrid = VimGrid::new(
                                 grid,
                                 0,
-                                (0., y).into(),
+                                (0, row).into(),
                                 (width, 1).into(),
                                 self.hldefs.clone(),
                                 self.dragging.clone(),
                                 self.metrics.clone(),
                                 self.font_description.clone(),
                             );
-                            vgrid.set_pango_context(self.pctx.clone());
                             vgrid.show();
+                            vgrid.set_pango_context(self.pctx.clone());
                             self.vgrids.insert(grid, vgrid);
                         }
                     }
@@ -660,7 +695,7 @@ impl AppUpdate for AppModel {
                         focusable,
                         sort_order: _,
                     } => {
-                        log::info!(
+                        log::debug!(
                             "grid {} is float window exists in vgrids {} anchor {} {:?} pos {}x{} focusable {}",
                             grid,
                             self.vgrids.get(grid).is_some(),
@@ -673,8 +708,9 @@ impl AppUpdate for AppModel {
                         // 避免负值,导致窗口溢出
                         let anchor_column = anchor_column.max(0.);
                         let anchor_row = anchor_row.max(0.);
-                        let basepos = self.vgrids.get(anchor_grid).unwrap().pos();
-                        let (left, top) = (basepos.x, basepos.y);
+                        log::debug!("after clamp {}x{}", anchor_column, anchor_row);
+                        let coord = self.vgrids.get(anchor_grid).unwrap().coord().clone();
+                        // let (left, top) = (basepos.x, basepos.y);
 
                         let vgrid = self.vgrids.get_mut(grid).unwrap();
 
@@ -692,11 +728,11 @@ impl AppUpdate for AppModel {
                             ),
                         };
 
-                        let metrics = self.metrics.get();
-                        let x = col * metrics.width();
-                        let y = row * metrics.height();
-                        log::info!("moving float window {} to {}x{}", grid, col, row);
-                        vgrid.set_pos(left + x, top + y);
+                        // let metrics = self.metrics.get();
+                        // let x = col * metrics.width();
+                        // let y = row * metrics.height();
+                        log::debug!("moving float window {} to {}x{}", grid, col, row);
+                        vgrid.set_coord(coord.col + col, coord.row + row);
                         vgrid.set_is_float(true);
                         vgrid.set_focusable(focusable);
                     }
@@ -775,12 +811,12 @@ impl Widgets<AppModel, ()> for AppWidgets {
                         set_focus_on_click: false,
                         set_overflow: gtk::Overflow::Hidden,
                         connect_resize[sender = sender.clone(), metrics = model.metrics.clone(), size = model.size.clone()] => move |da, width, height| {
-                            log::info!("da resizing width: {}, height: {}", width, height);
+                            log::debug!("da resizing width: {}, height: {}", width, height);
                             size.set((width, height));
                             let metrics = metrics.get();
                             let rows = da.height() as f64 / metrics.height(); //  + metrics.linespace
                             let cols = da.width() as f64 / metrics.width();
-                            log::info!("da resizing rows: {} cols: {}", rows, cols);
+                            log::debug!("da resizing rows: {} cols: {}", rows, cols);
                             sender
                                 .send(
                                     UiCommand::Parallel(ParallelCommand::Resize {
@@ -794,7 +830,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
                         set_draw_func[hldefs = model.hldefs.clone()] => move |_da, cr, w, h| {
                             let hldefs = hldefs.read();
                             let default_colors = hldefs.defaults().unwrap();
-                            log::info!("drawing default background {}x{}.", w, h);
+                            log::debug!("drawing default background {}x{}.", w, h);
                             if let Some(bg) = default_colors.background {
                                 cr.rectangle(0., 0., w.into(), h.into());
                                 cr.set_source_rgb(bg.red() as _, bg.green() as _, bg.blue() as _);
@@ -977,7 +1013,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
                     return gtk::Inhibit(false)
                 }
             };
-            log::info!("scrolling grid {} x: {}, y: {} {}", id, x, y, &direction);
+            log::debug!("scrolling grid {} x: {}, y: {} {}", id, x, y, &direction);
             let command = UiCommand::Serial(SerialCommand::Scroll { direction: direction.into(), grid_id: id, position: (0, 1), modifier });
             sender.send(AppMessage::UiCommand(command)).unwrap();
             gtk::Inhibit(false)
@@ -1041,14 +1077,16 @@ impl Widgets<AppModel, ()> for AppWidgets {
         ) {
             self.da.queue_draw();
         }
-        if let Ok(true) = model.cursor_redraw.compare_exchange(
+        if let Ok(true) = model.cursor_changed.compare_exchange(
             true,
             false,
             atomic::Ordering::Acquire,
             atomic::Ordering::Relaxed,
         ) {
             let metrics = model.metrics.get();
-            let (x, y) = model.cursor.borrow().pos();
+            let cursor = model.cursor.borrow();
+            let coord = cursor.coord();
+            let (x, y) = (coord.col * metrics.width(), coord.row * metrics.height());
             unsafe { model.im_context.get_unchecked() }.set_cursor_location(&gdk::Rectangle::new(
                 x as i32,
                 y as i32,

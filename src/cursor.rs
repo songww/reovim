@@ -1,4 +1,5 @@
 use crate::color::Color;
+use crate::grapheme::Coord;
 use crate::style::{Colors, Style};
 use crate::vimview::{HighlightDefinitions, TextCell};
 
@@ -32,7 +33,10 @@ pub struct CursorMode {
 
 #[derive(Clone, Debug)]
 pub struct Cursor {
-    pub pos: (f64, f64),
+    // {cols}x{rows}
+    pub coord: Coord,
+    // {x}x{y} in pixel.
+    // pub coord: (f64, f64),
     pub grid: u64,
     pub shape: CursorShape,
     pub cell_percentage: Option<f64>,
@@ -48,8 +52,8 @@ pub struct Cursor {
 impl Cursor {
     pub fn new() -> Cursor {
         Cursor {
-            pos: (0., 0.).into(),
             grid: 0,
+            coord: (0, 0).into(),
             shape: CursorShape::Block,
             style: None,
             cell_percentage: None,
@@ -70,11 +74,21 @@ impl Cursor {
             percentage
         );
         match self.shape {
-            CursorShape::Block => (self.pos.0, self.pos.1, width, height),
-            CursorShape::Vertical => (self.pos.0, self.pos.1, width * percentage, height),
+            CursorShape::Block => (
+                self.coord.col * width,
+                self.coord.row * height,
+                width,
+                height,
+            ),
+            CursorShape::Vertical => (
+                self.coord.col * width,
+                self.coord.row * height,
+                width * percentage,
+                height,
+            ),
             CursorShape::Horizontal => (
-                self.pos.0,
-                self.pos.1 + height - height * percentage,
+                self.coord.col * width,
+                self.coord.row * height + height - height * percentage,
                 width,
                 height * percentage,
             ),
@@ -110,12 +124,24 @@ impl Cursor {
         &self.cell
     }
 
-    pub fn pos(&self) -> (f64, f64) {
-        self.pos
+    pub fn grid(&self) -> u64 {
+        self.grid
     }
 
-    pub fn set_pos(&mut self, x: f64, y: f64) {
-        self.pos = (x, y);
+    pub fn coord(&self) -> &Coord {
+        &self.coord
+    }
+
+    // pub fn coord(&self) -> (usize, usize) {
+    //     self.coord
+    // }
+
+    pub fn set_coord(&mut self, cols: f64, rows: f64) {
+        self.coord = (cols, rows).into();
+    }
+
+    pub fn set_grid(&mut self, grid: u64) {
+        self.grid = grid;
     }
 
     pub fn set_cell(&mut self, cell: TextCell) {

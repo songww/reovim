@@ -10,8 +10,7 @@ use relm4::*;
 use crate::app::{self, Dragging};
 use crate::bridge::{MouseAction, MouseButton, SerialCommand, UiCommand};
 use crate::event_aggregator::EVENT_AGGREGATOR;
-use crate::pos::Position;
-use crate::rect::Rectangle;
+use crate::grapheme::{Coord, Pos, Rectangle};
 
 use super::gridview::VimGridView;
 use super::TextBuf;
@@ -21,7 +20,8 @@ type HighlightDefinitions = Rc<RwLock<crate::vimview::HighlightDefinitions>>;
 pub struct VimGrid {
     win: u64,
     grid: u64,
-    pos: FixedPosition,
+    pos: Pos,
+    coord: Coord,
     move_to: Cell<Option<FixedPosition>>,
     width: usize,
     height: usize,
@@ -40,7 +40,7 @@ impl VimGrid {
     pub fn new(
         id: u64,
         winid: u64,
-        pos: Position,
+        coord: Coord,
         rect: Rectangle,
         hldefs: HighlightDefinitions,
         dragging: Rc<Cell<Option<Dragging>>>,
@@ -50,10 +50,12 @@ impl VimGrid {
         let textbuf = TextBuf::new(rect.height, rect.width);
         textbuf.borrow().set_hldefs(hldefs.clone());
         textbuf.borrow().set_metrics(metrics.clone());
+        let m = metrics.get();
         VimGrid {
             win: winid,
             grid: id,
-            pos: pos.into(),
+            pos: (coord.col as f64 * m.width(), coord.row as f64 * m.height()).into(),
+            coord,
             width: rect.width as _,
             height: rect.height as _,
             move_to: None.into(),
@@ -79,8 +81,8 @@ impl VimGrid {
         self.width
     }
 
-    pub fn pos(&self) -> &FixedPosition {
-        &self.pos
+    pub fn coord(&self) -> &Coord {
+        &self.coord
     }
 
     pub fn hide(&mut self) {
@@ -112,7 +114,7 @@ impl VimGrid {
         log::debug!("scroll-region {} rows moved up.", rows);
         log::debug!(
             "Origin Region {:?} {}x{}",
-            self.pos,
+            self.coord,
             self.width,
             self.height
         );
@@ -124,7 +126,7 @@ impl VimGrid {
         log::debug!("scroll-region {} rows moved down.", rows);
         log::debug!(
             "Origin Region {:?} {}x{}",
-            self.pos,
+            self.coord,
             self.width,
             self.height
         );
@@ -137,9 +139,13 @@ impl VimGrid {
         self.textbuf().borrow().resize(height, width);
     }
 
-    pub fn set_pos(&mut self, x: f64, y: f64) {
-        self.pos = FixedPosition { x, y };
-        self.move_to.replace(FixedPosition { x, y }.into());
+    pub fn set_coord(&mut self, col: f64, row: f64) {
+        let metrics = self.metrics.get();
+        let pos: Pos = (col * metrics.width(), row * metrics.height()).into();
+        let move_to: FixedPosition = pos.into();
+        self.pos = pos;
+        self.coord = Coord { col, row };
+        self.move_to.replace(move_to.into());
     }
 
     pub fn set_is_float(&mut self, is_float: bool) {
@@ -291,10 +297,7 @@ impl factory::FactoryPrototype for VimGrid {
 
     fn position(&self, _: &u64) -> FixedPosition {
         log::debug!("requesting position of grid {}", self.grid);
-        FixedPosition {
-            x: self.pos.x,
-            y: self.pos.y,
-        }
+        self.pos.into()
     }
 
     fn view(&self, index: &u64, widgets: &VimGridWidgets) {

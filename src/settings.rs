@@ -133,7 +133,10 @@ mod tests {
     use tokio;
 
     use super::*;
-    use crate::bridge::{create, create_nvim_command};
+    use crate::{
+        bridge::{create, create_nvim_command},
+        Opts,
+    };
 
     #[derive(Clone)]
     pub struct NeovimHandler();
@@ -226,6 +229,8 @@ mod tests {
     async fn test_read_initial_values() {
         let settings = Settings::new();
 
+        let opts = Opts::default();
+
         let v1: String = "foo".to_string();
         let v2: String = "bar".to_string();
         let v3: String = "baz".to_string();
@@ -235,7 +240,7 @@ mod tests {
         //create_nvim_command tries to read from CmdLineSettings.neovim_args
         //TODO: this sets a static variable. Can this have side effects on other tests?
 
-        let (nvim, _) = create::new_child_cmd(&mut create_nvim_command(), NeovimHandler())
+        let (nvim, _) = create::new_child_cmd(&mut create_nvim_command(&opts), NeovimHandler())
             .await
             .expect("Could not locate or start the neovim process");
         nvim.set_var(&v4, Value::from(v2.clone())).await.ok();

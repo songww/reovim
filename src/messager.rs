@@ -22,6 +22,7 @@ impl MessageHandler<crate::app::AppModel> for VimMessager {
         app_model.rt.spawn(async move {
             while let Some(event) = rx.recv().await {
                 if !RUNNING_TRACKER.is_running() {
+                    sender.send(AppMessage::Quit).unwrap();
                     break;
                 }
                 log::trace!("RedrawEvent {:?}", event);
@@ -29,13 +30,6 @@ impl MessageHandler<crate::app::AppModel> for VimMessager {
                     .send(AppMessage::RedrawEvent(event))
                     .expect("Failed to send RedrawEvent to main thread");
             }
-        });
-
-        app_model.rt.spawn(async move {
-            while RUNNING_TRACKER.is_running() {
-                tokio::time::sleep(std::time::Duration::from_millis(20)).await
-            }
-            parent_sender.send(AppMessage::Quit).unwrap();
         });
 
         VimMessager {}
