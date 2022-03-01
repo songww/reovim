@@ -288,6 +288,8 @@ impl factory::FactoryPrototype for VimGrid {
                     dragging.set(Dragging { btn, pos: position }.into());
                 }
             }
+            // for mouse auto hide
+            // if motion show one second.
 
         }));
         view.add_controller(&motion_listener);

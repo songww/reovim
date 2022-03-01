@@ -9,7 +9,6 @@ mod imp {
 
     use crate::metrics::Metrics;
     use crate::vimview::textbuf::Lines;
-    use crate::vimview::TextLine;
 
     use super::super::highlights::HighlightDefinitions;
     use super::super::TextBuf;

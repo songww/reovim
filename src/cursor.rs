@@ -120,6 +120,18 @@ impl Cursor {
         }
     }
 
+    pub fn blinkon(&self) -> Option<u64> {
+        self.blinkon
+    }
+
+    pub fn blinkoff(&self) -> Option<u64> {
+        self.blinkoff
+    }
+
+    pub fn blinkwait(&self) -> Option<u64> {
+        self.blinkwait
+    }
+
     pub fn cell(&self) -> &TextCell {
         &self.cell
     }
@@ -184,7 +196,16 @@ impl Cursor {
         }
 
         if let Some(style) = style {
-            self.style = styles.get(*style).cloned();
+            if *style == HighlightDefinitions::DEFAULT {
+                let mut style = styles.get(*style).cloned().unwrap();
+                let bg = style.colors.background;
+                let fg = style.colors.foreground;
+                style.colors.foreground = bg;
+                style.colors.background = fg;
+                self.style.replace(style);
+            } else {
+                self.style = styles.get(*style).cloned();
+            }
         }
 
         self.cell_percentage = *cell_percentage;

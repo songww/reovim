@@ -6,7 +6,7 @@ use gtk::gdk::prelude::FontMapExt;
 use gtk::gdk::{self, ScrollDirection};
 use gtk::prelude::{
     BoxExt, DrawingAreaExt, DrawingAreaExtManual, EventControllerExt, GtkWindowExt, IMContextExt,
-    IMContextExtManual, IMMulticontextExt, OrientableExt, WidgetExt,
+    IMContextExtManual, IMMulticontextExt, OrientableExt, StyleContextExt, WidgetExt,
 };
 use once_cell::sync::{Lazy, OnceCell};
 use pango::FontDescription;
@@ -364,16 +364,19 @@ impl AppUpdate for AppModel {
                         let coord = cursor.coord();
                         let cursor_grid = cursor.grid();
                         if cursor_grid == grid && coord.row == leftop.row + row {
-                            let cell = vgrid
-                                .textbuf()
-                                .borrow()
-                                .cell(
-                                    (coord.row - leftop.row).floor() as usize,
-                                    (coord.col - leftop.col).floor() as usize,
-                                )
-                                .unwrap();
-                            cursor.set_cell(cell);
-                            self.cursor_changed.store(true, atomic::Ordering::Relaxed);
+                            let row = (coord.row - leftop.row).floor() as usize;
+                            let col = (coord.col - leftop.col).floor() as usize;
+                            if let Some(cell) = vgrid.textbuf().borrow().cell(row, col) {
+                                cursor.set_cell(cell);
+                                self.cursor_changed.store(true, atomic::Ordering::Relaxed);
+                            } else {
+                                log::error!(
+                                    "cursor pos {}x{} of grid {} dose not exists.",
+                                    col,
+                                    row,
+                                    grid
+                                );
+                            }
                         }
                     }
                     RedrawEvent::Scroll {
@@ -455,7 +458,7 @@ impl AppUpdate for AppModel {
                         width,
                         height,
                     } => {
-                        let metrics = self.metrics.get();
+                        // let metrics = self.metrics.get();
                         // let x = start_column as f64 * metrics.width();
                         // let y = start_row as f64 * metrics.height(); //;
 
@@ -545,7 +548,7 @@ impl AppUpdate for AppModel {
                         if let Some(cell) = vgrid.textbuf().borrow().cell(row, column) {
                             // let metrics = self.metrics.get();
                             log::debug!(
-                                "cursor goto {}x{} of grid {}, gird at {}x{}",
+                                "cursor goto {}x{} of grid {}, grid at {}x{}",
                                 column,
                                 row,
                                 grid,
@@ -851,22 +854,52 @@ impl Widgets<AppModel, ()> for AppWidgets {
                         set_vexpand: false,
                     },
                     add_overlay: cursor_drawing_area = &gtk::DrawingArea {
-                        set_widget_name: "cursor-drawing-area",
+                        set_widget_name: "cursor",
                         set_visible: true,
                         set_hexpand: true,
                         set_vexpand: true,
                         set_can_focus: false,
                         set_sensitive: false,
                         set_focus_on_click: false,
+                        set_css_classes: &["blink"],
                         set_draw_func[hldefs = model.hldefs.clone(),
                                       cursor = model.cursor.clone(),
                                       metrics = model.metrics.clone(),
-                                      pctx = model.pctx.clone()] => move |_da, cr, _, _| {
+                                      pctx = model.pctx.clone()] => move |da, cr, _, _| {
+                            da.remove_css_class("blink");
+                            let cursor = cursor.borrow();
+                            let blinkon = cursor.blinkon().filter(|blinkon| *blinkon > 0);
+                            let blinkoff = cursor.blinkoff().filter(|blinkoff| *blinkoff > 0);
+                            let blinkwait = cursor.blinkwait().filter(|blinkwait| *blinkwait > 0);
+                            if let (Some(blinkon), Some(blinkoff), Some(blinkwait)) = (blinkon, blinkoff, blinkwait) {
+                                let css = format!(".blink {{
+  animation-name: blinking;
+  animation-delay: {}ms;
+  animation-duration: {}ms;
+  animation-iteration-count: infinite;
+  animation-timing-function: steps(2, start);
+}}
+
+@keyframes blinking {{
+  {}% {{ opacity: 0; }}
+}}
+",
+                                    blinkwait,
+                                    blinkon + blinkoff,
+                                    blinkon * 100 / (blinkon + blinkoff)
+                                );
+                                let context = da.style_context();
+                                let provider = gtk::CssProvider::new();
+                                provider.load_from_data(css.as_bytes());
+                                // FIXME: add once.
+                                context.add_provider(&provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+                                log::debug!("css {} {}: \n{}", blinkon, blinkoff, &css);
+                                da.add_css_class("blink");
+                            }
                             let hldefs = hldefs.read();
                             let default_colors = hldefs.defaults().unwrap();
-                            let cursor = cursor.borrow();
-                            let fg = cursor.background(default_colors);
-                            let bg = cursor.foreground(default_colors);
+                            let bg = cursor.background(default_colors);
+                            let fg = cursor.foreground(default_colors);
                             let cell = cursor.cell();
                             let metrics = metrics.get();
                             let (x, y, width, height)  = cursor.rectangle(metrics.width(), metrics.height());
@@ -898,7 +931,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
                                         let x_offset =geometry.x_offset() - (geometry.width() - width) / 2;
                                         geometry.set_width(width);
                                         geometry.set_x_offset(x_offset);
-                                        log::info!("cursor glyph width {}", width);
+                                        log::debug!("cursor glyph width {}", width);
                                     }
                                     // 试试汉字
                                     cr.save().unwrap();
@@ -911,7 +944,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
                                     pangocairo::show_glyph_string(cr, &itemized.analysis().font(), &mut glyph_string);
                                 }
                                 _ => {
-                                    log::info!("drawing cursor with {}x{}", width, height);
+                                    log::debug!("drawing cursor with {}x{}", width, height);
                                     cr.set_source_rgba(bg.red() as f64, bg.green() as f64, bg.blue() as f64, bg.alpha() as f64);
                                     cr.rectangle(x, y, width, height);
                                     cr.fill().unwrap();
