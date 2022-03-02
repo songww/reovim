@@ -6,9 +6,11 @@ mod imp {
     use glib::translate::{from_glib_none, ToGlibPtr};
     use gtk::{gdk::prelude::*, graphene::Rect, subclass::prelude::*};
     use parking_lot::RwLock;
+    use rustc_hash::FxHashMap;
 
     use crate::metrics::Metrics;
     use crate::vimview::textbuf::Lines;
+    use crate::vimview::TextCell;
 
     use super::super::highlights::HighlightDefinitions;
     use super::super::TextBuf;
@@ -136,6 +138,7 @@ mod imp {
             self.parent_snapshot(widget, snapshot);
             let textbuf = self.textbuf();
             let pctx = textbuf.pango_context();
+            pctx.set_base_dir(pango::Direction::Ltr);
 
             let (width, height) = self.size_required();
 
@@ -167,8 +170,8 @@ mod imp {
             let rows = textbuf.rows();
             log::debug!("text to render:");
             let desc = pctx.font_description();
-            pctx.set_round_glyph_positions(true);
             let mut layout = pango::Layout::new(&pctx);
+            layout.set_auto_dir(false);
             layout.set_font_description(desc.as_ref());
             let textbuf = self.textbuf();
             let lines = textbuf.lines();
@@ -265,12 +268,14 @@ mod imp {
             let line = lines.get(lineno).unwrap();
             let cols = line.len();
             let mut text = String::new();
+            let mut indexed = FxHashMap::default();
             let attrs = pango::AttrList::new();
             for col in 0..cols {
                 let cell = line.get(col).expect("Invalid cols and rows");
                 if cell.start_index == cell.end_index {
                     continue;
                 }
+                indexed.insert(text.len(), cell);
                 text.push_str(&cell.text);
                 cell.attrs
                     .clone()
@@ -287,22 +292,56 @@ mod imp {
                 layout.baseline(),
                 layout.line_readonly(0).unwrap().height(),
                 metrics.linespace(),
-                metrics.charheight() * PANGO_SCALE as f64,
+                metrics.charheight() * PANGO_SCALE,
                 unknown_glyphs
             );
-            log::debug!("{}", text);
 
-            let layoutline: pango::LayoutLine = unsafe { self.align(layout, &text, &metrics) };
+            let required_lineheight = metrics.charheight() * PANGO_SCALE;
+            let real_lineheight = layout.line_readonly(0).unwrap().height() as f64;
+            if required_lineheight != real_lineheight {
+                attrs.insert_before({
+                    let mut attr =
+                        pango::AttrInt::new_line_height_absolute(required_lineheight as i32);
+                    attr.set_start_index(0);
+                    attr.set_end_index(pango::ATTR_INDEX_TO_TEXT_END);
+                    attr
+                });
+
+                // unsafe {
+                //     let attr = pango::ffi::pango_attr_line_height_new(
+                //         required_lineheight / real_lineheight,
+                //     );
+                //     log::warn!(
+                //         "line-height scale: {}",
+                //         required_lineheight / real_lineheight
+                //     );
+                //     (*attr).start_index = 0;
+                //     (*attr).end_index = pango::ATTR_INDEX_TO_TEXT_END;
+                //     pango::ffi::pango_attr_list_insert_before(attrs.to_glib_none().0, attr);
+                //     std::mem::forget(attr);
+                // }
+                layout.set_attributes(Some(&attrs));
+                layout.context_changed();
+            }
+            if required_lineheight as i32 != layout.line_readonly(0).unwrap().height() {
+                log::debug!("Scale line height failed.");
+            }
+            // assert_eq!(
+            //     required_lineheight as i32,
+            //     layout.line_readonly(0).unwrap().height()
+            // );
+            log::trace!("{}", text);
+
+            let layoutline: pango::LayoutLine = unsafe { self.align(layout, &indexed, &metrics) };
             layoutline
         }
 
         unsafe fn align(
             &self,
             layout: &mut pango::Layout,
-            text: &str,
+            indexed: &FxHashMap<usize, &TextCell>,
             metrics: &Metrics,
         ) -> pango::LayoutLine {
-            let mut isfirst = true;
             // let _baseline = pango::ffi::pango_layout_get_baseline(layout.to_glib_none().0);
             let layoutline = pango::ffi::pango_layout_get_line(layout.to_glib_none().0, 0);
             let mut runs = (*layoutline).runs;
@@ -328,19 +367,23 @@ mod imp {
                     ink_rect,
                     &mut logical_rect,
                 );
+                log::trace!("{} glyphs item.offset {}", num_glyphs, (*item).offset);
+                log::trace!("log_clusters{:?}", log_clusters);
                 for (glyph, log_cluster) in glyphs.iter_mut().zip(log_clusters) {
                     let index = ((*item).offset + log_cluster) as usize;
-                    let c = text[index..].chars().next().unwrap();
-                    let width = if glib::ffi::g_unichar_iswide(c as u32) == 1 {
-                        2.
-                    } else if glib::ffi::g_unichar_iszerowidth(c as u32) == 1 {
-                        0.
-                    } else {
-                        1.
-                    };
+                    let isfirst = index == 0;
+                    let cell = indexed.get(&index).unwrap();
+                    assert!(cell.text.chars().count() == 1);
+                    let c = cell.text.chars().next().unwrap();
+                    if glib::ffi::g_unichar_iszerowidth(c as u32) == 1 {
+                        log::debug!("Skipping zerowidth: {}", cell.text);
+                        continue;
+                    }
+                    let width = if cell.double_width { 2. } else { 1. };
                     let width = metrics.charwidth() * width * PANGO_SCALE;
                     let width = width.ceil() as i32;
                     let geometry = &mut glyph.geometry;
+                    log::trace!("{} char-cell {:?}", index, cell);
                     if geometry.width > 0 && geometry.width != width {
                         let x_offset = if isfirst {
                             geometry.x_offset
@@ -349,18 +392,17 @@ mod imp {
                         };
                         let y_offset = geometry.y_offset
                             - (logical_rect.height / pango::SCALE - metrics.height() as i32) / 2;
-                        isfirst = false;
                         // 啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊
                         log::debug!(
-                            "adjusting ({})  width {}->{}  x-offset {}->{} y-offset {} -> {}",
-                            // lineno,
+                            "adjusting ({})  width {}->{}  x-offset {}->{} y-offset {} -> {} is-start-char {}",
                             c,
                             geometry.width,
                             width,
                             geometry.x_offset,
                             x_offset,
                             geometry.y_offset,
-                            y_offset
+                            y_offset,
+                            isfirst
                         );
                         geometry.width = width;
                         geometry.x_offset = x_offset;

@@ -374,7 +374,7 @@ impl AppUpdate for AppModel {
                                     .vimcursor
                                     .send(CursorMessage::SetCell(cell))
                                     .expect("Send to cursor failed.");
-                                log::warn!("Sending set cursor cell.");
+                                log::trace!("set cursor cell.");
                             } else {
                                 log::error!(
                                     "cursor pos {}x{} of grid {} dose not exists.",
