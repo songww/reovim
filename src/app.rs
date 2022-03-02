@@ -2,12 +2,11 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{atomic, Arc};
 
+use gtk::gdk;
 use gtk::gdk::prelude::FontMapExt;
-use gtk::gdk::{self, ScrollDirection};
-use gtk::prelude::{
-    BoxExt, DrawingAreaExt, DrawingAreaExtManual, EventControllerExt, GtkWindowExt, IMContextExt,
-    IMContextExtManual, IMMulticontextExt, OrientableExt, StyleContextExt, WidgetExt,
-};
+use gtk::gdk::ScrollDirection;
+use gtk::prelude::*;
+
 use once_cell::sync::{Lazy, OnceCell};
 use pango::FontDescription;
 use parking_lot::RwLock;
@@ -15,19 +14,19 @@ use relm4::factory::FactoryVec;
 use relm4::*;
 use rustc_hash::FxHashMap;
 
+use crate::bridge;
 use crate::bridge::{
-    EditorMode, MessageKind, MouseButton, ParallelCommand, SerialCommand, WindowAnchor,
+    EditorMode, MessageKind, MouseButton, ParallelCommand, RedrawEvent, SerialCommand, UiCommand,
+    WindowAnchor,
 };
 use crate::components::{VimCmdEvent, VimCmdPrompts};
-use crate::cursor::{Cursor, CursorMode, CursorShape};
+use crate::cursor::{CursorMessage, CursorMode, VimCursor};
 use crate::event_aggregator::EVENT_AGGREGATOR;
+use crate::grapheme::Coord;
 use crate::keys::ToInput;
+use crate::metrics::Metrics;
 use crate::vimview::{self, VimGrid, VimMessage};
-use crate::{
-    bridge::{self, RedrawEvent, UiCommand},
-    metrics::Metrics,
-    Opts,
-};
+use crate::Opts;
 
 #[allow(non_upper_case_globals)]
 pub static GridActived: Lazy<Arc<atomic::AtomicU64>> =
@@ -66,10 +65,11 @@ pub struct AppModel {
     pub mode: EditorMode,
 
     pub mouse_on: Rc<atomic::AtomicBool>,
-    pub cursor: Rc<RefCell<Cursor>>,
+    pub cursor_grid: u64,
+    pub cursor_coord: Coord,
+    pub cursor_coord_changed: atomic::AtomicBool,
     pub cursor_mode: usize,
     pub cursor_modes: Vec<CursorMode>,
-    pub cursor_changed: atomic::AtomicBool,
 
     pub pctx: Rc<pango::Context>,
     pub gtksettings: OnceCell<gtk::Settings>,
@@ -116,10 +116,11 @@ impl AppModel {
             mode: EditorMode::Normal,
 
             mouse_on: Rc::new(false.into()),
-            cursor: Rc::new(RefCell::new(Cursor::new())),
+            cursor_grid: 0,
             cursor_mode: 0,
             cursor_modes: Vec::new(),
-            cursor_changed: atomic::AtomicBool::new(false),
+            cursor_coord: Coord::default(),
+            cursor_coord_changed: atomic::AtomicBool::new(false),
 
             pctx: pangocairo::FontMap::default()
                 .unwrap()
@@ -292,6 +293,8 @@ impl AppUpdate for AppModel {
                                     .for_each(|(_, vgrid)| vgrid.reset_cache());
 
                                 self.font_changed.store(true, atomic::Ordering::Relaxed);
+                                self.cursor_coord_changed
+                                    .store(true, atomic::Ordering::Relaxed);
                             }
                         }
                         bridge::GuiOption::GuiFontSet(guifontset) => {
@@ -358,21 +361,23 @@ impl AppUpdate for AppModel {
                             .textbuf()
                             .borrow()
                             .set_cells(row as _, column_start as _, &cells);
-                        let row = row as f64;
-                        let leftop = vgrid.coord();
-                        let mut cursor = self.cursor.borrow_mut();
-                        let coord = cursor.coord();
-                        let cursor_grid = cursor.grid();
-                        if cursor_grid == grid && coord.row == leftop.row + row {
-                            let row = (coord.row - leftop.row).floor() as usize;
-                            let col = (coord.col - leftop.col).floor() as usize;
-                            if let Some(cell) = vgrid.textbuf().borrow().cell(row, col) {
-                                cursor.set_cell(cell);
-                                self.cursor_changed.store(true, atomic::Ordering::Relaxed);
+                        let row = row as usize;
+                        let coord = &self.cursor_coord;
+                        let cursor_grid = self.cursor_grid;
+                        if cursor_grid == grid {
+                            if let Some(cell) = vgrid
+                                .textbuf()
+                                .borrow()
+                                .cell(coord.row.floor() as usize, coord.col.floor() as usize)
+                            {
+                                components
+                                    .vimcursor
+                                    .send(CursorMessage::SetCell(cell))
+                                    .expect("Send to cursor failed.");
                             } else {
                                 log::error!(
                                     "cursor pos {}x{} of grid {} dose not exists.",
-                                    col,
+                                    coord.col,
                                     row,
                                     grid
                                 );
@@ -401,23 +406,20 @@ impl AppUpdate for AppModel {
                             // rows and columns are both zero.
                             unimplemented!("could not be there.");
                         }
-                        let mut cursor = self.cursor.borrow_mut();
-                        let cursor_grid = cursor.grid();
+                        let cursor_grid = self.cursor_grid;
                         log::debug!("scrolling grid {} cursor at {}", grid, cursor_grid);
                         if cursor_grid == grid {
-                            let leftop = vgrid.coord();
-                            let coord = cursor.coord();
+                            let coord = &self.cursor_coord;
                             let cell = vgrid
                                 .textbuf()
                                 .borrow()
-                                .cell(
-                                    (coord.row - leftop.row).floor() as usize,
-                                    (coord.col - leftop.col).floor() as usize,
-                                )
+                                .cell((coord.row).floor() as usize, (coord.col).floor() as usize)
                                 .unwrap();
                             log::debug!("cursor character change to {}", cell.text);
-                            cursor.set_cell(cell);
-                            self.cursor_changed.store(true, atomic::Ordering::Relaxed);
+                            components
+                                .vimcursor
+                                .send(CursorMessage::SetCell(cell))
+                                .expect("Send to cursor failed.");
                         }
                     }
                     RedrawEvent::Resize {
@@ -546,7 +548,6 @@ impl AppUpdate for AppModel {
                         let row = row as usize;
                         let column = column as usize;
                         if let Some(cell) = vgrid.textbuf().borrow().cell(row, column) {
-                            // let metrics = self.metrics.get();
                             log::debug!(
                                 "cursor goto {}x{} of grid {}, grid at {}x{}",
                                 column,
@@ -555,11 +556,15 @@ impl AppUpdate for AppModel {
                                 leftop.col,
                                 leftop.row
                             );
-                            // let x = metrics.width() * column as f64 + vgrid_pos.x;
-                            // let y = metrics.height() * row as f64 + vgrid_pos.y;
-                            let mut cursor = self.cursor.borrow_mut();
-                            cursor.set_cell(cell.clone());
-                            cursor.set_coord(leftop.col + column as f64, leftop.row + row as f64);
+                            let coord =
+                                (leftop.col + column as f64, leftop.row + row as f64).into();
+                            self.cursor_grid = grid;
+                            self.cursor_coord.col = column as _;
+                            self.cursor_coord.row = row as _;
+                            components
+                                .vimcursor
+                                .send(CursorMessage::Goto(grid, coord, cell))
+                                .expect("Send to cursor failed.");
                         } else {
                             log::warn!(
                                 "Cursor pos {}x{} of grid {} dose not exists",
@@ -568,26 +573,28 @@ impl AppUpdate for AppModel {
                                 grid
                             );
                         }
-                        self.cursor.borrow_mut().set_grid(grid);
-                        self.cursor_changed.store(true, atomic::Ordering::Relaxed);
+                        self.cursor_coord_changed
+                            .store(true, atomic::Ordering::Relaxed);
+                        self.cursor_grid = grid;
                     }
                     RedrawEvent::ModeInfoSet { cursor_modes } => {
                         self.cursor_modes = cursor_modes;
-                        self.cursor_changed.store(true, atomic::Ordering::Relaxed);
 
-                        let mode = &self.cursor_modes[self.cursor_mode];
-                        let style = self.hldefs.read();
-                        self.cursor.borrow_mut().change_mode(mode, &style);
+                        let mode = self.cursor_modes.get(self.cursor_mode).unwrap().clone();
+                        components
+                            .vimcursor
+                            .send(CursorMessage::SetMode(mode))
+                            .expect("Send to cursor failed.");
                     }
                     RedrawEvent::ModeChange { mode, mode_index } => {
                         self.mode = mode;
                         self.cursor_mode = mode_index as _;
-                        self.cursor_changed.store(true, atomic::Ordering::Relaxed);
-                        let cursor_mode = &self.cursor_modes[self.cursor_mode];
+                        let cursor_mode = self.cursor_modes.get(self.cursor_mode).unwrap().clone();
                         log::debug!("Mode Change to {:?} {:?}", &self.mode, cursor_mode);
-                        let style = self.hldefs.read();
-
-                        self.cursor.borrow_mut().change_mode(cursor_mode, &style);
+                        components
+                            .vimcursor
+                            .send(CursorMessage::SetMode(cursor_mode))
+                            .expect("Send to cursor failed.");
                     }
                     RedrawEvent::BusyStart => {
                         log::debug!("Ignored BusyStart.");
@@ -780,6 +787,7 @@ impl AppUpdate for AppModel {
 pub struct AppComponents {
     _messager: relm4::RelmMsgHandler<crate::messager::VimMessager, AppModel>,
     cmd_prompt: RelmComponent<VimCmdPrompts, AppModel>,
+    vimcursor: RelmComponent<VimCursor, AppModel>,
 }
 
 #[relm_macros::widget(pub)]
@@ -853,105 +861,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
                         set_hexpand: false,
                         set_vexpand: false,
                     },
-                    add_overlay: cursor_drawing_area = &gtk::DrawingArea {
-                        set_widget_name: "cursor",
-                        set_visible: true,
-                        set_hexpand: true,
-                        set_vexpand: true,
-                        set_can_focus: false,
-                        set_sensitive: false,
-                        set_focus_on_click: false,
-                        set_css_classes: &["blink"],
-                        set_draw_func[hldefs = model.hldefs.clone(),
-                                      cursor = model.cursor.clone(),
-                                      metrics = model.metrics.clone(),
-                                      pctx = model.pctx.clone()] => move |da, cr, _, _| {
-                            da.remove_css_class("blink");
-                            let cursor = cursor.borrow();
-                            let blinkon = cursor.blinkon().filter(|blinkon| *blinkon > 0);
-                            let blinkoff = cursor.blinkoff().filter(|blinkoff| *blinkoff > 0);
-                            let blinkwait = cursor.blinkwait().filter(|blinkwait| *blinkwait > 0);
-                            if let (Some(blinkon), Some(blinkoff), Some(blinkwait)) = (blinkon, blinkoff, blinkwait) {
-                                let css = format!(".blink {{
-  animation-name: blinking;
-  animation-delay: {}ms;
-  animation-duration: {}ms;
-  animation-iteration-count: infinite;
-  animation-timing-function: steps(2, start);
-}}
-
-@keyframes blinking {{
-  {}% {{ opacity: 0; }}
-}}
-",
-                                    blinkwait,
-                                    blinkon + blinkoff,
-                                    blinkon * 100 / (blinkon + blinkoff)
-                                );
-                                let context = da.style_context();
-                                let provider = gtk::CssProvider::new();
-                                provider.load_from_data(css.as_bytes());
-                                // FIXME: add once.
-                                context.add_provider(&provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
-                                log::debug!("css {} {}: \n{}", blinkon, blinkoff, &css);
-                                da.add_css_class("blink");
-                            }
-                            let hldefs = hldefs.read();
-                            let default_colors = hldefs.defaults().unwrap();
-                            let bg = cursor.background(default_colors);
-                            let fg = cursor.foreground(default_colors);
-                            let cell = cursor.cell();
-                            let metrics = metrics.get();
-                            let (x, y, width, height)  = cursor.rectangle(metrics.width(), metrics.height());
-                            log::debug!("drawing cursor at {}x{}.", x, y);
-                            match cursor.shape {
-                                CursorShape::Block => {
-                                    use pango::AttrType;
-                                    let attrs = pango::AttrList::new();
-                                    cell.attrs.iter().filter_map(|attr| {
-                                        match attr.type_() {
-                                            AttrType::Family | AttrType::Style | AttrType::Weight | AttrType::Variant | AttrType::Underline | AttrType::Strikethrough | AttrType::Overline => {
-                                                let mut attr = attr.clone();
-                                                attr.set_start_index(0);
-                                                attr.set_end_index(pango::ATTR_INDEX_TO_TEXT_END);
-                                                Some(attr)
-                                            },
-                                            _ => None
-                                        }
-                                    }).for_each(|attr| attrs.insert(attr));
-                                    log::debug!("cursor cell '{}' wide {}", cell.text, cursor.width);
-                                    let itemized = &pango::itemize(&pctx, &cell.text, 0, cell.text.len() as _, &attrs, None)[0];
-                                    let mut glyph_string = pango::GlyphString::new();
-                                    pango::shape(&cell.text, itemized.analysis(), &mut glyph_string);
-                                    let glyphs = glyph_string.glyph_info_mut();
-                                    assert_eq!(glyphs.len(), 1);
-                                    let geometry = glyphs[0].geometry_mut();
-                                    let width = (metrics.width() * cursor.width).ceil() as i32;
-                                    if geometry.width() > 0 && geometry.width() != width {
-                                        let x_offset =geometry.x_offset() - (geometry.width() - width) / 2;
-                                        geometry.set_width(width);
-                                        geometry.set_x_offset(x_offset);
-                                        log::debug!("cursor glyph width {}", width);
-                                    }
-                                    // 试试汉字
-                                    cr.save().unwrap();
-                                    cr.rectangle(x, y, width as f64, metrics.height());
-                                    cr.set_source_rgba(bg.red() as f64, bg.green() as f64, bg.blue() as f64, bg.alpha() as f64);
-                                    cr.fill().unwrap();
-                                    cr.restore().unwrap();
-                                    cr.set_source_rgba(fg.red() as f64, fg.green() as f64, fg.blue() as f64, fg.alpha() as f64);
-                                    cr.move_to(x + geometry.width() as f64 / 2., y + metrics.ascent());
-                                    pangocairo::show_glyph_string(cr, &itemized.analysis().font(), &mut glyph_string);
-                                }
-                                _ => {
-                                    log::debug!("drawing cursor with {}x{}", width, height);
-                                    cr.set_source_rgba(bg.red() as f64, bg.green() as f64, bg.blue() as f64, bg.alpha() as f64);
-                                    cr.rectangle(x, y, width, height);
-                                    cr.fill().unwrap();
-                                }
-                            }
-                        }
-                    },
+                    add_overlay: components.vimcursor.root_widget(),
                     add_overlay: messages_container = &gtk::Box {
                         set_widget_name: "messages-container",
                         set_opacity: 0.95,
@@ -973,7 +883,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
             },
             connect_close_request[sender = sender.clone()] => move |_| {
                 sender.send(AppMessage::UiCommand(UiCommand::Parallel(ParallelCommand::Quit))).ok();
-                gtk::Inhibit(false)
+                gtk::Inhibit(true)
             },
         }
     }
@@ -1110,23 +1020,25 @@ impl Widgets<AppModel, ()> for AppWidgets {
         ) {
             self.da.queue_draw();
         }
-        if let Ok(true) = model.cursor_changed.compare_exchange(
+        if let Ok(true) = model.cursor_coord_changed.compare_exchange(
             true,
             false,
             atomic::Ordering::Acquire,
             atomic::Ordering::Relaxed,
         ) {
+            let coord = &model.cursor_coord;
             let metrics = model.metrics.get();
-            let cursor = model.cursor.borrow();
-            let coord = cursor.coord();
-            let (x, y) = (coord.col * metrics.width(), coord.row * metrics.height());
-            unsafe { model.im_context.get_unchecked() }.set_cursor_location(&gdk::Rectangle::new(
-                x as i32,
-                y as i32,
-                metrics.width() as i32,
-                metrics.height() as i32,
-            ));
-            self.cursor_drawing_area.queue_draw();
+            if let Some(base) = model.vgrids.get(model.cursor_grid).map(|vg| vg.coord()) {
+                let (col, row) = (base.col + coord.col, base.row + coord.row);
+                let (x, y) = (col * metrics.width(), row * metrics.height());
+                let rect = gdk::Rectangle::new(
+                    x as i32,
+                    y as i32,
+                    metrics.width() as i32,
+                    metrics.height() as i32,
+                );
+                unsafe { model.im_context.get_unchecked() }.set_cursor_location(&rect);
+            }
         }
         if let Ok(true) = model.font_changed.compare_exchange(
             true,

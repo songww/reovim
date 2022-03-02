@@ -1,6 +1,6 @@
 use relm4::factory::positions::FixedPosition;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Coord {
     pub col: f64,
     pub row: f64,

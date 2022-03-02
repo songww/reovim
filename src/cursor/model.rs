@@ -1,6 +1,13 @@
+use std::cell::Cell;
+use std::rc::Rc;
+
+use glib::ffi::g_unichar_iszerowidth;
+use glib::translate::from_glib;
+use parking_lot::RwLock;
+
 use crate::color::Color;
 use crate::grapheme::Coord;
-use crate::style::{Colors, Style};
+use crate::metrics::Metrics;
 use crate::vimview::{HighlightDefinitions, TextCell};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -43,14 +50,22 @@ pub struct Cursor {
     pub blinkwait: Option<u64>,
     pub blinkon: Option<u64>,
     pub blinkoff: Option<u64>,
-    pub style: Option<Style>,
+    pub style: Option<u64>,
     pub enabled: bool,
     pub width: f64,
     pub cell: TextCell,
+
+    pub pctx: Rc<pango::Context>,
+    pub metrics: Rc<Cell<Metrics>>,
+    pub hldefs: Rc<RwLock<HighlightDefinitions>>,
 }
 
 impl Cursor {
-    pub fn new() -> Cursor {
+    pub fn new(
+        pctx: Rc<pango::Context>,
+        metrics: Rc<Cell<Metrics>>,
+        hldefs: Rc<RwLock<HighlightDefinitions>>,
+    ) -> Cursor {
         Cursor {
             grid: 0,
             coord: (0, 0).into(),
@@ -63,6 +78,10 @@ impl Cursor {
             enabled: true,
             width: 1.,
             cell: TextCell::default(),
+
+            pctx,
+            hldefs,
+            metrics,
         }
     }
 
@@ -95,8 +114,11 @@ impl Cursor {
         }
     }
 
-    pub fn foreground(&self, default_colors: &Colors) -> Color {
-        if let Some(style) = &self.style {
+    pub fn foreground(&self) -> Color {
+        let hldefs = self.hldefs.read();
+        let default_colors = hldefs.defaults().unwrap();
+        if let Some(style_id) = self.style.filter(|&s| s != HighlightDefinitions::DEFAULT) {
+            let style = hldefs.get(style_id).unwrap();
             style
                 .colors
                 .foreground
@@ -106,18 +128,27 @@ impl Cursor {
         }
     }
 
-    pub fn background(&self, default_colors: &Colors) -> Color {
-        if let Some(style) = &self.style {
-            let alpha = (100 - style.blend) as f32 / 100.;
-            let mut color = style
-                .colors
-                .background
-                .unwrap_or_else(|| default_colors.foreground.unwrap());
-            color.set_alpha(alpha);
-            color
-        } else {
-            default_colors.foreground.unwrap()
-        }
+    pub fn background(&self) -> Color {
+        let hldefs = self.hldefs.read();
+        let default_colors = hldefs.defaults().unwrap();
+        let (mut color, blend) =
+            if let Some(style_id) = self.style.filter(|&s| s != HighlightDefinitions::DEFAULT) {
+                let style = hldefs.get(style_id).unwrap();
+                let color = style
+                    .colors
+                    .background
+                    .unwrap_or_else(|| default_colors.foreground.unwrap());
+                (color, style.blend)
+            } else {
+                let blend = hldefs
+                    .get(HighlightDefinitions::DEFAULT)
+                    .map(|s| s.blend)
+                    .unwrap_or(100);
+                (default_colors.foreground.unwrap(), blend)
+            };
+        let alpha = (100 - blend) as f32 / 100.;
+        color.set_alpha(alpha);
+        color
     }
 
     pub fn blinkon(&self) -> Option<u64> {
@@ -144,10 +175,6 @@ impl Cursor {
         &self.coord
     }
 
-    // pub fn coord(&self) -> (usize, usize) {
-    //     self.coord
-    // }
-
     pub fn set_coord(&mut self, cols: f64, rows: f64) {
         self.coord = (cols, rows).into();
     }
@@ -157,7 +184,7 @@ impl Cursor {
     }
 
     pub fn set_cell(&mut self, cell: TextCell) {
-        // let character = cell.text.chars().next().unwrap();
+        let character = cell.text.chars().next().unwrap();
         // let width = unsafe {
         //     if from_glib(g_unichar_iswide(character as u32))
         //         || from_glib(g_unichar_iswide_cjk(character as u32))
@@ -172,7 +199,7 @@ impl Cursor {
         // };
         let width = if cell.double_width {
             2.
-        } else if cell.text.is_empty() {
+        } else if unsafe { from_glib(g_unichar_iszerowidth(character as u32)) } {
             0.
         } else {
             1.
@@ -181,6 +208,42 @@ impl Cursor {
         self.width = width;
     }
 
+    pub fn set_mode(&mut self, cursor_mode: CursorMode) {
+        let CursorMode {
+            shape,
+            style,
+            cell_percentage,
+            blinkwait,
+            blinkon,
+            blinkoff,
+        } = cursor_mode;
+
+        if let Some(shape) = shape {
+            self.shape = shape.clone();
+        }
+
+        self.style = style;
+        /*
+        if let Some(style) = style {
+            if *style == HighlightDefinitions::DEFAULT {
+                let mut style = styles.get(*style).cloned().unwrap();
+                let bg = style.colors.background;
+                let fg = style.colors.foreground;
+                style.colors.foreground = bg;
+                style.colors.background = fg;
+                self.style.replace(style);
+            } else {
+                self.style = styles.get(*style).cloned();
+            }
+        }*/
+
+        self.cell_percentage = cell_percentage;
+        self.blinkwait = blinkwait;
+        self.blinkon = blinkon;
+        self.blinkoff = blinkoff;
+    }
+
+    /*
     pub fn change_mode(&mut self, cursor_mode: &CursorMode, styles: &HighlightDefinitions) {
         let CursorMode {
             shape,
@@ -213,6 +276,7 @@ impl Cursor {
         self.blinkon = *blinkon;
         self.blinkoff = *blinkoff;
     }
+    */
 }
 
 #[cfg(test)]

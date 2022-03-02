@@ -1,4 +1,3 @@
-mod blink;
 mod cursor_vfx;
 
 use rustc_hash::FxHashMap;
@@ -11,8 +10,6 @@ use crate::{
     renderer::{GridRenderer, RenderedWindow},
     settings::{ParseFromValue, SETTINGS},
 };
-
-use blink::*;
 
 const DEFAULT_CELL_PERCENTAGE: f32 = 1.0 / 8.0;
 
