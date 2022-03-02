@@ -1,9 +1,8 @@
-use log::error;
-use nvim_rs::Value;
-use skia_safe::{paint::Style, BlendMode, Canvas, Color, Paint, Point, Rect};
+use grapheme::Point;
+use nvim::Value;
 
+use super::cursor::Cursor;
 use crate::{
-    editor::Cursor,
     renderer::cursor_renderer::CursorSettings,
     renderer::{animation_utils::*, grid_renderer::GridRenderer},
     settings::*,
@@ -60,12 +59,12 @@ impl ParseFromValue for VfxMode {
                 "pixiedust" => VfxMode::Trail(TrailMode::PixieDust),
                 "" => VfxMode::Disabled,
                 value => {
-                    error!("Expected a VfxMode name, but received {:?}", value);
+                    log::error!("Expected a VfxMode name, but received {:?}", value);
                     return;
                 }
             };
         } else {
-            error!("Expected a VfxMode string, but received {:?}", value);
+            log::error!("Expected a VfxMode string, but received {:?}", value);
         }
     }
 }

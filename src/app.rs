@@ -364,7 +364,7 @@ impl AppUpdate for AppModel {
                         let row = row as usize;
                         let coord = &self.cursor_coord;
                         let cursor_grid = self.cursor_grid;
-                        if cursor_grid == grid {
+                        if cursor_grid == grid && row as f64 == coord.row {
                             if let Some(cell) = vgrid
                                 .textbuf()
                                 .borrow()
@@ -374,6 +374,7 @@ impl AppUpdate for AppModel {
                                     .vimcursor
                                     .send(CursorMessage::SetCell(cell))
                                     .expect("Send to cursor failed.");
+                                log::warn!("Sending set cursor cell.");
                             } else {
                                 log::error!(
                                     "cursor pos {}x{} of grid {} dose not exists.",
@@ -705,7 +706,7 @@ impl AppUpdate for AppModel {
                         focusable,
                         sort_order: _,
                     } => {
-                        log::debug!(
+                        log::info!(
                             "grid {} is float window exists in vgrids {} anchor {} {:?} pos {}x{} focusable {}",
                             grid,
                             self.vgrids.get(grid).is_some(),
@@ -718,7 +719,7 @@ impl AppUpdate for AppModel {
                         // 避免负值,导致窗口溢出
                         let anchor_column = anchor_column.max(0.);
                         let anchor_row = anchor_row.max(0.);
-                        log::debug!("after clamp {}x{}", anchor_column, anchor_row);
+                        log::info!("after clamp {}x{}", anchor_column, anchor_row);
                         let coord = self.vgrids.get(anchor_grid).unwrap().coord().clone();
                         // let (left, top) = (basepos.x, basepos.y);
 
@@ -741,7 +742,7 @@ impl AppUpdate for AppModel {
                         // let metrics = self.metrics.get();
                         // let x = col * metrics.width();
                         // let y = row * metrics.height();
-                        log::debug!("moving float window {} to {}x{}", grid, col, row);
+                        log::info!("moving float window {} to {}x{}", grid, col, row);
                         vgrid.set_coord(coord.col + col, coord.row + row);
                         vgrid.set_is_float(true);
                         vgrid.set_focusable(focusable);

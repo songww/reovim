@@ -1,7 +1,6 @@
-mod cursor_vfx;
-
 use rustc_hash::FxHashMap;
 
+use super::vfx;
 use crate::{
     bridge::EditorMode,
     editor::{Cursor, CursorShape},
@@ -164,11 +163,10 @@ pub struct CursorRenderer {
     pub corners: Vec<Corner>,
     cursor: Cursor,
     destination: Point,
-    blink_status: BlinkStatus,
     previous_cursor_shape: Option<CursorShape>,
     previous_editor_mode: EditorMode,
-    cursor_vfx: Option<Box<dyn cursor_vfx::CursorVfx>>,
-    previous_vfx_mode: cursor_vfx::VfxMode,
+    cursor_vfx: Option<Box<dyn vfx::CursorVfx>>,
+    previous_vfx_mode: vfx::VfxMode,
 }
 
 impl CursorRenderer {
@@ -254,7 +252,7 @@ impl CursorRenderer {
         &mut self,
         grid_renderer: &mut GridRenderer,
         current_mode: &EditorMode,
-        canvas: &mut Canvas,
+        canvas: &cairo::Context,
         dt: f32,
     ) {
         let render = self.blink_status.update_status(&self.cursor);

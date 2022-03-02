@@ -34,6 +34,8 @@ pub struct VimGrid {
     textbuf: TextBuf,
 
     visible: bool,
+
+    animation: Option<adw::TimedAnimation>,
 }
 
 impl VimGrid {
@@ -66,6 +68,7 @@ impl VimGrid {
             textbuf,
             visible: true,
             font_description,
+            animation: None,
         }
     }
 
@@ -190,8 +193,6 @@ impl factory::FactoryPrototype for VimGrid {
                 set_font_description: &self.font_description.borrow(),
 
                 set_css_classes: &["vim-view-grid", &format!("vim-view-grid-{}", self.grid)],
-
-                // inline_css: b"border: 1px solid @borders;",
             }
         }
 

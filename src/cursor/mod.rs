@@ -1,8 +1,9 @@
-mod model;
+mod cursor;
+// mod state;
+// mod vfx;
 
+pub use cursor::{Cursor as VimCursor, CursorMode, CursorShape};
 use gtk::prelude::{StyleContextExt, WidgetExt};
-pub use model::Cursor as VimCursor;
-pub use model::{CursorMode, CursorShape};
 
 use relm4::drawing::DrawContext;
 use relm4::{ComponentUpdate, Model, Sender, Widgets};
@@ -84,6 +85,8 @@ impl Widgets<VimCursor, AppModel> for CursorWidgets {
     }
 
     fn pre_view() {
+        log::trace!("start cursor view.");
+        let instant = std::time::Instant::now();
         self.da.set_opacity(1.);
         self.da.remove_css_class("blink");
         self.da.style_context().remove_provider(&self.provider);
@@ -99,6 +102,10 @@ impl Widgets<VimCursor, AppModel> for CursorWidgets {
                 .add_provider(&self.provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
             self.da.add_css_class("blink");
         }
+        log::trace!(
+            "cursor view used {:.3}ms",
+            instant.elapsed().as_secs_f32() * 1000.
+        );
     }
 }
 
