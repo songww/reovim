@@ -20,7 +20,7 @@ use crate::bridge::{
     WindowAnchor,
 };
 use crate::components::{VimCmdEvent, VimCmdPrompts};
-use crate::cursor::{CursorMessage, CursorMode, VimCursor};
+use crate::cursor::{CursorMode, VimCursor};
 use crate::event_aggregator::EVENT_AGGREGATOR;
 use crate::grapheme::Coord;
 use crate::keys::ToInput;
@@ -65,6 +65,7 @@ pub struct AppModel {
     pub mode: EditorMode,
 
     pub mouse_on: Rc<atomic::AtomicBool>,
+    pub cursor: MicroComponent<VimCursor>,
     pub cursor_grid: u64,
     pub cursor_coord: Coord,
     pub cursor_coord_changed: atomic::AtomicBool,
@@ -103,6 +104,26 @@ impl AppModel {
             .unwrap();
         let font_desc = FontDescription::from_string("monospace 11");
         let size = Rc::new(Cell::new((opts.width, opts.height)));
+        let pctx: Rc<pango::Context> = pangocairo::FontMap::default()
+            .unwrap()
+            .create_context()
+            .map(|ctx| {
+                ctx.set_round_glyph_positions(false);
+                ctx.set_font_description(&font_desc);
+                ctx.set_base_dir(pango::Direction::Ltr);
+                ctx.set_language(&pango::Language::default());
+                let mut options = cairo::FontOptions::new().ok();
+                options.as_mut().map(|options| {
+                    options.set_antialias(cairo::Antialias::Subpixel);
+                    options.set_hint_style(cairo::HintStyle::Full);
+                });
+                pangocairo::context_set_font_options(&ctx, options.as_ref());
+                ctx
+            })
+            .unwrap()
+            .into();
+        let hldefs = Rc::new(RwLock::new(vimview::HighlightDefinitions::new()));
+        let metrics = Rc::new(Metrics::new().into());
         AppModel {
             size,
             title: opts.title.clone(),
@@ -116,38 +137,25 @@ impl AppModel {
             mode: EditorMode::Normal,
 
             mouse_on: Rc::new(false.into()),
+            cursor: MicroComponent::new(
+                VimCursor::new(pctx.clone(), Rc::clone(&metrics), hldefs.clone()),
+                (),
+            ),
             cursor_grid: 0,
             cursor_mode: 0,
             cursor_modes: Vec::new(),
             cursor_coord: Coord::default(),
             cursor_coord_changed: atomic::AtomicBool::new(false),
 
-            pctx: pangocairo::FontMap::default()
-                .unwrap()
-                .create_context()
-                .map(|ctx| {
-                    ctx.set_round_glyph_positions(true);
-                    ctx.set_font_description(&font_desc);
-                    ctx.set_base_dir(pango::Direction::Ltr);
-                    ctx.set_language(&pango::Language::default());
-                    let mut options = cairo::FontOptions::new().ok();
-                    options.as_mut().map(|options| {
-                        options.set_antialias(cairo::Antialias::Subpixel);
-                        options.set_hint_style(cairo::HintStyle::Full);
-                    });
-                    pangocairo::context_set_font_options(&ctx, options.as_ref());
-                    ctx
-                })
-                .unwrap()
-                .into(),
+            pctx,
             gtksettings: OnceCell::new(),
             im_context: OnceCell::new(),
 
-            metrics: Rc::new(Metrics::new().into()),
+            metrics,
             font_description: Rc::new(RefCell::new(font_desc)),
             font_changed: Rc::new(false.into()),
 
-            hldefs: Rc::new(RwLock::new(vimview::HighlightDefinitions::new())),
+            hldefs,
             hlgroups: Rc::new(RwLock::new(FxHashMap::default())),
 
             background_changed: Rc::new(false.into()),
@@ -370,10 +378,11 @@ impl AppUpdate for AppModel {
                                 .borrow()
                                 .cell(coord.row.floor() as usize, coord.col.floor() as usize)
                             {
-                                components
-                                    .vimcursor
-                                    .send(CursorMessage::SetCell(cell))
-                                    .expect("Send to cursor failed.");
+                                self.cursor
+                                    .model_mut()
+                                    .map(|mut m| m.set_cell(cell))
+                                    .unwrap();
+                                self.cursor.update_view().unwrap();
                                 log::trace!("set cursor cell.");
                             } else {
                                 log::error!(
@@ -417,10 +426,11 @@ impl AppUpdate for AppModel {
                                 .cell((coord.row).floor() as usize, (coord.col).floor() as usize)
                                 .unwrap();
                             log::debug!("cursor character change to {}", cell.text);
-                            components
-                                .vimcursor
-                                .send(CursorMessage::SetCell(cell))
-                                .expect("Send to cursor failed.");
+                            self.cursor
+                                .model_mut()
+                                .map(|mut m| m.set_cell(cell))
+                                .unwrap();
+                            self.cursor.update_view().unwrap();
                         }
                     }
                     RedrawEvent::Resize {
@@ -557,15 +567,20 @@ impl AppUpdate for AppModel {
                                 leftop.col,
                                 leftop.row
                             );
-                            let coord =
+                            let coord: Coord =
                                 (leftop.col + column as f64, leftop.row + row as f64).into();
                             self.cursor_grid = grid;
                             self.cursor_coord.col = column as _;
                             self.cursor_coord.row = row as _;
-                            components
-                                .vimcursor
-                                .send(CursorMessage::Goto(grid, coord, cell))
-                                .expect("Send to cursor failed.");
+                            self.cursor
+                                .model_mut()
+                                .map(|mut m| {
+                                    m.set_cell(cell);
+                                    m.set_grid(grid);
+                                    m.set_coord(coord);
+                                })
+                                .unwrap();
+                            self.cursor.update_view().unwrap();
                         } else {
                             log::warn!(
                                 "Cursor pos {}x{} of grid {} dose not exists",
@@ -582,20 +597,26 @@ impl AppUpdate for AppModel {
                         self.cursor_modes = cursor_modes;
 
                         let mode = self.cursor_modes.get(self.cursor_mode).unwrap().clone();
-                        components
-                            .vimcursor
-                            .send(CursorMessage::SetMode(mode))
-                            .expect("Send to cursor failed.");
+                        self.cursor
+                            .model_mut()
+                            .map(|mut m| {
+                                m.set_mode(mode);
+                            })
+                            .unwrap();
+                        self.cursor.update_view().unwrap();
                     }
                     RedrawEvent::ModeChange { mode, mode_index } => {
                         self.mode = mode;
                         self.cursor_mode = mode_index as _;
                         let cursor_mode = self.cursor_modes.get(self.cursor_mode).unwrap().clone();
                         log::debug!("Mode Change to {:?} {:?}", &self.mode, cursor_mode);
-                        components
-                            .vimcursor
-                            .send(CursorMessage::SetMode(cursor_mode))
-                            .expect("Send to cursor failed.");
+                        self.cursor
+                            .model_mut()
+                            .map(|mut m| {
+                                m.set_mode(cursor_mode);
+                            })
+                            .unwrap();
+                        self.cursor.update_view().unwrap();
                     }
                     RedrawEvent::BusyStart => {
                         log::debug!("Ignored BusyStart.");
@@ -743,7 +764,7 @@ impl AppUpdate for AppModel {
                         // let x = col * metrics.width();
                         // let y = row * metrics.height();
                         log::info!("moving float window {} to {}x{}", grid, col, row);
-                        vgrid.set_coord(coord.col + col, coord.row + row);
+                        vgrid.set_coord(coord.col + col.max(0.), coord.row + row.max(0.));
                         vgrid.set_is_float(true);
                         vgrid.set_focusable(focusable);
                     }
@@ -788,7 +809,6 @@ impl AppUpdate for AppModel {
 pub struct AppComponents {
     _messager: relm4::RelmMsgHandler<crate::messager::VimMessager, AppModel>,
     cmd_prompt: RelmComponent<VimCmdPrompts, AppModel>,
-    vimcursor: RelmComponent<VimCursor, AppModel>,
 }
 
 #[relm_macros::widget(pub)]
@@ -862,7 +882,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
                         set_hexpand: false,
                         set_vexpand: false,
                     },
-                    add_overlay: components.vimcursor.root_widget(),
+                    add_overlay: model.cursor.root_widget(),
                     add_overlay: messages_container = &gtk::Box {
                         set_widget_name: "messages-container",
                         set_opacity: 0.95,

@@ -6,7 +6,6 @@ mod imp {
     use glib::translate::{from_glib_none, ToGlibPtr};
     use gtk::{gdk::prelude::*, graphene::Rect, subclass::prelude::*};
     use parking_lot::RwLock;
-    use rustc_hash::FxHashMap;
 
     use crate::metrics::Metrics;
     use crate::vimview::textbuf::Lines;
@@ -135,6 +134,7 @@ mod imp {
     // Trait shared by all widgets
     impl WidgetImpl for VimGridView {
         fn snapshot(&self, widget: &Self::Type, snapshot: &gtk::Snapshot) {
+            let instant = std::time::Instant::now();
             self.parent_snapshot(widget, snapshot);
             let textbuf = self.textbuf();
             let pctx = textbuf.pango_context();
@@ -178,6 +178,7 @@ mod imp {
             for lineno in 0..rows {
                 cr.move_to(0., y);
                 y += metrics.height();
+                let ins = std::time::Instant::now();
                 let line = lines.get(lineno).unwrap();
                 let layoutline = if let Some((layout, layoutline)) = line.cache() {
                     unsafe {
@@ -193,6 +194,14 @@ mod imp {
                     layoutline
                 };
                 pangocairo::show_layout_line(&cr, &layoutline);
+                // let elapsed = ins.elapsed().as_secs_f32() * 1000.;
+                // if elapsed > 1. {
+                //     log::warn!("show layout line {} used {:.3}ms", lineno, elapsed);
+                // }
+            }
+            let elapsed = instant.elapsed().as_secs_f32() * 1000.;
+            if elapsed > 10. {
+                log::warn!("snapshot used: {:.3}ms", elapsed);
             }
         }
 
@@ -268,14 +277,17 @@ mod imp {
             let line = lines.get(lineno).unwrap();
             let cols = line.len();
             let mut text = String::new();
-            let mut indexed = FxHashMap::default();
+            let mut indexed: Vec<Option<&TextCell>> = vec![None; 128];
             let attrs = pango::AttrList::new();
             for col in 0..cols {
                 let cell = line.get(col).expect("Invalid cols and rows");
                 if cell.start_index == cell.end_index {
                     continue;
                 }
-                indexed.insert(text.len(), cell);
+                if indexed.len() <= text.len() {
+                    indexed.resize(indexed.len() * 2, None);
+                }
+                indexed[text.len()] = cell.into();
                 text.push_str(&cell.text);
                 cell.attrs
                     .clone()
@@ -339,7 +351,7 @@ mod imp {
         unsafe fn align(
             &self,
             layout: &mut pango::Layout,
-            indexed: &FxHashMap<usize, &TextCell>,
+            indexed: &Vec<Option<&TextCell>>,
             metrics: &Metrics,
         ) -> pango::LayoutLine {
             // let _baseline = pango::ffi::pango_layout_get_baseline(layout.to_glib_none().0);
@@ -372,8 +384,11 @@ mod imp {
                 for (glyph, log_cluster) in glyphs.iter_mut().zip(log_clusters) {
                     let index = ((*item).offset + log_cluster) as usize;
                     let isfirst = index == 0;
-                    let cell = indexed.get(&index).unwrap();
-                    assert!(cell.text.chars().count() == 1);
+                    let cell = indexed
+                        .get(index)
+                        .unwrap()
+                        .unwrap_or_else(|| panic!("index {} out of range, {:?}", index, &indexed));
+                    // .expect(&format!();
                     let c = cell.text.chars().next().unwrap();
                     if glib::ffi::g_unichar_iszerowidth(c as u32) == 1 {
                         log::debug!("Skipping zerowidth: {}", cell.text);

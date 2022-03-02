@@ -167,42 +167,30 @@ impl Cursor {
         &self.cell
     }
 
-    pub fn grid(&self) -> u64 {
-        self.grid
-    }
-
-    pub fn coord(&self) -> &Coord {
-        &self.coord
-    }
-
-    pub fn set_coord(&mut self, cols: f64, rows: f64) {
-        self.coord = (cols, rows).into();
-    }
-
-    pub fn set_grid(&mut self, grid: u64) {
-        self.grid = grid;
-    }
-
     pub fn set_cell(&mut self, cell: TextCell) {
-        let character = cell.text.chars().next().unwrap();
-        // let width = unsafe {
-        //     if from_glib(g_unichar_iswide(character as u32))
-        //         || from_glib(g_unichar_iswide_cjk(character as u32))
-        //     {
-        //         // if from_glib(g_unichar_iswide_cjk(character as u32)) {
-        //         2.
-        //     } else if from_glib(g_unichar_iszerowidth(character as u32)) {
-        //         0.
-        //     } else {
-        //         1.
-        //     }
-        // };
-        let width = if cell.double_width {
-            2.
-        } else if unsafe { from_glib(g_unichar_iszerowidth(character as u32)) } {
+        let width = if cell.text.is_empty() {
             0.
         } else {
-            1.
+            let character = cell.text.chars().next().unwrap();
+            // let width = unsafe {
+            //     if from_glib(g_unichar_iswide(character as u32))
+            //         || from_glib(g_unichar_iswide_cjk(character as u32))
+            //     {
+            //         // if from_glib(g_unichar_iswide_cjk(character as u32)) {
+            //         2.
+            //     } else if from_glib(g_unichar_iszerowidth(character as u32)) {
+            //         0.
+            //     } else {
+            //         1.
+            //     }
+            // };
+            if cell.double_width {
+                2.
+            } else if unsafe { from_glib(g_unichar_iszerowidth(character as u32)) } {
+                0.
+            } else {
+                1.
+            }
         };
         self.cell = cell;
         self.width = width;
@@ -223,24 +211,19 @@ impl Cursor {
         }
 
         self.style = style;
-        /*
-        if let Some(style) = style {
-            if *style == HighlightDefinitions::DEFAULT {
-                let mut style = styles.get(*style).cloned().unwrap();
-                let bg = style.colors.background;
-                let fg = style.colors.foreground;
-                style.colors.foreground = bg;
-                style.colors.background = fg;
-                self.style.replace(style);
-            } else {
-                self.style = styles.get(*style).cloned();
-            }
-        }*/
 
         self.cell_percentage = cell_percentage;
         self.blinkwait = blinkwait;
         self.blinkon = blinkon;
         self.blinkoff = blinkoff;
+    }
+
+    pub fn set_grid(&mut self, grid: u64) {
+        self.grid = grid;
+    }
+
+    pub fn set_coord(&mut self, coord: Coord) {
+        self.coord = coord;
     }
 
     /*
