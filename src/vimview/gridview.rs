@@ -178,7 +178,6 @@ mod imp {
             for lineno in 0..rows {
                 cr.move_to(0., y);
                 y += metrics.height();
-                let ins = std::time::Instant::now();
                 let line = lines.get(lineno).unwrap();
                 let layoutline = if let Some((layout, layoutline)) = line.cache() {
                     unsafe {
@@ -200,9 +199,7 @@ mod imp {
                 // }
             }
             let elapsed = instant.elapsed().as_secs_f32() * 1000.;
-            if elapsed > 10. {
-                log::warn!("snapshot used: {:.3}ms", elapsed);
-            }
+            log::debug!("snapshot used: {:.3}ms", elapsed);
         }
 
         fn measure(
