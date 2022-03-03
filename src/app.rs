@@ -7,6 +7,7 @@ use gtk::gdk::prelude::FontMapExt;
 use gtk::gdk::ScrollDirection;
 use gtk::prelude::*;
 
+use adw::prelude::*;
 use once_cell::sync::{Lazy, OnceCell};
 use pango::FontDescription;
 use parking_lot::RwLock;
@@ -38,6 +39,7 @@ pub static GridActived: Lazy<Arc<atomic::AtomicU64>> =
 #[derive(Clone, Debug)]
 pub enum AppMessage {
     Quit,
+    ShowPointer,
     UiCommand(UiCommand),
     RedrawEvent(RedrawEvent),
 }
@@ -88,6 +90,7 @@ pub struct AppModel {
     pub messages: FactoryVec<vimview::VimMessage>,
 
     pub dragging: Rc<Cell<Option<Dragging>>>,
+    pub show_pointer: atomic::AtomicBool,
 
     pub rt: tokio::runtime::Runtime,
 }
@@ -167,6 +170,7 @@ impl AppModel {
             messages: FactoryVec::new(),
 
             dragging: Rc::new(Cell::new(None)),
+            show_pointer: true.into(),
 
             opts,
 
@@ -255,7 +259,7 @@ impl AppUpdate for AppModel {
         &mut self,
         message: AppMessage,
         components: &AppComponents,
-        _sender: Sender<AppMessage>,
+        sender: Sender<AppMessage>,
     ) -> bool {
         match message {
             AppMessage::UiCommand(ui_command) => {
@@ -264,6 +268,9 @@ impl AppUpdate for AppModel {
             }
             AppMessage::Quit => {
                 return false;
+            }
+            AppMessage::ShowPointer => {
+                self.show_pointer.store(true, atomic::Ordering::Relaxed);
             }
             AppMessage::RedrawEvent(event) => {
                 match event {
@@ -443,7 +450,7 @@ impl AppUpdate for AppModel {
                         width,
                         height,
                     } => {
-                        log::debug!("Resizing grid {} to {}x{}.", grid, width, height);
+                        log::info!("Resizing grid {} to {}x{}.", grid, width, height);
 
                         let exists = self.vgrids.get(grid).is_some();
                         if exists {
@@ -494,7 +501,7 @@ impl AppUpdate for AppModel {
                             );
                             vgrid.set_pango_context(self.pctx.clone());
                             self.vgrids.insert(grid, vgrid);
-                            log::debug!(
+                            log::info!(
                                 "Add grid {} at {}x{} with {}x{}.",
                                 grid,
                                 column,
@@ -517,7 +524,7 @@ impl AppUpdate for AppModel {
                             vgrid.show();
                         }
 
-                        log::debug!(
+                        log::info!(
                             "WindowPosition grid {} row-start({}) col-start({}) width({}) height({})",
                             grid, row, column, width, height,
                         );
@@ -531,7 +538,7 @@ impl AppUpdate for AppModel {
                         current_column,
                         line_count,
                     } => {
-                        log::debug!(
+                        log::info!(
                             "WindowViewport grid {} viewport: top({}) bottom({}) highlight-line({}) highlight-column({}) with {} lines",
                              grid, top_line, bottom_line, current_line, current_column, line_count,
                         );
@@ -564,7 +571,7 @@ impl AppUpdate for AppModel {
                         let row = row as usize;
                         let column = column as usize;
                         if let Some(cell) = vgrid.textbuf().borrow().cell(row, column) {
-                            log::debug!(
+                            log::info!(
                                 "cursor goto {}x{} of grid {}, grid at {}x{}",
                                 column,
                                 row,
@@ -622,12 +629,17 @@ impl AppUpdate for AppModel {
                             })
                             .unwrap();
                         self.cursor.update_view().unwrap();
+                        if matches!(self.mode, EditorMode::Normal | EditorMode::Unknown(_)) {
+                            sender.send(AppMessage::ShowPointer).unwrap();
+                        }
                     }
                     RedrawEvent::BusyStart => {
                         log::debug!("Ignored BusyStart.");
+                        sender.send(AppMessage::ShowPointer).unwrap();
                     }
                     RedrawEvent::BusyStop => {
                         log::debug!("Ignored BusyStop.");
+                        sender.send(AppMessage::ShowPointer).unwrap();
                     }
                     RedrawEvent::MouseOn => {
                         self.mouse_on.store(true, atomic::Ordering::Relaxed);
@@ -645,15 +657,7 @@ impl AppUpdate for AppModel {
                         if replace_last && !self.messages.is_empty() {
                             self.messages.pop();
                         }
-                        if matches!(kind, MessageKind::Echo) {
-                            if let Some((_idx, _)) = self
-                                .messages
-                                .iter()
-                                .enumerate()
-                                .find(|(_, m)| matches!(m.kind(), MessageKind::Echo))
-                            {
-                            }
-                        }
+
                         self.messages.push(VimMessage::new(
                             kind,
                             content,
@@ -822,6 +826,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
         main_window = gtk::ApplicationWindow {
             set_default_width: model.default_width,
             set_default_height: model.default_height,
+            set_cursor_from_name: Some("text"),
             set_title: watch!(Some(&model.title)),
             set_child: vbox = Some(&gtk::Box) {
                 set_orientation: gtk::Orientation::Vertical,
@@ -914,6 +919,10 @@ impl Widgets<AppModel, ()> for AppWidgets {
         }
     }
 
+    additional_fields! {
+        pointer_animation: adw::TimedAnimation,
+    }
+
     fn post_init() {
         model.calculate();
         model.gtksettings.set(overlay.settings()).ok();
@@ -926,6 +935,18 @@ impl Widgets<AppModel, ()> for AppWidgets {
         da.queue_allocate();
         da.queue_resize();
         da.queue_draw();
+
+        let target = adw::CallbackAnimationTarget::new(Some(Box::new(
+            glib::clone!(@weak main_window => move |_| {
+                main_window.set_cursor_from_name(Some("text"));
+            }),
+        )));
+        let pointer_animation = adw::TimedAnimation::new(&main_window, 0., 1., 1000, &target);
+        pointer_animation.set_easing(adw::Easing::Linear);
+        pointer_animation.set_repeat_count(1);
+        pointer_animation.connect_done(move |this| {
+            this.widget().set_cursor_from_name(Some("none"));
+        });
 
         let im_context = gtk::IMMulticontext::new();
         im_context.set_use_preedit(false);
@@ -1038,22 +1059,14 @@ impl Widgets<AppModel, ()> for AppWidgets {
     }
 
     fn pre_view() {
-        let cursor_name = if let Ok(true) = CURSOR_VISIBLE.compare_exchange(
+        if let Ok(true) = model.show_pointer.compare_exchange(
             true,
             false,
             atomic::Ordering::Acquire,
             atomic::Ordering::Relaxed,
         ) {
-            "text"
-        } else if let Some(_) = model.dragging.get() {
-            "text"
-        } else {
-            match model.mode {
-                EditorMode::Normal | EditorMode::Visual | EditorMode::Unknown(_) => "text",
-                _ => "none",
-            }
-        };
-        self.main_window.set_cursor_from_name(Some(cursor_name));
+            self.pointer_animation.play();
+        }
         if let Ok(true) = model.background_changed.compare_exchange(
             true,
             false,

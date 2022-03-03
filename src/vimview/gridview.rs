@@ -203,7 +203,7 @@ mod imp {
                 pangocairo::show_layout_line(&cr, &layoutline);
             }
             let elapsed = instant.elapsed().as_secs_f32() * 1000.;
-            log::warn!("snapshot used: {:.3}ms", elapsed);
+            log::info!("snapshot used: {:.3}ms", elapsed);
         }
 
         fn measure(
@@ -311,6 +311,7 @@ mod imp {
                     continue;
                 }
 
+                // normally only one char at here
                 for c in chars_ {
                     chars[index] = {
                         CharAttr {
@@ -353,19 +354,6 @@ mod imp {
                     attr
                 });
 
-                // unsafe {
-                //     let attr = pango::ffi::pango_attr_line_height_new(
-                //         required_lineheight / real_lineheight,
-                //     );
-                //     log::warn!(
-                //         "line-height scale: {}",
-                //         required_lineheight / real_lineheight
-                //     );
-                //     (*attr).start_index = 0;
-                //     (*attr).end_index = pango::ATTR_INDEX_TO_TEXT_END;
-                //     pango::ffi::pango_attr_list_insert_before(attrs.to_glib_none().0, attr);
-                //     std::mem::forget(attr);
-                // }
                 layout.set_attributes(Some(&attrs));
                 layout.context_changed();
             }
@@ -373,7 +361,6 @@ mod imp {
                 log::debug!("Scale line height failed.");
             }
 
-            log::debug!("{}", text);
 
             let layoutline: pango::LayoutLine = unsafe { self.align(layout, &chars, &metrics) };
             layoutline
@@ -404,6 +391,7 @@ mod imp {
                     width: 0,
                     height: 0,
                 };
+
                 pango::ffi::pango_glyph_string_extents(
                     glyph_string,
                     font,

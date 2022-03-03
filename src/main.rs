@@ -91,7 +91,6 @@ fn main() {
     log::trace!("opts: {:?}", opts);
     let model = app::AppModel::new(opts);
     let relm = relm4::RelmApp::new(model);
-    // relm4::set_global_css_from_file("style.css");
 
     relm.run_with_args(&[title]);
 }
