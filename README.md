@@ -28,6 +28,11 @@ this can be done as follows:
 sudo apt install libgtk-4-dev>=4.6 libadawaita-1-dev>=1.0 clang
 ```
 
+On Arch Linux derivatives this can be done as follows:
+```sh
+pacman -S gtk4 libadwaita
+```
+
 Then install the latest rust compiler, best with the
 [rustup tool](https://rustup.rs/). The build command:
 
