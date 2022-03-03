@@ -3,6 +3,38 @@ Neovim GUI written in Rust, using relm4 and gtk4-rs.
 
 Thanks [Neovide](https://github.com/neovide/neovide)
 
+# Configuration
+
+To setup font add next line to `init.vim`
+```vim
+set guifont=Cascadia\ Code,Symbols\ Nerd\ Font\ Mono\ Light:h12
+```
+or `init.lua`
+
+```lua
+vim.opt.guifont="Cascadia Code, Symbols Nerd Font Mono Light:h12"
+```
+
+## Install
+
+### Build prerequisites
+
+#### Linux
+
+First install the GTK development packages. On Debian/Ubuntu derivatives
+this can be done as follows:
+
+```sh
+sudo apt install libgtk-4-dev>=4.6 libadawaita-1-dev>=1.0 clang
+```
+
+Then install the latest rust compiler, best with the
+[rustup tool](https://rustup.rs/). The build command:
+
+```
+cargo install --git https://github.com/songww/reovim
+```
+
 ## Features
 
 ### Ligatures
