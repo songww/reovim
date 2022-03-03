@@ -8,6 +8,7 @@ mod imp {
     use parking_lot::RwLock;
 
     use crate::metrics::Metrics;
+    use crate::vimview::gridview::VisWidth;
     use crate::vimview::textbuf::Lines;
     use crate::vimview::TextCell;
 
@@ -15,6 +16,14 @@ mod imp {
     use super::super::TextBuf;
 
     const PANGO_SCALE: f64 = pango::SCALE as f64;
+
+    #[derive(Clone, Debug)]
+    struct CharAttr<'c> {
+        c: char,
+        cell: &'c TextCell,
+        // visible width. how much cell used.
+        viswidth: f64,
+    }
 
     // #[derive(Debug)]
     pub struct VimGridView {
@@ -155,7 +164,7 @@ mod imp {
                 .and_then(|colors| colors.background)
                 .unwrap();
             if self.is_float.get() {
-                // float window should use blend and drawing background.
+                // float window should respect blend for background.
                 let blend = hldef.map(|style| style.blend).unwrap_or(0);
                 let alpha = (100 - blend) as f32 / 100.;
                 background.set_alpha(alpha);
@@ -166,7 +175,6 @@ mod imp {
 
             let mut y = metrics.ascent();
 
-            // let cols = textbuf.cols();
             let rows = textbuf.rows();
             log::debug!("text to render:");
             let desc = pctx.font_description();
@@ -193,13 +201,9 @@ mod imp {
                     layoutline
                 };
                 pangocairo::show_layout_line(&cr, &layoutline);
-                // let elapsed = ins.elapsed().as_secs_f32() * 1000.;
-                // if elapsed > 1. {
-                //     log::warn!("show layout line {} used {:.3}ms", lineno, elapsed);
-                // }
             }
             let elapsed = instant.elapsed().as_secs_f32() * 1000.;
-            log::debug!("snapshot used: {:.3}ms", elapsed);
+            log::warn!("snapshot used: {:.3}ms", elapsed);
         }
 
         fn measure(
@@ -274,17 +278,50 @@ mod imp {
             let line = lines.get(lineno).unwrap();
             let cols = line.len();
             let mut text = String::new();
-            let mut indexed: Vec<Option<&TextCell>> = vec![None; 128];
+            let mut chars: Vec<Option<CharAttr>> = vec![None; cols * 2];
             let attrs = pango::AttrList::new();
             for col in 0..cols {
                 let cell = line.get(col).expect("Invalid cols and rows");
                 if cell.start_index == cell.end_index {
                     continue;
                 }
-                if indexed.len() <= text.len() {
-                    indexed.resize(indexed.len() * 2, None);
+                if chars.len() <= text.len() {
+                    chars.resize(chars.len() * 2, None);
                 }
-                indexed[text.len()] = cell.into();
+                let mut chars_ = cell.text.chars();
+                let mut index = text.len();
+
+                if let Some(c) = chars_.next() {
+                    chars[index] = {
+                        CharAttr {
+                            c,
+                            cell,
+                            viswidth: if cell.double_width {
+                                2.
+                            } else if c.is_zerowidth() {
+                                0.
+                            } else {
+                                1.
+                            },
+                        }
+                    }
+                    .into();
+                    index += c.to_string().bytes().len();
+                } else {
+                    continue;
+                }
+
+                for c in chars_ {
+                    chars[index] = {
+                        CharAttr {
+                            c,
+                            cell,
+                            viswidth: 0.,
+                        }
+                    }
+                    .into();
+                    index += c.to_string().bytes().len();
+                }
                 text.push_str(&cell.text);
                 cell.attrs
                     .clone()
@@ -335,20 +372,17 @@ mod imp {
             if required_lineheight as i32 != layout.line_readonly(0).unwrap().height() {
                 log::debug!("Scale line height failed.");
             }
-            // assert_eq!(
-            //     required_lineheight as i32,
-            //     layout.line_readonly(0).unwrap().height()
-            // );
-            log::trace!("{}", text);
 
-            let layoutline: pango::LayoutLine = unsafe { self.align(layout, &indexed, &metrics) };
+            log::debug!("{}", text);
+
+            let layoutline: pango::LayoutLine = unsafe { self.align(layout, &chars, &metrics) };
             layoutline
         }
 
         unsafe fn align(
             &self,
             layout: &mut pango::Layout,
-            indexed: &Vec<Option<&TextCell>>,
+            chars: &Vec<Option<CharAttr>>,
             metrics: &Metrics,
         ) -> pango::LayoutLine {
             // let _baseline = pango::ffi::pango_layout_get_baseline(layout.to_glib_none().0);
@@ -381,21 +415,18 @@ mod imp {
                 for (glyph, log_cluster) in glyphs.iter_mut().zip(log_clusters) {
                     let index = ((*item).offset + log_cluster) as usize;
                     let isfirst = index == 0;
-                    let cell = indexed
-                        .get(index)
-                        .unwrap()
-                        .unwrap_or_else(|| panic!("index {} out of range, {:?}", index, &indexed));
-                    // .expect(&format!();
-                    let c = cell.text.chars().next().unwrap();
-                    if glib::ffi::g_unichar_iszerowidth(c as u32) == 1 {
-                        log::debug!("Skipping zerowidth: {}", cell.text);
+                    let charattr = chars.get(index).unwrap().as_ref().unwrap_or_else(|| {
+                        // lazy, format is expensive.
+                        panic!("index {} out of range, {:?}", index, &chars)
+                    });
+                    if charattr.viswidth == 0. {
+                        log::debug!("Skipping zerowidth: {}", charattr.cell.text);
                         continue;
                     }
-                    let width = if cell.double_width { 2. } else { 1. };
-                    let width = metrics.charwidth() * width * PANGO_SCALE;
+                    let width = metrics.charwidth() * charattr.viswidth * PANGO_SCALE;
                     let width = width.ceil() as i32;
                     let geometry = &mut glyph.geometry;
-                    log::trace!("{} char-cell {:?}", index, cell);
+                    // log::info!("{} char-cell {:?}", index, charattr.cell);
                     if geometry.width > 0 && geometry.width != width {
                         let x_offset = if isfirst {
                             geometry.x_offset
@@ -407,7 +438,7 @@ mod imp {
                         // 啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊
                         log::debug!(
                             "adjusting ({})  width {}->{}  x-offset {}->{} y-offset {} -> {} is-start-char {}",
-                            c,
+                            charattr.c,
                             geometry.width,
                             width,
                             geometry.x_offset,
@@ -435,6 +466,7 @@ use std::cell::{Cell, Ref};
 use std::rc::Rc;
 
 use glib::subclass::prelude::*;
+use glib::translate::from_glib;
 use gtk::prelude::*;
 use parking_lot::RwLock;
 
@@ -490,5 +522,15 @@ impl VimGridView {
         self.imp().set_width(width);
         self.imp().set_height(height);
         self.imp().textbuf().resize(height as _, width as _);
+    }
+}
+
+trait VisWidth {
+    fn is_zerowidth(&self) -> bool;
+}
+
+impl VisWidth for char {
+    fn is_zerowidth(&self) -> bool {
+        unsafe { from_glib(gtk::glib::ffi::g_unichar_iszerowidth(*self as u32)) }
     }
 }
