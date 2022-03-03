@@ -30,7 +30,7 @@ sudo apt install libgtk-4-dev>=4.6 libadawaita-1-dev>=1.0 clang
 
 On Arch Linux derivatives this can be done as follows:
 ```sh
-pacman -S gtk4 libadwaita
+pacman -S gtk4 libadwaita clang pkg-config
 ```
 
 Then install the latest rust compiler, best with the
