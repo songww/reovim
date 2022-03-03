@@ -344,28 +344,55 @@ impl From<ParallelCommand> for UiCommand {
 pub fn start_ui_command_handler(nvim: Arc<Neovim<TxWrapper>>) {
     let (serial_tx, mut serial_rx) = unbounded_channel::<SerialCommand>();
     let ui_command_nvim = nvim.clone();
+    let running_tracker = RUNNING_TRACKER.clone();
     tokio::spawn(async move {
         let mut ui_command_receiver = EVENT_AGGREGATOR.register_event::<UiCommand>();
-        while RUNNING_TRACKER.is_running() {
-            match ui_command_receiver.recv().await {
-                Some(UiCommand::Serial(serial_command)) => serial_tx
-                    .send(serial_command)
-                    .expect("Could not send serial ui command"),
-                Some(UiCommand::Parallel(parallel_command)) => {
-                    let ui_command_nvim = ui_command_nvim.clone();
-                    tokio::spawn(async move {
-                        log::trace!("aggregated parallel ui-command");
-                        parallel_command.execute(&ui_command_nvim).await;
-                    });
+        loop {
+            tokio::select! {
+                _ = running_tracker.wait_quit() => {
+                    log::info!("ui command executor quit.");
+                    break;
                 }
-                None => {
-                    RUNNING_TRACKER.quit("ui command channel failed");
-                }
+                Some(ui_command) = ui_command_receiver.recv() => {
+                    match ui_command {
+                        UiCommand::Serial(serial_command) => serial_tx
+                            .send(serial_command)
+                            .expect("Could not send serial ui command"),
+                        UiCommand::Parallel(parallel_command) => {
+                            let ui_command_nvim = ui_command_nvim.clone();
+                            tokio::spawn(async move {
+                                log::trace!("aggregated parallel ui-command");
+                                parallel_command.execute(&ui_command_nvim).await;
+                            });
+                        }
+                    }
+                },
+                else => {
+                    running_tracker.quit("ui command channel failed");
+                },
             }
         }
     });
 
+    let running_tracker = RUNNING_TRACKER.clone();
     tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ =  running_tracker.wait_quit() => {
+                    log::info!("serial ui command executor quit.");
+                    break;
+                },
+                Some(serial_command) = serial_rx.recv() => {
+                    log::trace!("aggregated serial ui-command");
+                    serial_command.execute(&nvim).await;
+                },
+                else => {
+                    running_tracker.quit("serial ui command channel failed");
+                    break;
+                },
+            }
+        }
+        /*
         while RUNNING_TRACKER.is_running() {
             match serial_rx.recv().await {
                 Some(serial_command) => {
@@ -377,5 +404,6 @@ pub fn start_ui_command_handler(nvim: Arc<Neovim<TxWrapper>>) {
                 }
             }
         }
+        */
     });
 }

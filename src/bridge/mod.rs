@@ -75,14 +75,22 @@ pub async fn open(opts: Opts) {
     SETTINGS.read_initial_values(&nvim).await;
     SETTINGS.setup_changed_listeners(&nvim).await;
 
-    match io_handler.await {
-        Err(join_error) => error!("Error joining IO loop: '{}'", join_error),
-        Ok(Err(error)) => {
-            if !error.is_channel_closed() {
-                error!("Error: '{}'", error);
+    let running_tracker = RUNNING_TRACKER.clone();
+    tokio::select! {
+        r = io_handler => {
+            match r {
+                Err(join_error) => error!("Error joining IO loop: '{}'", join_error),
+                Ok(Err(error)) => {
+                    if !error.is_channel_closed() {
+                        error!("Error: '{}'", error);
+                    }
+                }
+                Ok(Ok(())) => {}
             }
+            running_tracker.quit("neovim processed failed");
+        },
+        _ = running_tracker.wait_quit() => {
+            log::info!("io-handler quit.");
         }
-        Ok(Ok(())) => {}
-    };
-    RUNNING_TRACKER.quit("neovim processed failed");
+    }
 }

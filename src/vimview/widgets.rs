@@ -7,6 +7,7 @@ use parking_lot::RwLock;
 use relm4::factory::positions::FixedPosition;
 use relm4::*;
 
+use crate::app::CURSOR_VISIBLE;
 use crate::app::{self, Dragging};
 use crate::bridge::{MouseAction, MouseButton, SerialCommand, UiCommand};
 use crate::event_aggregator::EVENT_AGGREGATOR;
@@ -34,8 +35,7 @@ pub struct VimGrid {
     textbuf: TextBuf,
 
     visible: bool,
-
-    animation: Option<adw::TimedAnimation>,
+    // animation: Option<adw::TimedAnimation>,
 }
 
 impl VimGrid {
@@ -68,7 +68,7 @@ impl VimGrid {
             textbuf,
             visible: true,
             font_description,
-            animation: None,
+            // animation: None,
         }
     }
 
@@ -196,6 +196,7 @@ impl factory::FactoryPrototype for VimGrid {
             }
         }
 
+        let cursor_visible = CURSOR_VISIBLE.clone();
         let click_listener = gtk::GestureClick::builder()
             .button(0)
             .exclusive(false)
@@ -204,7 +205,8 @@ impl factory::FactoryPrototype for VimGrid {
             .name("click-listener")
             .build();
         click_listener.connect_pressed(
-            glib::clone!(@strong sender, @strong self.dragging as dragging, @strong self.metrics as metrics => move |c, n_press, x, y| {
+            glib::clone!(@strong sender, @weak self.dragging as dragging, @weak cursor_visible as cursor_visible, @weak self.metrics as metrics => move |c, n_press, x, y| {
+                cursor_visible.store(true, atomic::Ordering::Relaxed);
                 let metrics = metrics.get();
                 let width = metrics.width();
                 let height = metrics.height();
@@ -233,7 +235,8 @@ impl factory::FactoryPrototype for VimGrid {
             }),
         );
         click_listener.connect_released(
-            glib::clone!(@strong sender, @strong self.dragging as dragging, @strong self.metrics as metrics => move |c, n_press, x, y| {
+            glib::clone!(@strong sender, @weak self.dragging as dragging, @weak cursor_visible as cursor_visible, @weak self.metrics as metrics => move |c, n_press, x, y| {
+                cursor_visible.store(true, atomic::Ordering::Relaxed);
                 let metrics = metrics.get();
                 let width = metrics.width();
                 let height = metrics.height();
@@ -267,7 +270,8 @@ impl factory::FactoryPrototype for VimGrid {
         motion_listener.connect_enter(move |_, _, _| {
             app::GridActived.store(grid_id, atomic::Ordering::Relaxed);
         });
-        motion_listener.connect_motion(glib::clone!(@strong sender, @strong self.dragging as dragging, @strong self.metrics as metrics => move |c, x, y| {
+        motion_listener.connect_motion(glib::clone!(@strong sender, @weak self.dragging as dragging, @weak cursor_visible as cursor_visible, @weak self.metrics as metrics => move |c, x, y| {
+            cursor_visible.store(true, atomic::Ordering::Relaxed);
             log::trace!("cursor motion {} {}", x, y);
             if let Some(Dragging { btn, pos }) = dragging.get() {
                 let metrics = metrics.get();

@@ -3,7 +3,7 @@ Neovim GUI written in Rust, using relm4 and gtk4-rs.
 
 Thanks [Neovide](https://github.com/neovide/neovide)
 
-# Configuration
+## Configuration
 
 To setup font add next line to `init.vim`
 ```vim

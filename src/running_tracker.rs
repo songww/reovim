@@ -1,42 +1,43 @@
-use std::sync::{
-    atomic::{AtomicBool, AtomicI32, Ordering},
-    Arc,
-};
+use std::sync::{atomic, Arc};
 
-use log::info;
 use once_cell::sync::Lazy;
 
-pub static RUNNING_TRACKER: Lazy<RunningTracker> = Lazy::new(|| RunningTracker::new());
+// pub static RUNNING_TRACKER: Lazy<Arc<tokio::sync::Notify>> =
+//     Lazy::new(|| Arc::new(tokio::sync::Notify::new()));
+
+pub static RUNNING_TRACKER: Lazy<Arc<RunningTracker>> =
+    Lazy::new(|| Arc::new(RunningTracker::new()));
 
 pub struct RunningTracker {
-    running: Arc<AtomicBool>,
-    exit_code: Arc<AtomicI32>,
+    notify: tokio::sync::Notify,
+    exit_code: atomic::AtomicI32,
 }
 
 impl RunningTracker {
     fn new() -> Self {
-        Self {
-            running: Arc::new(AtomicBool::new(true)),
-            exit_code: Arc::new(AtomicI32::new(0)),
+        RunningTracker {
+            notify: tokio::sync::Notify::new(),
+            exit_code: atomic::AtomicI32::new(0),
         }
     }
 
     pub fn quit(&self, reason: &str) {
-        self.running.store(false, Ordering::Relaxed);
-        info!("Quit {}", reason);
+        self.notify.notify_waiters();
+        log::info!("Quit {}", reason);
     }
 
     pub fn quit_with_code(&self, code: i32, reason: &str) {
-        self.exit_code.store(code, Ordering::Relaxed);
-        self.running.store(false, Ordering::Relaxed);
-        info!("Quit with code {}: {}", code, reason);
+        self.notify.notify_waiters();
+        self.exit_code.store(code, atomic::Ordering::Relaxed);
+        log::info!("Quit with code {}: {}", code, reason);
     }
 
-    pub fn is_running(&self) -> bool {
-        self.running.load(Ordering::Relaxed)
-    }
-
+    #[allow(unused)]
     pub fn exit_code(&self) -> i32 {
-        self.exit_code.load(Ordering::Relaxed)
+        self.exit_code.load(atomic::Ordering::Relaxed)
+    }
+
+    pub async fn wait_quit(&self) {
+        self.notify.notified().await
     }
 }

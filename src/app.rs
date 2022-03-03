@@ -28,6 +28,9 @@ use crate::metrics::Metrics;
 use crate::vimview::{self, VimGrid, VimMessage};
 use crate::Opts;
 
+pub static CURSOR_VISIBLE: Lazy<Arc<atomic::AtomicBool>> =
+    Lazy::new(|| Arc::new(atomic::AtomicBool::new(true)));
+
 #[allow(non_upper_case_globals)]
 pub static GridActived: Lazy<Arc<atomic::AtomicU64>> =
     Lazy::new(|| Arc::new(atomic::AtomicU64::new(0)));
@@ -259,7 +262,9 @@ impl AppUpdate for AppModel {
                 log::trace!("ui-commad {:?}", ui_command);
                 EVENT_AGGREGATOR.send(ui_command);
             }
-            AppMessage::Quit => return false,
+            AppMessage::Quit => {
+                return false;
+            }
             AppMessage::RedrawEvent(event) => {
                 match event {
                     RedrawEvent::SetTitle { title } => {
@@ -609,7 +614,7 @@ impl AppUpdate for AppModel {
                         self.mode = mode;
                         self.cursor_mode = mode_index as _;
                         let cursor_mode = self.cursor_modes.get(self.cursor_mode).unwrap().clone();
-                        log::debug!("Mode Change to {:?} {:?}", &self.mode, cursor_mode);
+                        log::info!("Mode Change to {:?} {:?}", &self.mode, cursor_mode);
                         self.cursor
                             .model_mut()
                             .map(|mut m| {
@@ -1033,6 +1038,22 @@ impl Widgets<AppModel, ()> for AppWidgets {
     }
 
     fn pre_view() {
+        let cursor_name = if let Ok(true) = CURSOR_VISIBLE.compare_exchange(
+            true,
+            false,
+            atomic::Ordering::Acquire,
+            atomic::Ordering::Relaxed,
+        ) {
+            "text"
+        } else if let Some(_) = model.dragging.get() {
+            "text"
+        } else {
+            match model.mode {
+                EditorMode::Normal | EditorMode::Visual | EditorMode::Unknown(_) => "text",
+                _ => "none",
+            }
+        };
+        self.main_window.set_cursor_from_name(Some(cursor_name));
         if let Ok(true) = model.background_changed.compare_exchange(
             true,
             false,

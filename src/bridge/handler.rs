@@ -61,6 +61,7 @@ impl Handler for NeovimHandler {
     ) {
         trace!("Neovim notification: {:?}", &event_name);
 
+        let running_tracker = RUNNING_TRACKER.clone();
         match event_name.as_ref() {
             "redraw" => {
                 for events in arguments {
@@ -79,7 +80,7 @@ impl Handler for NeovimHandler {
                 let error_code = arguments[0]
                     .as_i64()
                     .expect("Could not parse error code from neovim");
-                RUNNING_TRACKER.quit_with_code(error_code as i32, "Quit from neovim");
+                running_tracker.quit_with_code(error_code as i32, "Quit from neovim");
             }
             #[cfg(windows)]
             "neovide.register_right_click" => {

@@ -67,7 +67,7 @@ pub struct CursorWidgets {
 impl MicroWidgets<VimCursor> for CursorWidgets {
     type Root = gtk::DrawingArea;
 
-    fn init_view(model: &VimCursor, sender: Sender<<VimCursor as MicroModel>::Msg>) -> Self {
+    fn init_view(_model: &VimCursor, _sender: Sender<<VimCursor as MicroModel>::Msg>) -> Self {
         let da = gtk::DrawingArea::new();
         da.set_widget_name("cursor");
         da.set_visible(true);
