@@ -113,7 +113,7 @@ impl AppModel {
                 ctx.set_round_glyph_positions(false);
                 ctx.set_font_description(&font_desc);
                 ctx.set_base_dir(pango::Direction::Ltr);
-                ctx.set_language(&pango::Language::default());
+                ctx.set_language(&pango::Language::from_string("en-US"));
                 let mut options = cairo::FontOptions::new().ok();
                 options.as_mut().map(|options| {
                     options.set_antialias(cairo::Antialias::Subpixel);
