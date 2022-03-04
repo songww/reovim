@@ -17,8 +17,7 @@ use rustc_hash::FxHashMap;
 
 use crate::bridge;
 use crate::bridge::{
-    EditorMode, MessageKind, MouseButton, ParallelCommand, RedrawEvent, SerialCommand, UiCommand,
-    WindowAnchor,
+    EditorMode, MouseButton, ParallelCommand, RedrawEvent, SerialCommand, UiCommand, WindowAnchor,
 };
 use crate::components::{VimCmdEvent, VimCmdPrompts};
 use crate::cursor::{CursorMode, VimCursor};
@@ -28,9 +27,6 @@ use crate::keys::ToInput;
 use crate::metrics::Metrics;
 use crate::vimview::{self, VimGrid, VimMessage};
 use crate::Opts;
-
-pub static CURSOR_VISIBLE: Lazy<Arc<atomic::AtomicBool>> =
-    Lazy::new(|| Arc::new(atomic::AtomicBool::new(true)));
 
 #[allow(non_upper_case_globals)]
 pub static GridActived: Lazy<Arc<atomic::AtomicU64>> =

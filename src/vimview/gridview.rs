@@ -327,7 +327,7 @@ mod imp {
                 cell.attrs
                     .clone()
                     .into_iter()
-                    .for_each(|attr| attrs.insert(attr));
+                    .for_each(|attr| attrs.change(attr));
             }
             layout.set_text(&text);
             layout.set_attributes(Some(&attrs));
