@@ -7,9 +7,9 @@ use std::{
 use log::debug;
 use nvim::Value;
 
-use crate::color::Color;
+use crate::color::{Color, Colors};
 use crate::cursor::{CursorMode, CursorShape};
-use crate::style::{Colors, Style};
+use crate::style::Style;
 
 use super::TxWrapper;
 // use crate::editor::{Colors, CursorMode, CursorShape, Style};

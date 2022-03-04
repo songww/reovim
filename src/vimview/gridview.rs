@@ -8,7 +8,6 @@ mod imp {
     use parking_lot::RwLock;
 
     use crate::metrics::Metrics;
-    use crate::vimview::gridview::VisWidth;
     use crate::vimview::textbuf::Lines;
     use crate::vimview::TextCell;
 
@@ -298,7 +297,7 @@ mod imp {
                             cell,
                             viswidth: if cell.double_width {
                                 2.
-                            } else if c.is_zerowidth() {
+                            } else if pango::is_zero_width(c) {
                                 0.
                             } else {
                                 1.
@@ -454,7 +453,6 @@ use std::cell::{Cell, Ref};
 use std::rc::Rc;
 
 use glib::subclass::prelude::*;
-use glib::translate::from_glib;
 use gtk::prelude::*;
 use parking_lot::RwLock;
 
@@ -510,15 +508,5 @@ impl VimGridView {
         self.imp().set_width(width);
         self.imp().set_height(height);
         self.imp().textbuf().resize(height as _, width as _);
-    }
-}
-
-trait VisWidth {
-    fn is_zerowidth(&self) -> bool;
-}
-
-impl VisWidth for char {
-    fn is_zerowidth(&self) -> bool {
-        unsafe { from_glib(gtk::glib::ffi::g_unichar_iszerowidth(*self as u32)) }
     }
 }

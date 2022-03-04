@@ -110,14 +110,15 @@ impl AppModel {
             .unwrap()
             .create_context()
             .map(|ctx| {
-                ctx.set_round_glyph_positions(false);
+                // ctx.set_round_glyph_positions(true);
                 ctx.set_font_description(&font_desc);
                 ctx.set_base_dir(pango::Direction::Ltr);
                 ctx.set_language(&pango::Language::from_string("en-US"));
                 let mut options = cairo::FontOptions::new().ok();
                 options.as_mut().map(|options| {
-                    options.set_antialias(cairo::Antialias::Subpixel);
-                    options.set_hint_style(cairo::HintStyle::Full);
+                    // options.set_hint_style(cairo::HintStyle::Full);
+                    // options.set_antialias(cairo::Antialias::Subpixel);
+                    options.set_hint_metrics(cairo::HintMetrics::On);
                 });
                 pangocairo::context_set_font_options(&ctx, options.as_ref());
                 ctx
@@ -893,7 +894,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
                         set_widget_name: "messages-container",
                         set_opacity: 0.95,
                         set_spacing: 5,
-                        set_visible: true,
+                        set_visible: false,
                         set_hexpand: true,
                         // It dosenot matter.
                         set_width_request: 0,
@@ -905,7 +906,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
                         set_orientation: gtk::Orientation::Vertical,
                         factory!(model.messages),
                     },
-                    add_overlay: components.cmd_prompt.root_widget() ,
+                    // add_overlay: components.cmd_prompt.root_widget() ,
                 }
             },
             connect_close_request[sender = sender.clone()] => move |_| {

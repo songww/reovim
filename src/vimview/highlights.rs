@@ -1,24 +1,26 @@
 use glib::subclass::prelude::*;
 
+use crate::color::Colors;
 use crate::style;
 
 mod imp {
     use std::cell::{Cell, RefCell};
 
+    use glib::subclass::prelude::*;
     use rustc_hash::FxHashMap;
 
-    use glib::subclass::prelude::*;
+    use crate::color::Colors;
 
     #[derive(Debug)]
     pub struct HighlightDefinitions {
         styles: RefCell<FxHashMap<u64, crate::style::Style>>,
-        defaults: Cell<Option<crate::style::Colors>>,
+        defaults: Cell<Option<Colors>>,
     }
 
     impl Default for HighlightDefinitions {
         fn default() -> Self {
             let mut styles = FxHashMap::default();
-            let defaults = crate::style::Colors {
+            let defaults = Colors {
                 background: crate::color::Color::BLACK.into(),
                 foreground: crate::color::Color::WHITE.into(),
                 special: crate::color::Color::WHITE.into(),
@@ -51,26 +53,17 @@ mod imp {
             self.styles.borrow_mut().insert(k, style);
         }
 
-        pub fn defaults(&self) -> Option<&crate::style::Colors> {
+        pub fn defaults(&self) -> Option<&Colors> {
             unsafe { &*self.defaults.as_ptr() }.as_ref()
         }
 
-        pub fn set_defaults(&self, defaults: crate::style::Colors) {
+        pub fn set_defaults(&self, defaults: Colors) {
             self.defaults.replace(Some(defaults));
             let styles = unsafe { &mut *self.styles.as_ptr() };
             styles.insert(0, crate::style::Style::new(defaults));
         }
     }
 }
-
-// impl std::fmt::Debug for HighlightDefinitions {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         f.write_str("HighlightDefinitions: ")?;
-//         f.debug_map()
-//             .entries(self.styles.iter().map(|(k, v)| (k, v)))
-//             .finish()
-//     }
-// }
 
 glib::wrapper! {
     pub struct HighlightDefinitions(ObjectSubclass<imp::HighlightDefinitions>);
@@ -80,8 +73,6 @@ impl HighlightDefinitions {
     pub const DEFAULT: u64 = 0;
 
     pub fn new() -> HighlightDefinitions {
-        // let styles = FxHashMap::default();
-        // HighlightDefinitions::default()
         glib::Object::new::<Self>(&[]).expect("Failed to initialize Timer object")
     }
 
@@ -97,11 +88,11 @@ impl HighlightDefinitions {
         self.imp().set(k, style);
     }
 
-    pub fn defaults(&self) -> Option<&style::Colors> {
+    pub fn defaults(&self) -> Option<&Colors> {
         self.imp().defaults()
     }
 
-    pub fn set_defaults(&self, defaults: style::Colors) {
+    pub fn set_defaults(&self, defaults: Colors) {
         self.imp().set_defaults(defaults)
     }
 }

@@ -1,11 +1,4 @@
-use crate::color::Color;
-
-#[derive(new, Copy, Clone, Debug, Default, PartialEq)]
-pub struct Colors {
-    pub foreground: Option<Color>,
-    pub background: Option<Color>,
-    pub special: Option<Color>,
-}
+use crate::color::{Color, Colors};
 
 #[derive(new, Copy, Clone, Debug, PartialEq)]
 pub struct Style {
@@ -57,7 +50,7 @@ impl Style {
 #[cfg(test)]
 mod tests {
     use super::*;
-    // use crate::color::Color;
+    use crate::color::{Color, Colors};
 
     const COLORS: Colors = Colors {
         foreground: Some(Color::new(0.1, 0.1, 0.1, 0.1)),
@@ -106,15 +99,9 @@ mod tests {
     fn test_background() {
         let mut style = Style::new(COLORS);
 
-        assert_eq!(
-            style.background(&DEFAULT_COLORS),
-            COLORS.background.unwrap()
-        );
+        assert_eq!(style.background(), COLORS.background);
         style.colors.background = None;
-        assert_eq!(
-            style.background(&DEFAULT_COLORS),
-            DEFAULT_COLORS.background.unwrap()
-        );
+        assert_eq!(style.background(), None);
     }
 
     #[test]
@@ -122,15 +109,9 @@ mod tests {
         let mut style = Style::new(COLORS);
         style.reverse = true;
 
-        assert_eq!(
-            style.background(&DEFAULT_COLORS),
-            COLORS.foreground.unwrap()
-        );
+        assert_eq!(style.background(), COLORS.foreground);
         style.colors.foreground = None;
-        assert_eq!(
-            style.background(&DEFAULT_COLORS),
-            DEFAULT_COLORS.foreground.unwrap()
-        );
+        assert_eq!(style.background(), None);
     }
 
     #[test]
