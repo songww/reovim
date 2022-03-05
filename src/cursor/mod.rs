@@ -182,14 +182,19 @@ impl VimCursor {
                     })
                     .for_each(|attr| attrs.insert(attr));
                 log::debug!("cursor cell '{}' wide {}", cell.text, self.width);
-                let itemized = &pango::itemize(
+                let itemized = pango::itemize(
                     &self.pctx,
                     &cell.text,
                     0,
                     cell.text.len() as _,
                     &attrs,
                     None,
-                )[0];
+                );
+                if itemized.is_empty() {
+                    log::warn!("cursor cell '{:?}' got empty itemized.", cell);
+                    return;
+                }
+                let itemized = &itemized[0];
                 let mut glyph_string = pango::GlyphString::new();
                 pango::shape(&cell.text, itemized.analysis(), &mut glyph_string);
                 let glyphs = glyph_string.glyph_info_mut();

@@ -50,7 +50,7 @@ pub struct AppModel {
     pub opts: Opts,
 
     pub title: String,
-    pub size: Rc<Cell<(i32, i32)>>,
+    pub window_size: Rc<Cell<(i32, i32)>>,
     pub default_width: i32,
     pub default_height: i32,
 
@@ -105,7 +105,7 @@ impl AppModel {
             .build()
             .unwrap();
         let font_desc = FontDescription::from_string("monospace 11");
-        let size = Rc::new(Cell::new((opts.width, opts.height)));
+        let window_size = Rc::new(Cell::new((opts.width, opts.height)));
         let pctx: Rc<pango::Context> = pangocairo::FontMap::default()
             .unwrap()
             .create_context()
@@ -128,7 +128,7 @@ impl AppModel {
         let hldefs = Rc::new(RwLock::new(vimview::HighlightDefinitions::new()));
         let metrics = Rc::new(Metrics::new().into());
         AppModel {
-            size,
+            window_size,
             title: opts.title.clone(),
             default_width: opts.width,
             default_height: opts.height,
@@ -276,7 +276,7 @@ impl AppUpdate for AppModel {
                             .split("     ")
                             .filter_map(|s| if s.is_empty() { None } else { Some(s.trim()) })
                             .collect::<Vec<_>>()
-                            .join("  ")
+                            .join("\n")
                     }
                     RedrawEvent::OptionSet { gui_option } => match gui_option {
                         bridge::GuiOption::AmbiWidth(ambi_width) => {
@@ -352,7 +352,7 @@ impl AppUpdate for AppModel {
                         log::trace!("current highlight groups: {:?}", self.hlgroups.read());
                     }
                     RedrawEvent::Clear { grid } => {
-                        log::debug!("cleared grid {}", grid);
+                        log::info!("cleared grid {}", grid);
                         self.vgrids.get_mut(grid).map(|grid| grid.clear());
                     }
                     RedrawEvent::GridLine {
@@ -362,8 +362,9 @@ impl AppUpdate for AppModel {
                         cells,
                     } => {
                         log::debug!(
-                            "grid {} line - {} cells at {}x{}",
+                            "grid {} setting line {} with {} cells at {}:{}",
                             grid,
+                            row,
                             cells.len(),
                             row,
                             column_start
@@ -376,7 +377,6 @@ impl AppUpdate for AppModel {
                         ));
                         vgrid
                             .textbuf()
-                            .borrow()
                             .set_cells(row as _, column_start as _, &cells);
                         let row = row as usize;
                         let coord = &self.cursor_coord;
@@ -384,7 +384,6 @@ impl AppUpdate for AppModel {
                         if cursor_grid == grid && row as f64 == coord.row {
                             if let Some(cell) = vgrid
                                 .textbuf()
-                                .borrow()
                                 .cell(coord.row.floor() as usize, coord.col.floor() as usize)
                             {
                                 self.cursor
@@ -405,10 +404,10 @@ impl AppUpdate for AppModel {
                     }
                     RedrawEvent::Scroll {
                         grid,
-                        top: _,
-                        bottom: _,
-                        left: _,
-                        right: _,
+                        top,
+                        bottom,
+                        left,
+                        right,
                         rows,
                         columns,
                     } => {
@@ -426,12 +425,19 @@ impl AppUpdate for AppModel {
                             unimplemented!("could not be there.");
                         }
                         let cursor_grid = self.cursor_grid;
+                        log::info!(
+                            "scrolling grid {} top({}) bottom({}) left({}) right({})",
+                            grid,
+                            top,
+                            bottom,
+                            left,
+                            right
+                        );
                         log::debug!("scrolling grid {} cursor at {}", grid, cursor_grid);
                         if cursor_grid == grid {
                             let coord = &self.cursor_coord;
                             let cell = vgrid
                                 .textbuf()
-                                .borrow()
                                 .cell((coord.row).floor() as usize, (coord.col).floor() as usize)
                                 .unwrap();
                             log::debug!("cursor character change to {}", cell.text);
@@ -448,6 +454,8 @@ impl AppUpdate for AppModel {
                         height,
                     } => {
                         log::info!("Resizing grid {} to {}x{}.", grid, width, height);
+                        assert!(width > 1);
+                        assert!(height > 1);
 
                         let exists = self.vgrids.get(grid).is_some();
                         if exists {
@@ -456,10 +464,9 @@ impl AppUpdate for AppModel {
                                 .unwrap()
                                 .resize(width as _, height as _);
                         } else {
-                            log::debug!("Add grid {} to default window at left top.", grid);
+                            log::error!("Add grid {} to default window at left top.", grid);
                             let vgrid = VimGrid::new(
                                 grid,
-                                0,
                                 (0., 0.).into(),
                                 (width, height).into(),
                                 self.hldefs.clone(),
@@ -470,6 +477,10 @@ impl AppUpdate for AppModel {
                             vgrid.set_pango_context(self.pctx.clone());
                             self.vgrids.insert(grid, vgrid);
                         };
+                        if grid == 1 {
+                            // to check default grid size is fit window size.
+                            // default grid size will changed after config reload.
+                        }
                     }
 
                     RedrawEvent::WindowPosition {
@@ -483,12 +494,13 @@ impl AppUpdate for AppModel {
                         // let metrics = self.metrics.get();
                         // let x = start_column as f64 * metrics.width();
                         // let y = start_row as f64 * metrics.height(); //;
+                        assert!(width > 1);
+                        assert!(height > 1);
 
                         if self.vgrids.get(grid).is_none() {
                             // dose not exists, create
                             let vgrid = VimGrid::new(
                                 grid,
-                                0,
                                 (column as usize, row as usize).into(),
                                 (width, height).into(),
                                 self.hldefs.clone(),
@@ -498,7 +510,7 @@ impl AppUpdate for AppModel {
                             );
                             vgrid.set_pango_context(self.pctx.clone());
                             self.vgrids.insert(grid, vgrid);
-                            log::info!(
+                            log::error!(
                                 "Add grid {} at {}x{} with {}x{}.",
                                 grid,
                                 column,
@@ -510,7 +522,7 @@ impl AppUpdate for AppModel {
                             let vgrid = self.vgrids.get_mut(grid).unwrap();
                             vgrid.resize(width as _, height as _);
                             vgrid.set_coord(column as _, row as _);
-                            log::debug!(
+                            log::info!(
                                 "Move grid {} to {}x{} with {}x{}.",
                                 grid,
                                 column,
@@ -529,21 +541,41 @@ impl AppUpdate for AppModel {
                     RedrawEvent::WindowViewport {
                         grid,
                         window: _,
-                        top_line,
-                        bottom_line,
+                        top_line: top,
+                        bottom_line: bottom,
                         current_line,
                         current_column,
                         line_count,
                     } => {
                         log::info!(
                             "WindowViewport grid {} viewport: top({}) bottom({}) highlight-line({}) highlight-column({}) with {} lines",
-                             grid, top_line, bottom_line, current_line, current_column, line_count,
+                             grid, top, bottom, current_line, current_column, line_count,
                         );
 
                         if self.vgrids.get(grid).is_none() {
+                            let height = (bottom - top).ceil() as usize;
+                            let mut vgrid = VimGrid::new(
+                                grid,
+                                (0, 0).into(),
+                                (1usize, height.max(1)).into(),
+                                self.hldefs.clone(),
+                                self.dragging.clone(),
+                                self.metrics.clone(),
+                                self.font_description.clone(),
+                            );
+                            vgrid.set_viewport(top, bottom);
+                            vgrid.set_pango_context(self.pctx.clone());
+                            self.vgrids.insert(grid, vgrid);
+                            log::info!(
+                                "Empty grid {} created cause of viewport({}, {}) event.",
+                                grid,
+                                top,
+                                bottom
+                            );
                             log::warn!("WindowViewport before create grid {}.", grid);
                         } else {
                             let vgrid = self.vgrids.get_mut(grid).unwrap();
+                            vgrid.set_viewport(top, bottom);
                             vgrid.show();
                         }
                     }
@@ -560,6 +592,7 @@ impl AppUpdate for AppModel {
                         self.vgrids.remove(grid);
                     }
                     RedrawEvent::Flush => {
+                        log::info!("flush event <-> ");
                         self.vgrids.flush();
                     }
                     RedrawEvent::CursorGoto { grid, row, column } => {
@@ -567,7 +600,7 @@ impl AppUpdate for AppModel {
                         let leftop = vgrid.coord();
                         let row = row as usize;
                         let column = column as usize;
-                        if let Some(cell) = vgrid.textbuf().borrow().cell(row, column) {
+                        if let Some(cell) = vgrid.textbuf().cell(row, column) {
                             log::info!(
                                 "cursor goto {}x{} of grid {}, grid at {}x{}",
                                 column,
@@ -626,7 +659,7 @@ impl AppUpdate for AppModel {
                             })
                             .unwrap();
                         self.cursor.update_view().unwrap();
-                        if matches!(self.mode, EditorMode::Normal | EditorMode::Unknown(_)) {
+                        if matches!(self.mode, EditorMode::Visual) {
                             sender.send(AppMessage::ShowPointer).unwrap();
                         }
                     }
@@ -692,17 +725,22 @@ impl AppUpdate for AppModel {
                                 width,
                                 vgrid.height()
                             );
+                            let height = if scrolled {
+                                vgrid.height() + 1
+                            } else {
+                                vgrid.height()
+                            };
+                            vgrid.resize(width, height);
+                            vgrid.set_viewport(0., height as f64);
                             vgrid.set_coord(0., row as f64);
-                            vgrid.resize(width, vgrid.height());
                             vgrid.show();
                         } else {
                             log::debug!("creating message grid at 0x{} size {}x{}", row, width, 1);
                             let row = row as usize;
                             let mut vgrid = VimGrid::new(
                                 grid,
-                                0,
                                 (0, row).into(),
-                                (width, 1).into(),
+                                (width.max(1), 1).into(),
                                 self.hldefs.clone(),
                                 self.dragging.clone(),
                                 self.metrics.clone(),
@@ -824,7 +862,15 @@ impl Widgets<AppModel, ()> for AppWidgets {
             set_default_width: model.default_width,
             set_default_height: model.default_height,
             set_cursor_from_name: Some("text"),
-            set_title: watch!(Some(&model.title)),
+            set_titlebar: titlebar = Some(&adw::HeaderBar) {
+                set_title_widget: window_title = Some(&adw::WindowTitle) {
+                    set_title: &model.title,
+                    set_subtitle: "Enjoy your neovim",
+                },
+                pack_end: fpslabel = &gtk::Label {
+                    //
+                },
+            },
             set_child: vbox = Some(&gtk::Box) {
                 set_orientation: gtk::Orientation::Vertical,
                 set_spacing: 0,
@@ -849,16 +895,16 @@ impl Widgets<AppModel, ()> for AppWidgets {
                         set_vexpand: true,
                         set_focus_on_click: false,
                         set_overflow: gtk::Overflow::Hidden,
-                        connect_resize[sender = sender.clone(), metrics = model.metrics.clone(), size = model.size.clone()] => move |da, width, height| {
-                            log::debug!("da resizing width: {}, height: {}", width, height);
-                            size.set((width, height));
+                        connect_resize[sender = sender.clone(), metrics = model.metrics.clone(), size = model.window_size.clone()] => move |_da, width, height| {
+                            log::error!("da resizing width: {}, height: {}", width, height);
                             let metrics = metrics.get();
-                            let rows = da.height() as f64 / metrics.height(); //  + metrics.linespace
-                            let cols = da.width() as f64 / metrics.width();
-                            log::debug!("da resizing rows: {} cols: {}", rows, cols);
+                            let rows = (height as f64 / metrics.height()).floor();
+                            let cols = (width as f64 / metrics.width()).floor();
+                            size.set((width, height));
+                            log::error!("da resizing rows: {} cols: {}", rows, cols);
                             sender
                                 .send(
-                                    UiCommand::Parallel(ParallelCommand::Resize {
+                                    UiCommand::Serial(SerialCommand::Resize {
                                         width: cols as _,
                                         height: rows as _,
                                     })
@@ -933,6 +979,13 @@ impl Widgets<AppModel, ()> for AppWidgets {
         da.queue_resize();
         da.queue_draw();
 
+        glib::source::timeout_add_local(
+            std::time::Duration::from_millis(500),
+            glib::clone!(@weak fpslabel => @default-return glib::source::Continue(false), move || {
+                fpslabel.set_text(&format!("{:.2} fps", fpslabel.frame_clock().unwrap().fps()));
+                glib::source::Continue(true)
+            }),
+        );
         let target = adw::CallbackAnimationTarget::new(Some(Box::new(
             glib::clone!(@weak main_window => move |_| {
                 main_window.set_cursor_from_name(Some("text"));
@@ -987,7 +1040,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
                 ScrollDirection::Up => {
                     "up"
                 },
-                    ScrollDirection::Down => {
+                ScrollDirection::Down => {
                     "down"
                 }
                 ScrollDirection::Left => {
@@ -996,11 +1049,16 @@ impl Widgets<AppModel, ()> for AppWidgets {
                 ScrollDirection::Right => {
                     "right"
                 }
+                ScrollDirection::Smooth => {
+                    let deltas = event.deltas();
+                    log::error!("smooth scrolling delta-x:{} delta-y:{}", deltas.0, deltas.1);
+                    return gtk::Inhibit(false)
+                }
                 _ => {
                     return gtk::Inhibit(false)
                 }
             };
-            log::debug!("scrolling grid {} x: {}, y: {} {}", id, x, y, &direction);
+            log::warn!("scrolling grid {} x: {}, y: {} {}", id, x, y, &direction);
             let command = UiCommand::Serial(SerialCommand::Scroll { direction: direction.into(), grid_id: id, position: (0, 1), modifier });
             sender.send(AppMessage::UiCommand(command)).unwrap();
             gtk::Inhibit(false)
@@ -1056,6 +1114,11 @@ impl Widgets<AppModel, ()> for AppWidgets {
     }
 
     fn pre_view() {
+        let titlelines = model.title.lines().collect::<Vec<_>>();
+        if titlelines.len() > 1 {
+            self.window_title.set_title(titlelines[0]);
+            self.window_title.set_subtitle(titlelines[1]);
+        }
         if let Ok(true) = model.show_pointer.compare_exchange(
             true,
             false,
@@ -1098,15 +1161,15 @@ impl Widgets<AppModel, ()> for AppWidgets {
             atomic::Ordering::Acquire,
             atomic::Ordering::Relaxed,
         ) {
-            log::debug!(
+            log::error!(
                 "default font name: {}",
                 model.font_description.borrow().to_str()
             );
-            let (width, height) = model.size.get();
+            let (width, height) = model.window_size.get();
             let metrics = model.metrics.get();
-            let rows = height as f64 / metrics.height();
-            let cols = width as f64 / metrics.width();
-            log::info!(
+            let rows = (height as f64 / metrics.height()).round();
+            let cols = (width as f64 / metrics.width()).round();
+            log::error!(
                 "trying resize nvim to {}x{} original {}x{} {:?}",
                 rows,
                 cols,
@@ -1116,7 +1179,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
             );
             sender
                 .send(
-                    UiCommand::Parallel(ParallelCommand::Resize {
+                    UiCommand::Serial(SerialCommand::Resize {
                         width: cols as _,
                         height: rows as _,
                     })

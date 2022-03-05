@@ -74,3 +74,24 @@ impl From<(u64, u64)> for Rectangle {
         }
     }
 }
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct Clamp {
+    top: f64,
+    bot: f64,
+}
+
+impl Clamp {
+    pub fn new(top: f64, bot: f64) -> Clamp {
+        Clamp { top, bot }
+    }
+
+    pub fn top(&self) -> f64 {
+        self.top
+    }
+
+    pub fn bottom(&self) -> f64 {
+        self.bot
+    }
+}
+

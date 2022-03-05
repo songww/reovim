@@ -1,6 +1,6 @@
 mod imp {
     use core::f32;
-    use std::cell::{Cell, Ref};
+    use std::cell::Cell;
     use std::rc::Rc;
 
     use glib::translate::{from_glib_none, ToGlibPtr};
@@ -8,11 +8,9 @@ mod imp {
     use parking_lot::RwLock;
 
     use crate::metrics::Metrics;
-    use crate::vimview::textbuf::Lines;
-    use crate::vimview::TextCell;
+    use crate::vimview::{TextBuf, TextCell, TextLine};
 
     use super::super::highlights::HighlightDefinitions;
-    use super::super::TextBuf;
 
     const PANGO_SCALE: f64 = pango::SCALE as f64;
 
@@ -53,10 +51,10 @@ mod imp {
         fn new() -> Self {
             Self {
                 id: 0.into(),
-                width: 0.into(),
-                height: 0.into(),
+                width: 1.into(),
+                height: 1.into(),
                 is_float: false.into(),
-                textbuf: TextBuf::default().into(),
+                textbuf: TextBuf::new(1, 1).into(),
             }
         }
     }
@@ -117,13 +115,13 @@ mod imp {
                 }
                 "width" => {
                     self.width.replace(value.get::<u64>().unwrap());
-                    self.textbuf()
-                        .resize(self.height.get() as _, self.width.get() as _);
+                    // self.textbuf()
+                    //     .resize(self.height.get() as _, self.width.get() as _);
                 }
                 "height" => {
                     self.height.replace(value.get::<u64>().unwrap());
-                    self.textbuf()
-                        .resize(self.height.get() as _, self.width.get() as _);
+                    // self.textbuf()
+                    //     .resize(self.height.get() as _, self.width.get() as _);
                 }
                 _ => unimplemented!(),
             }
@@ -174,7 +172,7 @@ mod imp {
 
             let mut y = metrics.ascent();
 
-            let rows = textbuf.rows();
+            // let rows = textbuf.rows();
             log::debug!("text to render:");
             let desc = pctx.font_description();
             let mut layout = pango::Layout::new(&pctx);
@@ -182,10 +180,10 @@ mod imp {
             layout.set_font_description(desc.as_ref());
             let textbuf = self.textbuf();
             let lines = textbuf.lines();
-            for lineno in 0..rows {
+            for line in lines.iter() {
                 cr.move_to(0., y);
                 y += metrics.height();
-                let line = lines.get(lineno).unwrap();
+
                 let layoutline = if let Some((layout, layoutline)) = line.cache() {
                     unsafe {
                         let layout: *mut pango::ffi::PangoLayout = layout.to_glib_none().0;
@@ -194,7 +192,7 @@ mod imp {
                     pangocairo::update_layout(&cr, &layout);
                     layoutline
                 } else {
-                    let layoutline = self.layoutline(&mut layout, &lines, lineno, &metrics);
+                    let layoutline = self.layoutline(&mut layout, line, &metrics);
                     line.set_cache(layout.copy().unwrap(), layoutline.clone());
                     pangocairo::update_layout(&cr, &layout);
                     layoutline
@@ -237,8 +235,8 @@ mod imp {
             self.textbuf.replace(textbuf);
         }
 
-        pub(super) fn textbuf(&self) -> Ref<super::super::textbuf::TextBuf> {
-            unsafe { &*self.textbuf.as_ptr() }.borrow()
+        pub(super) fn textbuf(&self) -> &super::super::textbuf::TextBuf {
+            unsafe { &*self.textbuf.as_ptr() }
         }
 
         pub(super) fn set_width(&self, width: u64) {
@@ -260,7 +258,7 @@ mod imp {
         pub(super) fn size_required(&self) -> (i32, i32) {
             let textbuf = self.textbuf();
             let width = textbuf.cols() as f64;
-            let height = textbuf.rows() as f64;
+            let height = textbuf.nlines() as f64;
             let metrics = textbuf.metrics().unwrap().get();
             let w = width * metrics.width();
             let h = height * metrics.height();
@@ -270,11 +268,9 @@ mod imp {
         fn layoutline(
             &self,
             layout: &mut pango::Layout,
-            lines: &Lines,
-            lineno: usize,
+            line: &TextLine,
             metrics: &Metrics,
         ) -> pango::LayoutLine {
-            let line = lines.get(lineno).unwrap();
             let cols = line.len();
             let mut text = String::new();
             let mut chars: Vec<Option<CharAttr>> = vec![None; cols * 2];
@@ -334,7 +330,7 @@ mod imp {
             log::trace!(
                 "grid {} line {} baseline {} line-height {} space {} char-height {} unknown_glyphs {}",
                 self.id.get(),
-                lineno,
+                line.nr(),
                 layout.baseline(),
                 layout.line_readonly(0).unwrap().height(),
                 metrics.linespace(),
@@ -360,6 +356,7 @@ mod imp {
                 log::debug!("Scale line height failed.");
             }
 
+            // println!("grid {} line {} -> {}", self.id.get(), lineno, text);
 
             let layoutline: pango::LayoutLine = unsafe { self.align(layout, &chars, &metrics) };
             layoutline
@@ -466,7 +463,7 @@ glib::wrapper! {
 
 impl Default for VimGridView {
     fn default() -> Self {
-        VimGridView::new(u64::MAX, 0, 0)
+        VimGridView::new(u64::MAX, 1, 1)
     }
 }
 
@@ -500,13 +497,13 @@ impl VimGridView {
         self.imp().set_metrics(metrics);
     }
 
-    pub fn textbuf(&self) -> Ref<super::textbuf::TextBuf> {
+    pub fn textbuf(&self) -> &super::textbuf::TextBuf {
         self.imp().textbuf()
     }
 
     pub fn resize(&self, width: u64, height: u64) {
         self.imp().set_width(width);
         self.imp().set_height(height);
-        self.imp().textbuf().resize(height as _, width as _);
+        // self.imp().textbuf().resize(height as _, width as _);
     }
 }

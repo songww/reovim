@@ -7,6 +7,8 @@ use parking_lot::RwLock;
 
 use super::highlights::HighlightDefinitions;
 
+type Nr = usize;
+
 mod imp {
     use std::cell::Cell;
     use std::rc::Rc;
@@ -16,14 +18,19 @@ mod imp {
 
     use crate::vimview::HighlightDefinitions;
 
+    use super::Nr;
+
     #[derive(Derivative)]
     #[derivative(Debug)]
     pub struct _TextBuf {
         rows: usize,
         cols: usize,
 
+        top: f64,
+        bottom: f64,
+
         #[derivative(Debug = "ignore")]
-        cells: Box<[super::TextLine]>,
+        cells: Vec<super::TextLine>,
         metrics: Option<Rc<Cell<crate::metrics::Metrics>>>,
 
         #[derivative(Debug = "ignore")]
@@ -40,11 +47,18 @@ mod imp {
     }
 
     impl _TextBuf {
+        fn make_cells(rows: usize, cols: usize) -> Vec<super::TextLine> {
+            let tl = super::TextLine::new(cols);
+            vec![tl; rows]
+        }
+
         fn new(rows: usize, cols: usize) -> _TextBuf {
-            let cells = _TextBuf::make(rows, cols);
+            let cells = _TextBuf::make_cells(rows, cols);
             _TextBuf {
                 rows,
                 cols,
+                top: 0.,
+                bottom: 0.,
                 cells,
                 pctx: None,
                 hldefs: None,
@@ -53,7 +67,12 @@ mod imp {
         }
 
         fn clear(&mut self) {
-            self.cells = _TextBuf::make(self.rows, self.cols);
+            self.cells = _TextBuf::make_cells(self.rows, self.cols);
+            let nr = self.top.floor() as usize;
+            self.cells
+                .iter_mut()
+                .enumerate()
+                .for_each(|(idx, tl)| tl.nr = nr + idx);
         }
 
         fn reset_cache(&mut self) {
@@ -65,6 +84,155 @@ mod imp {
                     cell.reset_attrs(pctx, &hldefs, &metrics);
                 });
             });
+        }
+
+        pub fn nlines(&self) -> usize {
+            self.cells.len()
+        }
+
+        /// 在scroll之后丢弃之前(已失效)的cells
+        pub fn discard(&mut self) {
+            // discard before top.
+            for tl in self.cells.iter() {
+                let mut s = String::with_capacity(20);
+                let end = tl.len().min(10);
+                tl[..end].iter().for_each(|c| s.push_str(&c.text));
+                log::error!("x {}: '{}'", tl.nr(), s);
+            }
+            let nrs = self.cells.iter().map(|tl| tl.nr()).collect::<Vec<_>>();
+            log::error!("{} nrs {} {:?}", self.top, nrs.len(), nrs);
+            let top = self.top.floor() as Nr;
+            let mut idx = 0;
+            for tl in self.cells.iter() {
+                if tl.nr() >= top {
+                    break;
+                }
+                idx += 1;
+            }
+            log::error!("before point: {}", idx);
+            let _: Vec<_> = self.cells.drain(0..idx).collect();
+            log::error!("after erase before {}", self.cells.len());
+            // discard after bottom.
+            // let bottom = self.rows + self.top.ceil() as Nr;
+            // let after = self.cells.partition_point(|line| line.nr <= bottom);
+            log::error!(
+                "before {} rows discarded, now {} should be {}.",
+                idx,
+                self.cells.len(),
+                self.rows
+            );
+            self.cells.truncate(self.rows);
+            log::error!("remain {} rows after discarded.", self.cells.len());
+            for tl in self.cells.iter() {
+                let mut s = String::with_capacity(20);
+                let end = tl.len().min(10);
+                tl[..end].iter().for_each(|c| s.push_str(&c.text));
+                log::error!("{}: '{}'", tl.nr(), s);
+            }
+        }
+
+        pub fn set_viewport(&mut self, top: f64, bottom: f64) {
+            log::error!(
+                "setting viewport {}-{} / {}-{}",
+                top,
+                bottom,
+                self.top,
+                self.bottom
+            );
+            if top == self.top && bottom == self.bottom {
+                log::error!("setting viewport {}-{} ignored.", top, bottom);
+                return;
+            }
+            log::error!(
+                "setting viewport {}-{} old nrs: {:?}",
+                top,
+                bottom,
+                self.cells.iter().map(|tl| tl.nr()).collect::<Vec<_>>()
+            );
+            if self.top == 0. {
+                let topidx = top.floor() as usize;
+                for (idx, line) in self.cells.iter_mut().enumerate() {
+                    line.nr = topidx + idx;
+                }
+                self.top = top;
+                self.bottom = bottom;
+                log::error!(
+                    "setting viewport {}-{} new nrs: {:?}",
+                    top,
+                    bottom,
+                    self.cells.iter().map(|tl| tl.nr()).collect::<Vec<_>>()
+                );
+                return;
+            }
+            let first_nr = self.cells.first().unwrap().nr() as f64;
+            if self.top > top && first_nr > top {
+                assert!(
+                    first_nr >= 1.,
+                    "first_nr({}) should >= 1 top {}",
+                    first_nr,
+                    top
+                );
+                let nr = (first_nr - 1.) as usize;
+                let rows_prepend = (first_nr - top).floor() as usize;
+                log::error!(
+                    "setting viewport preppend accord top {} nr {} first_nr {} with {}",
+                    top,
+                    nr,
+                    first_nr,
+                    rows_prepend
+                );
+                assert!(first_nr as usize >= rows_prepend);
+                let mut lines = vec![super::TextLine::new(self.cols); rows_prepend];
+                lines.iter_mut().rev().enumerate().for_each(|(idx, line)| {
+                    line.nr = nr - idx;
+                });
+                let _ = self.cells.splice(0..0, lines).collect::<Vec<_>>();
+                assert_eq!(self.cells.first().unwrap().nr(), top as Nr);
+                assert!(
+                    self.cells.len() > self.rows,
+                    "{} > {}",
+                    self.cells.len(),
+                    self.rows
+                );
+            }
+            let last_nr = self.cells.last().unwrap().nr() as f64;
+            let required_rows = self.rows.max((bottom - top).floor() as usize);
+            let rows = (last_nr - top).floor() as usize;
+            if rows < required_rows {
+                let nr = last_nr as usize + 1;
+                let rows_append = required_rows - rows;
+                log::error!(
+                    "setting viewport max nr {} required max nr {} append {}",
+                    last_nr,
+                    top + self.rows as f64,
+                    rows_append
+                );
+                let mut lines = vec![super::TextLine::new(self.cols); rows_append];
+                lines.iter_mut().enumerate().for_each(|(idx, line)| {
+                    line.nr = nr + idx;
+                });
+                self.cells.extend(lines);
+                assert!(
+                    self.cells.last().unwrap().nr() >= bottom as Nr,
+                    "setting viewport {} nrs: {:?}",
+                    bottom,
+                    self.cells.iter().map(|c| c.nr()).collect::<Vec<_>>()
+                );
+                assert!(
+                    self.cells.len() > self.rows,
+                    "setting viewport {} > {}",
+                    self.cells.len(),
+                    self.rows
+                );
+            }
+            log::error!(
+                "setting viewport {}-{} new nrs: {:?}",
+                top,
+                bottom,
+                self.cells.iter().map(|tl| tl.nr()).collect::<Vec<_>>()
+            );
+            self.top = top;
+            self.bottom = bottom;
         }
 
         pub fn set_hldefs(&mut self, hldefs: Rc<RwLock<HighlightDefinitions>>) {
@@ -80,17 +248,38 @@ mod imp {
         }
 
         fn set_cells(&mut self, row: usize, col: usize, cells: &[crate::bridge::GridLineCell]) {
-            let nrows = self.rows;
+            let nrows = (self.bottom - self.top).ceil() as usize;
+            let rows = self.cells.len();
             let ncols = self.cols;
-            if nrows <= row {
-                log::error!(
-                    "set cells dest line {} dose not exists, total {} lines.",
-                    row,
-                    nrows
-                );
-                return;
-            }
-            let line = &self.cells[row];
+            assert!(self.rows <= rows, "{} <= {}", self.rows, rows);
+            // if nrows <= row {
+            //     log::error!(
+            //         "set cells dest line {} dose not exists, total {} lines.",
+            //         row,
+            //         nrows
+            //     );
+            //     return;
+            // }
+            let nr = self.top.floor() as usize + row;
+            let nrs = self.cells.iter().map(|c| c.nr).collect::<Vec<_>>();
+            let line = &self
+                .cells
+                .iter_mut()
+                .find(|line| line.nr == nr)
+                .or_else(|| {
+                    log::error!(
+                        "current top: {} bottom: {} cols: {} rows: {}/{} of nr {} nrs: {:?}",
+                        self.top,
+                        self.bottom,
+                        self.cols,
+                        self.rows,
+                        rows,
+                        nr,
+                        &nrs
+                    );
+                    None
+                })
+                .unwrap();
             line.cache.set(None);
             let pctx = self.pctx.as_ref().unwrap();
             let hldefs = self.hldefs.as_ref().unwrap().read();
@@ -118,7 +307,7 @@ mod imp {
                     };
                     cell.reset_attrs(pctx, &hldefs, &metrics);
                     log::trace!(
-                        "Setting cell {}x{} start_index {} end_index {}",
+                        "Setting cell {}[{}] start_index {} end_index {}",
                         row,
                         col + expands.len(),
                         start_index,
@@ -141,10 +330,14 @@ mod imp {
             //             cell.end_index
             //         )
             //     });
-            log::debug!(
-                "textbuf {}x{} setting line {} with {} cells from {} to {}",
+            log::info!(
+                "textbuf {}-{} {}x{}/{} setting line {}/{} with {} cells from {} to {}",
+                self.top,
+                self.bottom,
                 ncols,
+                rows,
                 nrows,
+                line.nr(),
                 row,
                 expands.len(),
                 col,
@@ -162,20 +355,99 @@ mod imp {
 
         /// drop head of {} rows. leave tail as empty.
         fn up(&mut self, rows: usize) {
-            let mut cells = _TextBuf::make(self.rows, self.cols);
-            cells[..(self.rows - rows)].swap_with_slice(&mut self.cells[rows..]);
-            self.cells = cells;
+            // self.cells.last().unwrap().nr + self.top.floor() as usize + self.rows
+            // let nr = self.cells.last().unwrap().nr + 1;
+            // let mut lines = vec![super::TextLine::new(self.cols); rows];
+            // lines.iter_mut().enumerate().for_each(|(idx, line)| {
+            //     line.nr = nr + idx;
+            // });
+            // self.cells.extend(lines);
         }
 
         /// drop tail of {} rows. leave head as empty.
         fn down(&mut self, rows: usize) {
-            let mut cells = _TextBuf::make(self.rows, self.cols);
-            cells[rows..].swap_with_slice(&mut self.cells[..(self.rows - rows)]);
-            self.cells = cells;
+            // let nr = self.cells.first().unwrap().nr - 1;
+            // let mut lines = vec![super::TextLine::new(self.cols); rows];
+            // lines.iter_mut().rev().enumerate().for_each(|(idx, line)| {
+            //     line.nr = nr - idx;
+            // });
+            // let _ = self.cells.splice(0..0, lines).collect::<Vec<_>>();
         }
 
         fn pango_context(&self) -> Rc<pango::Context> {
             self.pctx.clone().unwrap()
+        }
+
+        fn resize(&mut self, rows: usize, cols: usize) {
+            self.discard();
+            let old_rows = self.rows;
+            let old_cols = self.cols;
+            if old_rows == rows && old_cols == cols {
+                return;
+            }
+            // let nrows = rows.min(old_rows);
+            match rows {
+                rows if rows < self.rows => {
+                    log::error!("resizing truncate from {} to {}", self.cells.len(), rows);
+                    self.cells.truncate(rows);
+                }
+                rows if rows == self.rows => {
+                    // do not change, do nothing.
+                }
+                _ => {
+                    log::error!("resizing extend from {} to {}", self.cells.len(), rows);
+                    let mut lines = vec![super::TextLine::new(self.cols); rows - self.cells.len()];
+                    let nr = self
+                        .cells
+                        .last()
+                        .map(|tl| tl.nr() + 1)
+                        .unwrap_or(self.top as usize);
+                    lines
+                        .iter_mut()
+                        .enumerate()
+                        .for_each(|(idx, line)| line.nr = nr + idx);
+                    self.cells.extend(lines);
+                }
+            };
+
+            assert_eq!(self.cells.len(), rows);
+
+            self.cols = cols;
+            self.rows = rows;
+
+            if old_cols == cols {
+                return;
+            }
+            self.cells.iter_mut().for_each(|tl| {
+                let mut start_index = tl.last().map(|last| last.start_index).unwrap_or(0);
+                let old = std::mem::take(&mut tl.boxed);
+                let mut cells: Vec<_> = old.into();
+                if cols > old_cols {
+                    for _ in 0..(cols - old_cols) {
+                        cells.push({
+                            let mut cell = super::TextCell::default();
+                            cell.start_index = start_index;
+                            cell.end_index = start_index + 1;
+                            start_index += 1;
+                            cell
+                        });
+                    }
+                } else {
+                    cells.truncate(cols);
+                }
+                assert_eq!(cells.len(), cols);
+                tl.boxed = cells.into_boxed_slice();
+            });
+            assert_eq!(self.cells.len(), rows);
+
+            log::info!(
+                "resizing buf cells from {}x{} to {}x{} {}",
+                old_cols,
+                old_rows,
+                cols,
+                rows,
+                self.cells.len()
+            );
         }
     }
 
@@ -247,8 +519,20 @@ mod imp {
             self.inner.write().clear();
         }
 
+        pub(super) fn discard(&self) {
+            self.inner.write().discard();
+        }
+
         pub(super) fn resize(&self, rows: usize, cols: usize) {
             self.inner.write().resize(rows, cols);
+        }
+
+        pub(super) fn set_viewport(&self, top: f64, bottom: f64) {
+            self.inner.write().set_viewport(top, bottom);
+        }
+
+        pub(super) fn nlines(&self) -> usize {
+            self.inner.read().nlines()
         }
 
         pub(super) fn rows(&self) -> usize {
@@ -274,57 +558,6 @@ mod imp {
         }
     }
 
-    trait TextBufExt {
-        fn resize(&mut self, rows: usize, cols: usize);
-
-        fn make(rows: usize, cols: usize) -> Box<[super::TextLine]> {
-            let tl = super::TextLine::new(cols);
-            vec![tl; rows].into_boxed_slice()
-        }
-    }
-
-    impl TextBufExt for _TextBuf {
-        fn resize(&mut self, rows: usize, cols: usize) {
-            let old_rows = self.rows;
-            let old_cols = self.cols;
-            if old_rows == rows && old_cols == cols {
-                return;
-            }
-            self.cols = cols;
-            self.rows = rows;
-            let nrows = rows.min(old_rows);
-            let mut cells = vec![super::TextLine::new(0); rows];
-            cells[..nrows].swap_with_slice(&mut self.cells[..nrows]);
-            let cells: Vec<_> = cells
-                .into_iter()
-                .map(|tl| {
-                    let mut tl = tl.into_inner().into_vec();
-                    let mut start_index = tl.last().map(|last| last.start_index).unwrap_or(0);
-                    let old_cols = tl.len();
-                    tl.resize(cols, super::TextCell::default());
-                    if cols > old_cols {
-                        tl.iter_mut().skip(old_cols).for_each(|cell| {
-                            cell.start_index = start_index;
-                            cell.end_index = start_index + 1;
-                            start_index += 1;
-                        });
-                    }
-                    super::TextLine::from(tl.into_boxed_slice())
-                })
-                .collect();
-
-            log::debug!(
-                "resizing buf cells from {}x{} to {}x{}",
-                old_cols,
-                old_rows,
-                cols,
-                rows
-            );
-
-            self.cells = cells.into_boxed_slice();
-        }
-    }
-
     pub struct Lines<'a> {
         guard: RwLockReadGuard<'a, _TextBuf>,
     }
@@ -332,6 +565,27 @@ mod imp {
     impl<'a> Lines<'a> {
         pub fn get(&self, no: usize) -> Option<&super::TextLine> {
             self.guard.cells.get(no)
+        }
+
+        pub fn iter(&self) -> LineIter {
+            LineIter {
+                lines: self,
+                index: 0,
+            }
+        }
+    }
+
+    pub struct LineIter<'a, 'b> {
+        lines: &'b Lines<'a>,
+        index: usize,
+    }
+
+    impl<'b, 'a: 'b> Iterator for LineIter<'a, 'b> {
+        type Item = &'b super::TextLine;
+        fn next(&mut self) -> Option<Self::Item> {
+            let v = self.lines.get(self.index);
+            self.index += 1;
+            v
         }
     }
 }
@@ -342,9 +596,14 @@ glib::wrapper! {
     pub struct TextBuf(ObjectSubclass<imp::TextBuf>);
 }
 
+unsafe impl Sync for TextBuf {}
+unsafe impl Send for TextBuf {}
+
 impl TextBuf {
-    pub fn new() -> Self {
-        glib::Object::new::<Self>(&[]).expect("Failed to initialize TextBuf object")
+    pub fn new(cols: usize, rows: usize) -> Self {
+        let tb = glib::Object::new::<Self>(&[]).expect("Failed to initialize TextBuf object");
+        tb.resize(rows, cols);
+        tb
     }
 
     fn imp(&self) -> &imp::TextBuf {
@@ -357,6 +616,14 @@ impl TextBuf {
 
     pub fn resize(&self, rows: usize, cols: usize) {
         self.imp().resize(rows, cols);
+    }
+
+    pub fn set_viewport(&self, top: f64, bottom: f64) {
+        self.imp().set_viewport(top, bottom);
+    }
+
+    pub fn nlines(&self) -> usize {
+        self.imp().nlines()
     }
 
     pub fn rows(&self) -> usize {
@@ -412,6 +679,10 @@ impl TextBuf {
 
     pub fn reset_cache(&self) {
         self.imp().reset_cache();
+    }
+
+    pub fn discard(&self) {
+        self.imp().discard();
     }
 }
 
@@ -544,6 +815,7 @@ impl TextCell {
 
 #[derive(Default)]
 pub struct TextLine {
+    nr: Nr,
     boxed: Box<[TextCell]>,
     cache: Cell<Option<(pango::Layout, pango::LayoutLine)>>,
 }
@@ -551,6 +823,7 @@ pub struct TextLine {
 impl Clone for TextLine {
     fn clone(&self) -> Self {
         TextLine {
+            nr: self.nr,
             boxed: self.boxed.clone(),
             cache: Cell::new(unsafe { &*self.cache.as_ptr() }.clone()),
         }
@@ -566,9 +839,14 @@ impl TextLine {
             cell.end_index = start_index + 1;
         });
         Self {
-            boxed: line.into_boxed_slice(),
+            nr: 0,
             cache: Cell::new(None),
+            boxed: line.into_boxed_slice(),
         }
+    }
+
+    pub fn nr(&self) -> Nr {
+        self.nr
     }
 
     pub fn cache(&self) -> Option<(pango::Layout, pango::LayoutLine)> {
@@ -617,12 +895,6 @@ impl From<Box<[TextCell]>> for TextLine {
 
 impl Into<Box<[TextCell]>> for TextLine {
     fn into(self) -> Box<[TextCell]> {
-        self.boxed
-    }
-}
-
-impl TextLine {
-    fn into_inner(self) -> Box<[TextCell]> {
         self.boxed
     }
 }

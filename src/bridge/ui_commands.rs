@@ -13,6 +13,7 @@ use crate::{
     running_tracker::RUNNING_TRACKER,
 };
 
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
 pub enum MouseAction {
     Drag,
@@ -126,6 +127,10 @@ pub enum SerialCommand {
         position: (u32, u32),
         modifier: gtk::gdk::ModifierType,
     },
+    Resize {
+        width: u64,
+        height: u64,
+    },
 }
 
 impl SerialCommand {
@@ -206,17 +211,20 @@ impl SerialCommand {
                 .await
                 .expect("Mouse Drag Failed");
             }
+            SerialCommand::Resize { width, height } => {
+                log::trace!("Window resize to: {}x{}", width, height);
+                nvim.ui_try_resize(width.max(10) as i64, height.max(3) as i64)
+                    .await
+                    .expect("Resize failed");
+            }
         }
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum ParallelCommand {
     Quit,
-    Resize {
-        width: u64,
-        height: u64,
-    },
     FileDrop(String),
     FocusLost,
     FocusGained,
@@ -233,10 +241,6 @@ impl ParallelCommand {
             ParallelCommand::Quit => {
                 nvim.command("qa!").await.ok();
             }
-            ParallelCommand::Resize { width, height } => nvim
-                .ui_try_resize(width.max(10) as i64, height.max(3) as i64)
-                .await
-                .expect("Resize failed"),
             ParallelCommand::FocusLost => nvim
                 .command("if exists('#FocusLost') | doautocmd <nomodeline> FocusLost | endif")
                 .await
