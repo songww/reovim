@@ -53,3 +53,12 @@ Supports ligatures and font shaping.
 Font fallback supports rendering of emoji not contained in the configured font.
 
 ![Emoji](./assets/Emoji.png)
+
+## Planing
+
+[ ] Animated Cursor. [example](https://github.com/neovide/neovide#animated-cursor)
+[ ] Animated Windows. [example](https://github.com/neovide/neovide#animated-windows)
+[ ] Smooth scrolling.
+[ ] Copy selections.
+[ ] Paste from clipboards.
+[ ] Better font rendering.
