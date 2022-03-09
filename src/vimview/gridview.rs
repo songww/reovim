@@ -210,7 +210,7 @@ mod imp {
             for_size: i32,
         ) -> (i32, i32, i32, i32) {
             let (w, h) = self.size_required();
-            log::debug!(
+            log::error!(
                 "measuring grid {} orientation {} for_size {} size_required {}x{}",
                 self.id.get(),
                 orientation,

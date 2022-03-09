@@ -13,6 +13,7 @@ description = "This is a graphical user interface for Neovim, powered by gtk4-rs
 log = "0.4"
 which = "4"
 anyhow = "1"
+chrono = "0.4"
 fragile = "1"
 futures = "0.3"
 tracker = "0.1"
@@ -25,6 +26,7 @@ vector-map = "1"
 async-trait = "0.1"
 derive_more = "0.99"
 pin-project = "1"
+parking_lot = "0.12"
 clap = { version = "3", features = [ "derive", "env" ] }
 chan = { version = "0.5", package = "crossbeam-channel" }
 nvim = { version = "0.4", package = "nvim-rs", features = [ "use_tokio" ] }
@@ -35,7 +37,6 @@ relm-components = { version = "0.4", package = "relm4-components" }
 
 tokio = { version = "1", features = ["process", "io-util", "sync", "rt", "time", "signal", "rt-multi-thread"] }
 tokio-util = { version = "0.7", features = ["compat"] }
-parking_lot = "0.12"
 
 [dependencies.adw]
 package = "libadwaita"

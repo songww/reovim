@@ -11,6 +11,7 @@ type Nr = usize;
 
 mod imp {
     use std::cell::Cell;
+    use std::collections::VecDeque;
     use std::rc::Rc;
 
     use glib::subclass::prelude::*;
@@ -30,7 +31,7 @@ mod imp {
         bottom: f64,
 
         #[derivative(Debug = "ignore")]
-        cells: Vec<super::TextLine>,
+        textlines: VecDeque<super::TextLine>,
         metrics: Option<Rc<Cell<crate::metrics::Metrics>>>,
 
         #[derivative(Debug = "ignore")]
@@ -47,19 +48,21 @@ mod imp {
     }
 
     impl _TextBuf {
-        fn make_cells(rows: usize, cols: usize) -> Vec<super::TextLine> {
+        fn make_textlines(rows: usize, cols: usize) -> VecDeque<super::TextLine> {
             let tl = super::TextLine::new(cols);
-            vec![tl; rows]
+            let mut textlines = VecDeque::with_capacity(rows);
+            textlines.resize(rows, tl);
+            textlines
         }
 
         fn new(rows: usize, cols: usize) -> _TextBuf {
-            let cells = _TextBuf::make_cells(rows, cols);
+            let textlines = _TextBuf::make_textlines(rows, cols);
             _TextBuf {
                 rows,
                 cols,
                 top: 0.,
                 bottom: 0.,
-                cells,
+                textlines,
                 pctx: None,
                 hldefs: None,
                 metrics: None,
@@ -67,9 +70,9 @@ mod imp {
         }
 
         fn clear(&mut self) {
-            self.cells = _TextBuf::make_cells(self.rows, self.cols);
+            self.textlines = _TextBuf::make_textlines(self.rows, self.cols);
             let nr = self.top.floor() as usize;
-            self.cells
+            self.textlines
                 .iter_mut()
                 .enumerate()
                 .for_each(|(idx, tl)| tl.nr = nr + idx);
@@ -79,7 +82,7 @@ mod imp {
             let pctx = self.pctx.as_ref().unwrap();
             let hldefs = self.hldefs.as_ref().unwrap().read();
             let metrics = self.metrics.as_ref().unwrap().get();
-            self.cells.iter_mut().for_each(|line| {
+            self.textlines.iter_mut().for_each(|line| {
                 line.iter_mut().for_each(|cell| {
                     cell.reset_attrs(pctx, &hldefs, &metrics);
                 });
@@ -87,152 +90,246 @@ mod imp {
         }
 
         pub fn nlines(&self) -> usize {
-            self.cells.len()
+            self.textlines.len()
+        }
+
+        fn ensure_rows(&mut self, rows: usize) {
+            match rows {
+                rows if rows < self.textlines.len() => {
+                    log::error!(
+                        "resizing truncate from {} to {}",
+                        self.textlines.len(),
+                        rows
+                    );
+                    self.textlines.truncate(rows);
+                }
+                rows if rows == self.textlines.len() => {
+                    // do not change, do nothing.
+                }
+                _ => {
+                    self.append_rows(rows - self.textlines.len());
+                }
+            };
+        }
+
+        fn append_rows(&mut self, rows: usize) {
+            log::error!("resizing extend {} from {}", rows, self.textlines.len());
+            let mut lines = vec![super::TextLine::new(self.cols); rows];
+            let nr = self
+                .textlines
+                .back()
+                .map(|tl| tl.nr() + 1)
+                .unwrap_or(self.top as usize);
+            lines
+                .iter_mut()
+                .enumerate()
+                .for_each(|(idx, line)| line.nr = nr + idx);
+            self.textlines.extend(lines);
         }
 
         /// 在scroll之后丢弃之前(已失效)的cells
         pub fn discard(&mut self) {
             // discard before top.
-            for tl in self.cells.iter() {
+            for tl in self.textlines.iter() {
                 let mut s = String::with_capacity(20);
                 let end = tl.len().min(10);
                 tl[..end].iter().for_each(|c| s.push_str(&c.text));
                 log::error!("x {}: '{}'", tl.nr(), s);
             }
-            let nrs = self.cells.iter().map(|tl| tl.nr()).collect::<Vec<_>>();
+            let nrs = self.textlines.iter().map(|tl| tl.nr()).collect::<Vec<_>>();
             log::error!("{} nrs {} {:?}", self.top, nrs.len(), nrs);
             let top = self.top.floor() as Nr;
-            let mut idx = 0;
-            for tl in self.cells.iter() {
-                if tl.nr() >= top {
+
+            let mut dropped = 0;
+            while let Some(front) = self.textlines.front() {
+                if front.nr() < top {
+                    dropped += 1;
+                    self.textlines.pop_front();
+                } else {
                     break;
                 }
-                idx += 1;
             }
-            log::error!("before point: {}", idx);
-            let _: Vec<_> = self.cells.drain(0..idx).collect();
-            log::error!("after erase before {}", self.cells.len());
-            // discard after bottom.
-            // let bottom = self.rows + self.top.ceil() as Nr;
-            // let after = self.cells.partition_point(|line| line.nr <= bottom);
+
             log::error!(
-                "before {} rows discarded, now {} should be {}.",
-                idx,
-                self.cells.len(),
-                self.rows
+                "before {} erased, lift {} elements",
+                dropped,
+                self.textlines.len()
             );
-            self.cells.truncate(self.rows);
-            log::error!("remain {} rows after discarded.", self.cells.len());
-            for tl in self.cells.iter() {
+            if self.textlines.is_empty() {
+                self.textlines = _TextBuf::make_textlines(self.rows, self.cols);
+                return;
+            }
+            // discard bottom.
+            if self.textlines.len() > self.rows {
+                self.textlines.truncate(self.rows);
+            }
+
+            // make sure in right size.
+            if self.textlines.len() != self.rows {
+                self.ensure_rows(self.rows);
+            }
+
+            let mut prevnr = self.textlines.front().unwrap().nr();
+            // let mut split_at = None;
+            for tl in self.textlines.iter().skip(1) {
+                assert_eq!(tl.nr(), prevnr + 1);
+                prevnr = tl.nr();
+            }
+
+            assert_eq!(self.rows, self.textlines.len());
+            // if let Some(at) = split_at {
+            //     self.textlines.truncate(at);
+            // }
+
+            for tl in self.textlines.iter() {
                 let mut s = String::with_capacity(20);
                 let end = tl.len().min(10);
                 tl[..end].iter().for_each(|c| s.push_str(&c.text));
-                log::error!("{}: '{}'", tl.nr(), s);
+                log::error!(
+                    "discarded {}-{} {}: '{}'",
+                    self.top,
+                    self.bottom,
+                    tl.nr(),
+                    s
+                );
+            }
+        }
+
+        pub fn flush_nrs(&mut self) {
+            let topnr = self.top.floor() as usize;
+            for (idx, tl) in self.textlines.iter_mut().enumerate() {
+                tl.nr = topnr + idx;
             }
         }
 
         pub fn set_viewport(&mut self, top: f64, bottom: f64) {
-            log::error!(
+            log::info!(
                 "setting viewport {}-{} / {}-{}",
                 top,
                 bottom,
                 self.top,
                 self.bottom
             );
-            if top == self.top && bottom == self.bottom {
-                log::error!("setting viewport {}-{} ignored.", top, bottom);
+            let self_top = self.top;
+            let self_bottom = self.bottom;
+            self.top = top;
+            self.bottom = bottom;
+            if (self_top, self_bottom) == (0., 0.) {
+                self.flush_nrs();
+                return;
+            }
+            if top == self_top {
+                log::debug!("setting viewport {}-{} ignored.", top, bottom);
+                self.top = top;
+                self.bottom = bottom;
                 return;
             }
             log::error!(
                 "setting viewport {}-{} old nrs: {:?}",
                 top,
                 bottom,
-                self.cells.iter().map(|tl| tl.nr()).collect::<Vec<_>>()
+                self.textlines.iter().map(|tl| tl.nr()).collect::<Vec<_>>()
             );
-            if self.top == 0. {
-                let topidx = top.floor() as usize;
-                for (idx, line) in self.cells.iter_mut().enumerate() {
-                    line.nr = topidx + idx;
+            let topusize = top.floor() as usize;
+
+            let topnr = self.textlines.front().unwrap().nr();
+            if topusize < topnr {
+                // push_front 5 4 3 2 1
+                for nr in (topusize..topnr).rev() {
+                    let mut elt = super::TextLine::new(self.cols);
+                    elt.nr = nr;
+                    self.textlines.push_front(elt);
                 }
-                self.top = top;
-                self.bottom = bottom;
                 log::error!(
-                    "setting viewport {}-{} new nrs: {:?}",
+                    "setting viewport {}-{} insert {} at front",
                     top,
                     bottom,
-                    self.cells.iter().map(|tl| tl.nr()).collect::<Vec<_>>()
-                );
-                return;
-            }
-            let first_nr = self.cells.first().unwrap().nr() as f64;
-            if self.top > top && first_nr > top {
-                assert!(
-                    first_nr >= 1.,
-                    "first_nr({}) should >= 1 top {}",
-                    first_nr,
-                    top
-                );
-                let nr = (first_nr - 1.) as usize;
-                let rows_prepend = (first_nr - top).floor() as usize;
-                log::error!(
-                    "setting viewport preppend accord top {} nr {} first_nr {} with {}",
-                    top,
-                    nr,
-                    first_nr,
-                    rows_prepend
-                );
-                assert!(first_nr as usize >= rows_prepend);
-                let mut lines = vec![super::TextLine::new(self.cols); rows_prepend];
-                lines.iter_mut().rev().enumerate().for_each(|(idx, line)| {
-                    line.nr = nr - idx;
-                });
-                let _ = self.cells.splice(0..0, lines).collect::<Vec<_>>();
-                assert_eq!(self.cells.first().unwrap().nr(), top as Nr);
-                assert!(
-                    self.cells.len() > self.rows,
-                    "{} > {}",
-                    self.cells.len(),
-                    self.rows
+                    topusize - topnr
                 );
             }
-            let last_nr = self.cells.last().unwrap().nr() as f64;
-            let required_rows = self.rows.max((bottom - top).floor() as usize);
-            let rows = (last_nr - top).floor() as usize;
-            if rows < required_rows {
-                let nr = last_nr as usize + 1;
-                let rows_append = required_rows - rows;
-                log::error!(
-                    "setting viewport max nr {} required max nr {} append {}",
-                    last_nr,
-                    top + self.rows as f64,
-                    rows_append
-                );
-                let mut lines = vec![super::TextLine::new(self.cols); rows_append];
-                lines.iter_mut().enumerate().for_each(|(idx, line)| {
-                    line.nr = nr + idx;
-                });
-                self.cells.extend(lines);
+
+            // make sure that has self.rows after top.
+            let mut start_at = None;
+            let mut insert_at = None;
+            for (idx, tl) in self.textlines.iter().enumerate() {
+                if tl.nr() == topusize {
+                    start_at.replace(idx);
+                    break;
+                }
+                if tl.nr() > topusize {
+                    insert_at.replace((idx, tl.nr()));
+                    break;
+                }
+            }
+            log::error!(
+                "setting viewport {}-{} start-at {:?} insert-at {:?}",
+                top,
+                bottom,
+                start_at,
+                insert_at,
+            );
+            if let Some((idx, lastnr)) = insert_at {
+                // lastnr - topusize
+                let mut afters = self.textlines.split_off(idx);
+                for nr in topusize..lastnr {
+                    let mut elt = super::TextLine::new(self.cols);
+                    elt.nr = nr;
+                    self.textlines.push_back(elt);
+                }
+                self.textlines.append(&mut afters);
+                // check from idx
+                // elements before idx is ok.
+                start_at.replace(idx);
+            }
+            // remains to check.
+            let mut remains = self.rows as isize;
+            while let Some(at) = start_at.take() {
                 assert!(
-                    self.cells.last().unwrap().nr() >= bottom as Nr,
-                    "setting viewport {} nrs: {:?}",
-                    bottom,
-                    self.cells.iter().map(|c| c.nr()).collect::<Vec<_>>()
+                    remains.is_positive(),
+                    "remains should be positive ({}).",
+                    remains
                 );
-                assert!(
-                    self.cells.len() > self.rows,
-                    "setting viewport {} > {}",
-                    self.cells.len(),
-                    self.rows
-                );
+                let mut iter = self.textlines.iter().skip(at).take(remains as usize);
+                // 检查是否连续,且长度是否够self.rows.
+                let mut rows_contiguous = 0;
+                let mut lacks = None;
+                // which exists exactly.
+                let mut prevnr = iter.next().unwrap().nr();
+                for tl in iter {
+                    if prevnr + 1 != tl.nr() {
+                        lacks.replace(tl.nr() - prevnr - 1);
+                        break;
+                    }
+                    remains -= 1;
+                    rows_contiguous += 1;
+                    prevnr = tl.nr();
+                }
+                if let Some(lacks) = lacks {
+                    assert!(
+                        remains.is_positive(),
+                        "remains should be positive ({}).",
+                        remains
+                    );
+                    // at + rows 处 append (self.rows - rows)
+                    let mut afters = self.textlines.split_off(at + rows_contiguous + 1);
+                    for offset in 0..((self.rows - rows_contiguous).min(lacks)) {
+                        let mut elt = super::TextLine::new(self.cols);
+                        elt.nr = prevnr + offset + 1;
+                        self.textlines.push_back(elt);
+                    }
+                    self.textlines.append(&mut afters);
+                    start_at.replace(at + rows_contiguous + 1);
+                }
+            }
+            if remains.is_positive() {
+                self.append_rows(remains as usize);
             }
             log::error!(
                 "setting viewport {}-{} new nrs: {:?}",
                 top,
                 bottom,
-                self.cells.iter().map(|tl| tl.nr()).collect::<Vec<_>>()
+                self.textlines.iter().map(|tl| tl.nr()).collect::<Vec<_>>()
             );
-            self.top = top;
-            self.bottom = bottom;
         }
 
         pub fn set_hldefs(&mut self, hldefs: Rc<RwLock<HighlightDefinitions>>) {
@@ -249,7 +346,7 @@ mod imp {
 
         fn set_cells(&mut self, row: usize, col: usize, cells: &[crate::bridge::GridLineCell]) {
             let nrows = (self.bottom - self.top).ceil() as usize;
-            let rows = self.cells.len();
+            let rows = self.textlines.len();
             let ncols = self.cols;
             assert!(self.rows <= rows, "{} <= {}", self.rows, rows);
             // if nrows <= row {
@@ -261,9 +358,9 @@ mod imp {
             //     return;
             // }
             let nr = self.top.floor() as usize + row;
-            let nrs = self.cells.iter().map(|c| c.nr).collect::<Vec<_>>();
+            let nrs = self.textlines.iter().map(|c| c.nr).collect::<Vec<_>>();
             let line = &self
-                .cells
+                .textlines
                 .iter_mut()
                 .find(|line| line.nr == nr)
                 .or_else(|| {
@@ -343,7 +440,7 @@ mod imp {
                 col,
                 col_to
             );
-            let line = &mut self.cells[row];
+            let line = &mut self.textlines[row];
             line[col..col_to].swap_with_slice(&mut expands);
             line.iter_mut().fold(0, |start_index, cell| {
                 cell.start_index = start_index;
@@ -385,32 +482,17 @@ mod imp {
             if old_rows == rows && old_cols == cols {
                 return;
             }
-            // let nrows = rows.min(old_rows);
-            match rows {
-                rows if rows < self.rows => {
-                    log::error!("resizing truncate from {} to {}", self.cells.len(), rows);
-                    self.cells.truncate(rows);
-                }
-                rows if rows == self.rows => {
-                    // do not change, do nothing.
-                }
-                _ => {
-                    log::error!("resizing extend from {} to {}", self.cells.len(), rows);
-                    let mut lines = vec![super::TextLine::new(self.cols); rows - self.cells.len()];
-                    let nr = self
-                        .cells
-                        .last()
-                        .map(|tl| tl.nr() + 1)
-                        .unwrap_or(self.top as usize);
-                    lines
-                        .iter_mut()
-                        .enumerate()
-                        .for_each(|(idx, line)| line.nr = nr + idx);
-                    self.cells.extend(lines);
-                }
-            };
 
-            assert_eq!(self.cells.len(), rows);
+            log::error!(
+                "resizing from {}x{} to {}x{}",
+                old_rows,
+                old_cols,
+                rows,
+                cols
+            );
+            self.ensure_rows(rows);
+
+            assert_eq!(self.textlines.len(), rows);
 
             self.cols = cols;
             self.rows = rows;
@@ -418,7 +500,7 @@ mod imp {
             if old_cols == cols {
                 return;
             }
-            self.cells.iter_mut().for_each(|tl| {
+            self.textlines.iter_mut().for_each(|tl| {
                 let mut start_index = tl.last().map(|last| last.start_index).unwrap_or(0);
                 let old = std::mem::take(&mut tl.boxed);
                 let mut cells: Vec<_> = old.into();
@@ -438,7 +520,7 @@ mod imp {
                 assert_eq!(cells.len(), cols);
                 tl.boxed = cells.into_boxed_slice();
             });
-            assert_eq!(self.cells.len(), rows);
+            assert_eq!(self.textlines.len(), rows);
 
             log::info!(
                 "resizing buf cells from {}x{} to {}x{} {}",
@@ -446,7 +528,7 @@ mod imp {
                 old_rows,
                 cols,
                 rows,
-                self.cells.len()
+                self.textlines.len()
             );
         }
     }
@@ -564,7 +646,7 @@ mod imp {
 
     impl<'a> Lines<'a> {
         pub fn get(&self, no: usize) -> Option<&super::TextLine> {
-            self.guard.cells.get(no)
+            self.guard.textlines.get(no)
         }
 
         pub fn iter(&self) -> LineIter {

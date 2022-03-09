@@ -861,7 +861,6 @@ impl Widgets<AppModel, ()> for AppWidgets {
         main_window = gtk::ApplicationWindow {
             set_default_width: model.default_width,
             set_default_height: model.default_height,
-            set_cursor_from_name: Some("text"),
             set_titlebar: titlebar = Some(&adw::HeaderBar) {
                 set_title_widget: window_title = Some(&adw::WindowTitle) {
                     set_title: &model.title,
@@ -872,6 +871,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
                 },
             },
             set_child: vbox = Some(&gtk::Box) {
+                set_cursor_from_name: Some("text"),
                 set_orientation: gtk::Orientation::Vertical,
                 set_spacing: 0,
                 set_hexpand: true,
@@ -987,11 +987,11 @@ impl Widgets<AppModel, ()> for AppWidgets {
             }),
         );
         let target = adw::CallbackAnimationTarget::new(Some(Box::new(
-            glib::clone!(@weak main_window => move |_| {
-                main_window.set_cursor_from_name(Some("text"));
+            glib::clone!(@weak vbox => move |_| {
+                vbox.set_cursor_from_name(Some("text"));
             }),
         )));
-        let pointer_animation = adw::TimedAnimation::new(&main_window, 0., 1., 1000, &target);
+        let pointer_animation = adw::TimedAnimation::new(&vbox, 0., 1., 1000, &target);
         pointer_animation.set_easing(adw::Easing::Linear);
         pointer_animation.set_repeat_count(1);
         pointer_animation.connect_done(move |this| {
