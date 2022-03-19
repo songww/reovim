@@ -107,19 +107,20 @@ mod imp {
                     // do not change, do nothing.
                 }
                 _ => {
-                    self.append_rows(rows - self.textlines.len());
+                    self.append_rows(rows - self.textlines.len(), None);
                 }
             };
         }
 
-        fn append_rows(&mut self, rows: usize) {
+        fn append_rows(&mut self, rows: usize, nr: impl Into<Option<Nr>>) {
             log::error!("resizing extend {} from {}", rows, self.textlines.len());
             let mut lines = vec![super::TextLine::new(self.cols); rows];
-            let nr = self
-                .textlines
-                .back()
-                .map(|tl| tl.nr() + 1)
-                .unwrap_or(self.top as usize);
+            let nr = nr.into().unwrap_or_else(|| {
+                self.textlines
+                    .back()
+                    .map(|tl| tl.nr() + 1)
+                    .unwrap_or(self.top as usize)
+            });
             lines
                 .iter_mut()
                 .enumerate()
@@ -232,6 +233,7 @@ mod imp {
             );
             let topusize = top.floor() as usize;
 
+            let botnr = self.textlines.back().unwrap().nr();
             let topnr = self.textlines.front().unwrap().nr();
             if topusize < topnr {
                 // push_front 5 4 3 2 1
@@ -240,12 +242,22 @@ mod imp {
                     elt.nr = nr;
                     self.textlines.push_front(elt);
                 }
+                log::error!("topusize: {} topnr: {}", topusize, topnr);
                 log::error!(
                     "setting viewport {}-{} insert {} at front",
                     top,
                     bottom,
-                    topusize - topnr
+                    topnr - topusize
                 );
+                if topusize < botnr {
+                    // FIXME: preserve line number.
+                    // new cells maybe not contains line number, if relativenumber is enabled.
+                }
+            } else if botnr < topusize {
+                let rows = (bottom - top).floor() as usize;
+                self.append_rows(rows, topusize);
+                // FIXME: preserve line number.
+                // new cells maybe not contains line number, if relativenumber is enabled.
             }
 
             // make sure that has self.rows after top.
@@ -284,6 +296,7 @@ mod imp {
             // remains to check.
             let mut remains = self.rows as isize;
             while let Some(at) = start_at.take() {
+                log::info!("still should append to end {}", remains);
                 assert!(
                     remains.is_positive(),
                     "remains should be positive ({}).",
@@ -321,8 +334,9 @@ mod imp {
                     start_at.replace(at + rows_contiguous + 1);
                 }
             }
+            log::info!("finnal remains {}", remains);
             if remains.is_positive() {
-                self.append_rows(remains as usize);
+                self.append_rows(remains as usize, None);
             }
             log::error!(
                 "setting viewport {}-{} new nrs: {:?}",
@@ -359,7 +373,7 @@ mod imp {
             // }
             let nr = self.top.floor() as usize + row;
             let nrs = self.textlines.iter().map(|c| c.nr).collect::<Vec<_>>();
-            let line = &self
+            let line = &mut self
                 .textlines
                 .iter_mut()
                 .find(|line| line.nr == nr)
@@ -440,7 +454,7 @@ mod imp {
                 col,
                 col_to
             );
-            let line = &mut self.textlines[row];
+            // let line = &mut self.textlines[row];
             line[col..col_to].swap_with_slice(&mut expands);
             line.iter_mut().fold(0, |start_index, cell| {
                 cell.start_index = start_index;

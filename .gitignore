@@ -1,8 +1,9 @@
 target/
 src/ui
+src/_bridge
 vim/
 .vscode/
 perf.data
 perf.data.old
 flamegraph.svg
-box_drawing.rs
+textview

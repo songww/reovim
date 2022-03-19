@@ -454,8 +454,8 @@ impl AppUpdate for AppModel {
                         height,
                     } => {
                         log::info!("Resizing grid {} to {}x{}.", grid, width, height);
-                        assert!(width > 1);
-                        assert!(height > 1);
+                        assert!(width >= 1);
+                        assert!(height >= 1);
 
                         let exists = self.vgrids.get(grid).is_some();
                         if exists {

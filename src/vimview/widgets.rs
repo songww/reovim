@@ -244,10 +244,15 @@ impl factory::FactoryPrototype for VimGrid {
             .map(|clamp| clamp.bottom() - clamp.top())
             .unwrap_or_else(|| self.height() as f64)
             .min(self.height() as f64);
-        let height_request = rows * m.height();
+        let height_request = (rows * m.height()).max(1.);
         let vadjustment = gtk::Adjustment::default();
         vadjustment.set_page_size(height_request as f64);
 
+        log::info!(
+            "creating {} scrolled window max-height: {}",
+            grid,
+            height_request
+        );
         let win = gtk::ScrolledWindow::builder()
             .child(&view)
             .has_frame(false)
@@ -423,6 +428,7 @@ impl factory::FactoryPrototype for VimGrid {
         if self.width != p_width || self.height != p_height {
             let metrics = self.metrics.get();
             let height_request = self.height as f64 * metrics.height();
+            log::info!("resizing scrolled window max-height: {}", height_request);
             widgets.root.child().map(|child| {
                 let win = child.downcast_ref::<gtk::ScrolledWindow>().unwrap();
                 win.set_max_content_height(height_request as _);
