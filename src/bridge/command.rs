@@ -56,7 +56,7 @@ fn create_platform_shell_command(_command: String) -> Option<StdCommand> {
     if SETTINGS.get::<CmdLineSettings>().wsl {
         let mut result = StdCommand::new("wsl");
         result.args(&["$SHELL", "-lic"]);
-        result.arg(command);
+        result.arg(_command);
 
         Some(result)
     } else {
@@ -68,7 +68,7 @@ fn create_platform_shell_command(_command: String) -> Option<StdCommand> {
         let shell = std::env::var("SHELL").unwrap();
         let mut result = StdCommand::new(shell);
         result.args(&["-lic"]);
-        result.arg(command);
+        result.arg(_command);
         Some(result)
     }
 
