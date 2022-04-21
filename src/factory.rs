@@ -65,6 +65,7 @@ where
     }
 
     /// Initialize a new [`FactoryMap`] with a normal [`Vec`].
+    #[allow(dead_code)]
     #[must_use]
     pub fn from_hashmap(data: FxHashMap<u64, Data>) -> Self {
         let length = data.len();
@@ -93,12 +94,14 @@ where
     // }
 
     /// Get the internal data of the [`FactoryMap`].
+    #[allow(dead_code)]
     #[must_use]
     pub fn into_hashmap(self) -> FxHashMap<u64, Data> {
         self.data
     }
 
     /// Remove all data from the [`FactoryMap`].
+    #[allow(dead_code)]
     pub fn clear(&mut self) {
         let stage = &mut self.staged.borrow_mut();
 
@@ -109,11 +112,13 @@ where
     }
 
     /// Returns the length as amount of elements stored in this type.
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.data.len()
     }
 
     /// Returns [`true`] if the length of this type is `0`.
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.data.is_empty()
     }

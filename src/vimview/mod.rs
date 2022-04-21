@@ -5,11 +5,8 @@ mod messageview;
 mod textbuf;
 mod widgets;
 
-use std::{
-    cell::RefCell,
-    ops::{Deref, DerefMut},
-    rc::Rc,
-};
+use std::ops::{Deref, DerefMut};
+use std::sync::Arc;
 
 pub use gridview::VimGridView;
 pub use highlights::HighlightDefinitions;
@@ -18,24 +15,20 @@ pub use textbuf::{TextCell, TextLine};
 pub use widgets::{VimGrid, VimGridWidgets};
 
 #[derive(Clone, Debug)]
-pub struct TextBuf(Rc<RefCell<textbuf::TextBuf>>);
+pub struct TextBuf(Arc<textbuf::TextBuf>);
+
+unsafe impl Sync for TextBuf {}
+unsafe impl Send for TextBuf {}
 
 impl TextBuf {
     pub fn new(rows: usize, cols: usize) -> Self {
-        let buf = Self::default();
-        buf.0.borrow_mut().resize(rows, cols);
+        let buf = TextBuf(Arc::new(textbuf::TextBuf::new(cols, rows)));
         buf
     }
 }
 
-impl Default for TextBuf {
-    fn default() -> Self {
-        Self(Rc::new(RefCell::new(textbuf::TextBuf::new())))
-    }
-}
-
 impl Deref for TextBuf {
-    type Target = Rc<RefCell<textbuf::TextBuf>>;
+    type Target = Arc<textbuf::TextBuf>;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
@@ -47,14 +40,14 @@ impl DerefMut for TextBuf {
     }
 }
 
-impl AsRef<Rc<RefCell<textbuf::TextBuf>>> for TextBuf {
-    fn as_ref(&self) -> &Rc<RefCell<textbuf::TextBuf>> {
+impl AsRef<textbuf::TextBuf> for TextBuf {
+    fn as_ref(&self) -> &textbuf::TextBuf {
         &self.0
     }
 }
 
-impl AsMut<Rc<RefCell<textbuf::TextBuf>>> for TextBuf {
-    fn as_mut(&mut self) -> &mut Rc<RefCell<textbuf::TextBuf>> {
+impl AsMut<Arc<textbuf::TextBuf>> for TextBuf {
+    fn as_mut(&mut self) -> &mut Arc<textbuf::TextBuf> {
         &mut self.0
     }
 }

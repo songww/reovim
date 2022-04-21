@@ -1,7 +1,9 @@
 use std::cell::{Cell, RefCell};
+use std::collections::LinkedList;
 use std::rc::Rc;
-use std::sync::atomic;
+use std::sync::{atomic, Arc};
 
+use adw::prelude::BinExt;
 use gtk::prelude::*;
 use parking_lot::RwLock;
 use relm4::factory::positions::FixedPosition;
@@ -10,15 +12,23 @@ use relm4::*;
 use crate::app::{self, Dragging};
 use crate::bridge::{MouseAction, MouseButton, SerialCommand, UiCommand};
 use crate::event_aggregator::EVENT_AGGREGATOR;
-use crate::grapheme::{Coord, Pos, Rectangle};
+use crate::grapheme::{Clamp, Coord, Pos, Rectangle};
 
 use super::gridview::VimGridView;
 use super::TextBuf;
 
 type HighlightDefinitions = Rc<RwLock<crate::vimview::HighlightDefinitions>>;
 
+type Nr = usize;
+
+#[derive(Debug)]
+struct OldClamps {
+    range: Option<(Nr, Nr)>,
+    actived: Option<Clamp>,
+    clamps: LinkedList<Clamp>,
+}
+
 pub struct VimGrid {
-    win: u64,
     grid: u64,
     pos: Pos,
     coord: Coord,
@@ -35,12 +45,14 @@ pub struct VimGrid {
 
     visible: bool,
     // animation: Option<adw::TimedAnimation>,
+    clamp: Option<Clamp>,
+    // preview view port.
+    old_clamps: Arc<RwLock<OldClamps>>,
 }
 
 impl VimGrid {
     pub fn new(
         id: u64,
-        winid: u64,
         coord: Coord,
         rect: Rectangle,
         hldefs: HighlightDefinitions,
@@ -49,11 +61,10 @@ impl VimGrid {
         font_description: Rc<RefCell<pango::FontDescription>>,
     ) -> VimGrid {
         let textbuf = TextBuf::new(rect.height, rect.width);
-        textbuf.borrow().set_hldefs(hldefs.clone());
-        textbuf.borrow().set_metrics(metrics.clone());
+        textbuf.set_hldefs(hldefs);
+        textbuf.set_metrics(metrics.clone());
         let m = metrics.get();
         VimGrid {
-            win: winid,
             grid: id,
             pos: (coord.col as f64 * m.width(), coord.row as f64 * m.height()).into(),
             coord,
@@ -67,7 +78,12 @@ impl VimGrid {
             textbuf,
             visible: true,
             font_description,
-            // animation: None,
+            clamp: None,
+            old_clamps: Arc::new(RwLock::new(OldClamps {
+                range: None,
+                actived: None,
+                clamps: LinkedList::new(),
+            })),
         }
     }
 
@@ -96,11 +112,11 @@ impl VimGrid {
     }
 
     pub fn clear(&self) {
-        self.textbuf().borrow().clear();
+        self.textbuf().clear();
     }
 
     pub fn reset_cache(&mut self) {
-        self.textbuf().borrow().reset_cache();
+        self.textbuf().reset_cache();
     }
 
     // content go up, view go down, eat head of rows.
@@ -120,7 +136,7 @@ impl VimGrid {
             self.width,
             self.height
         );
-        self.textbuf().borrow_mut().up(rows);
+        self.textbuf().up(rows);
     }
 
     // content go down, view go up, eat tail of rows.
@@ -132,13 +148,13 @@ impl VimGrid {
             self.width,
             self.height
         );
-        self.textbuf().borrow_mut().down(rows);
+        self.textbuf().down(rows);
     }
 
     pub fn resize(&mut self, width: usize, height: usize) {
         self.width = width;
         self.height = height;
-        self.textbuf().borrow().resize(height, width);
+        self.textbuf().resize(height, width);
     }
 
     pub fn set_coord(&mut self, col: f64, row: f64) {
@@ -159,19 +175,46 @@ impl VimGrid {
     }
 
     pub fn set_pango_context(&self, pctx: Rc<pango::Context>) {
-        self.textbuf().borrow().set_pango_context(pctx);
+        self.textbuf().set_pango_context(pctx);
+    }
+
+    /// visible top-line - bottom-line
+    pub fn set_viewport(&mut self, top: f64, bottom: f64) {
+        if let Some(true) = self.clamp.map(|c| c.top() == top && c.bottom() == bottom) {
+            // dose not changed.
+            log::debug!(
+                "viewport dose not set {}-{} {:?}",
+                top,
+                bottom,
+                self.old_clamps
+            );
+            return;
+        }
+        self.textbuf().set_viewport(top, bottom);
+        let mut old_clamps = self.old_clamps.write();
+
+        if let Some(clamp) = self.clamp.replace(Clamp::new(top, bottom)) {
+            old_clamps.clamps.push_back(clamp);
+        }
+        if old_clamps.clamps.len() > 5 {
+            old_clamps.clamps.pop_front();
+        }
     }
 }
 
-#[derive(Debug)]
+#[derive(Derivative)]
+#[derivative(Debug)]
 pub struct VimGridWidgets {
+    root: adw::Bin,
     view: VimGridView,
+    #[derivative(Debug = "ignore")]
+    smoother: Cell<Option<gtk::TickCallbackId>>,
 }
 
 impl factory::FactoryPrototype for VimGrid {
     type Factory = crate::factory::FactoryMap<Self>;
     type Widgets = VimGridWidgets;
-    type Root = VimGridView;
+    type Root = adw::Bin;
     type View = gtk::Fixed;
     type Msg = app::AppMessage;
 
@@ -179,7 +222,7 @@ impl factory::FactoryPrototype for VimGrid {
         let grid = *grid;
         view! {
             view = VimGridView::new(grid, self.width as _, self.height as _) {
-                set_widget_name: &format!("vim-grid-{}-{}", self.win, grid),
+                set_widget_name: &format!("vim-grid-{}", grid),
                 set_textbuf: self.textbuf.clone(),
 
                 set_visible: self.visible,
@@ -194,6 +237,61 @@ impl factory::FactoryPrototype for VimGrid {
                 set_css_classes: &["vim-view-grid", &format!("vim-view-grid-{}", self.grid)],
             }
         }
+
+        let m = self.metrics.get();
+        let rows = self
+            .clamp
+            .map(|clamp| clamp.bottom() - clamp.top())
+            .unwrap_or_else(|| self.height() as f64)
+            .min(self.height() as f64);
+        let height_request = (rows * m.height()).max(1.);
+        let vadjustment = gtk::Adjustment::default();
+        vadjustment.set_page_size(height_request as f64);
+
+        log::info!(
+            "creating {} scrolled window max-height: {}",
+            grid,
+            height_request
+        );
+        let win = gtk::ScrolledWindow::builder()
+            .child(&view)
+            .has_frame(false)
+            .vadjustment(&vadjustment)
+            .vscrollbar_policy(gtk::PolicyType::External)
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .kinetic_scrolling(false)
+            .max_content_height(height_request as i32)
+            .min_content_height(height_request as i32 - 1)
+            .propagate_natural_width(true)
+            .build();
+        let bin = adw::Bin::new();
+        bin.set_child(Some(&win));
+
+        log::error!(
+            "grid {} maximum_size ---------------------------> {}",
+            self.grid,
+            height_request,
+        );
+        {
+            // Patch: disable scroll-controllers
+            let controllers = win.observe_controllers();
+            let n = controllers.n_items();
+            let mut position = 0;
+            while position < n {
+                let object = controllers.item(position).unwrap();
+                let controller = object.downcast_ref::<gtk::EventController>().unwrap();
+                controller.set_propagation_phase(gtk::PropagationPhase::None);
+                position += 1;
+            }
+        }
+        // let target = adw::CallbackAnimationTarget::new(Some(Box::new(
+        //     glib::clone!(@weak view, @weak vadjustment => move |value: f64| {
+        //         log::warn!("callback smooth animation: {:.3}", value);
+        //         vadjustment.set_value(value);
+        //         view.queue_draw();
+        //         view.queue_resize();
+        //     }),
+        // )));
 
         let click_listener = gtk::GestureClick::builder()
             .button(0)
@@ -297,7 +395,11 @@ impl factory::FactoryPrototype for VimGrid {
         }));
         view.add_controller(&motion_listener);
 
-        VimGridWidgets { view }
+        VimGridWidgets {
+            root: bin,
+            view,
+            smoother: Cell::new(None),
+        }
     }
 
     fn position(&self, _: &u64) -> FixedPosition {
@@ -306,22 +408,40 @@ impl factory::FactoryPrototype for VimGrid {
     }
 
     fn view(&self, index: &u64, widgets: &VimGridWidgets) {
-        log::debug!(
+        log::info!(
             "vim grid {} update pos {:?} size {}x{}",
             index,
             self.pos,
             self.width,
             self.height
         );
+
         let view = &widgets.view;
 
         view.set_visible(self.visible);
         view.set_font_description(&self.font_description.borrow());
 
+        self.smoothed(widgets);
+
         let p_width = view.property::<u64>("width") as usize;
         let p_height = view.property::<u64>("height") as usize;
         if self.width != p_width || self.height != p_height {
+            let metrics = self.metrics.get();
+            let height_request = self.height as f64 * metrics.height();
+            log::info!("resizing scrolled window max-height: {}", height_request);
+            widgets.root.child().map(|child| {
+                let win = child.downcast_ref::<gtk::ScrolledWindow>().unwrap();
+                win.set_max_content_height(height_request as _);
+                win.set_min_content_height((height_request - 1.) as _);
+            });
+
+            log::error!(
+                "grid {} maximum_size ---------------------------> {}",
+                self.grid,
+                height_request
+            );
             view.resize(self.width as _, self.height as _);
+            view.queue_resize();
         }
 
         view.set_focusable(self.focusable);
@@ -329,18 +449,220 @@ impl factory::FactoryPrototype for VimGrid {
 
         if let Some(pos) = self.move_to.take() {
             gtk::prelude::FixedExt::move_(
-                &view.parent().unwrap().downcast::<gtk::Fixed>().unwrap(),
-                view,
+                widgets
+                    .root
+                    .parent()
+                    .unwrap()
+                    .downcast_ref::<gtk::Fixed>()
+                    .unwrap(),
+                &widgets.root,
                 pos.x,
                 pos.y,
             );
         }
 
-        view.queue_allocate();
-        view.queue_resize();
+        widgets.view.queue_allocate();
+        widgets.view.queue_resize();
+        widgets.view.queue_draw();
+        widgets.root.queue_allocate();
+        widgets.root.queue_resize();
+        widgets.root.queue_draw();
     }
 
-    fn root_widget(widgets: &VimGridWidgets) -> &VimGridView {
-        &widgets.view
+    fn root_widget(widgets: &VimGridWidgets) -> &adw::Bin {
+        &widgets.root
     }
 }
+
+impl VimGrid {
+    fn smoothed(&self, widgets: &VimGridWidgets) {
+        let metrics = self.metrics.get();
+        let old_clamps = self.old_clamps.read();
+        if old_clamps.clamps.is_empty() {
+            log::error!("grid {} empty clamps.", self.grid);
+            // 还没有配置viewport
+            return;
+        }
+        // last old clamp is actived, means no new clamps configured.
+        // Animation already running.
+        let clamp = *old_clamps.clamps.back().unwrap();
+        if let Some(true) = old_clamps.actived.map(|ref c| *c == clamp) {
+            log::error!("grid {} same clamps.", self.grid);
+            // dose not changed, do nothing.
+            return;
+        }
+        let textbuf = &self.textbuf;
+        let lines = textbuf.lines();
+
+        // let top = if let Some(ref actived) = old_clamps.actived {
+        //     log::error!("current actived: {:?} clamps: {:?}", actived, old_clamps);
+        //     let position = old_clamps
+        //         .clamps
+        //         .iter()
+        //         .position(|clamp| clamp == actived)
+        //         .unwrap();
+        //     assert!(old_clamps.clamps.iter().take(position + 1).last().unwrap() == actived);
+        //     let thetop = old_clamps
+        //         .clamps
+        //         .iter()
+        //         .take(position + 1)
+        //         .fold(f64::MAX, |b, c| if c.top() < b { c.top() } else { b });
+        //     // 动画正在运行中, 此时需计算之前的位置?
+        //     let value = vadjustment.value();
+        //     let (from, to) = old_clamps.range.unwrap();
+
+        //     // current nr scrolled to.
+        //     let index = (value / metrics.height() - thetop).floor() as usize;
+        //     if from < to {
+        //         // assert!((index + from) <= to, "({} + {}) <= {}", index, from, to);
+        //         (index + from).min(to) as f64
+        //     } else {
+        //         // from > to
+        //         // assert!((index + to) <= from, "({} + {}) <= {}", index, to, from);
+        //         (index + to).min(from) as f64
+        //     }
+        // } else {
+        //     // animation dose not started yet.
+        //     old_clamps.clamps.front().unwrap().top()
+        // };
+        // let vadjustment = widgets.viewport.vadjustment();
+
+        let top = old_clamps.clamps.front().unwrap().top();
+
+        let mut topidx = None;
+        let mut ctopidx = None;
+        // where from
+        let topu = top.floor() as usize;
+        // where to
+        let ctopu = self
+            .clamp
+            .map(|clamp| clamp.top().floor() as usize)
+            .unwrap();
+        let mut nrs = Vec::with_capacity(self.height() * 2);
+        for (relidx, line) in lines.iter().enumerate() {
+            nrs.push(line.nr());
+            if line.nr() == topu {
+                topidx.replace(relidx);
+            }
+            if line.nr() == ctopu {
+                ctopidx.replace(relidx);
+            }
+            if topidx.is_some() && ctopidx.is_some() {
+                break;
+            }
+        }
+
+        if topidx == ctopidx {
+            return;
+        }
+
+        log::error!(
+            "grid {} topu: {} ctopu {} topidx: {:?} ctopidx {:?}",
+            self.grid,
+            topu,
+            ctopu,
+            topidx,
+            ctopidx
+        );
+        log::error!(
+            "grid {} current clamp {:?} old-clamps {:?}",
+            self.grid,
+            self.clamp,
+            old_clamps
+        );
+        log::error!("grid {} nrs: {:?}", self.grid, nrs);
+        let topidx = topidx.unwrap_or(0);
+        let ctopidx = ctopidx.unwrap();
+
+        let value_from = topidx as f64 * metrics.height();
+        let value_to = ctopidx as f64 * metrics.height();
+
+        log::info!(
+            "grid {} viewport {:?} animation from {} to {}",
+            self.grid,
+            self.clamp.unwrap(),
+            value_from,
+            value_to
+        );
+
+        widgets.smoother.take().map(|handle| handle.remove());
+
+        let frame_clock = widgets.root.frame_clock().unwrap();
+        frame_clock.begin_updating();
+        let startat = frame_clock.frame_time();
+        let handle = widgets.root.add_tick_callback(glib::clone!(@strong self.textbuf as textbuf, @weak widgets.view as view, @weak self.old_clamps as old_clamps => @default-return glib::Continue(false), move |root, frame_clock| {
+            // 40951.023317
+            log::error!("frame_time {}", frame_clock.frame_time());
+            let child = root.child().unwrap();
+            let win = child.downcast_ref::<gtk::ScrolledWindow>().unwrap();
+            let vadjustment = win.vadjustment();
+            let ratio = (frame_clock.frame_time() - startat) as f64 / 100000.;
+            if ratio >= 1. {
+                frame_clock.end_updating();
+                vadjustment.set_value(value_to);
+
+                std::thread::spawn({
+                    let textbuf = textbuf.clone();
+                    let old_clamps = old_clamps.clone();
+                    move || {
+                        textbuf.discard();
+                        let mut old_clamps = old_clamps.write();
+                        old_clamps.range.take();
+                        old_clamps.clamps.clear();
+                        old_clamps.actived.take();
+                        log::error!("-------------------------------> animation done cleared.");
+                    }
+                });
+                return glib::Continue(false);
+            }
+
+            let value = (value_to - value_from) * ratio + value_from;
+            vadjustment.set_value(value);
+            log::debug!("changed value to: {}", value);
+            log::debug!("vadjustment-value: {}", vadjustment.value());
+            log::debug!("vadjustment-lower: {}", vadjustment.lower());
+            log::debug!("vadjustment-upper: {}", vadjustment.upper());
+            log::debug!("vadjustment-page-size: {}", vadjustment.page_size());
+            log::debug!("textbuf height: {}", view.height());
+            win.queue_draw();
+            glib::Continue(true)
+        }));
+        widgets.smoother.set(Some(handle));
+        log::debug!(
+            "grid {} -------------------------------> animation start",
+            self.grid
+        );
+        drop(old_clamps);
+        let mut old_clamps = self.old_clamps.write();
+        old_clamps.actived.replace(clamp);
+        old_clamps.range.replace((topu, ctopu));
+    }
+}
+
+/*
+fn smoothed(view: &adw::ClampScrollable, fc: &gdk::FrameClock) -> glib::Continue {
+    adw::Easing::EaseOutQuart;
+    glib::clone!(@strong sender, @strong self.textbuf as textbuf, @weak view, @weak self.old_clamps as old_clamps => move |_this| {
+        // smooth scrolling done.
+        std::thread::spawn({
+            let textbuf = textbuf.clone();
+            let old_clamps = old_clamps.clone();
+            move || {
+                textbuf.discard();
+                let mut old_clamps = old_clamps.write();
+                old_clamps.range.take();
+                old_clamps.clamps.clear();
+                old_clamps.actived.take();
+                log::error!("-------------------------------> animation done cleared.");
+            }
+        }).join().unwrap();
+        log::error!("-------------------------------> animation done");
+        view.queue_draw();
+        view.queue_resize();
+        // let widget = this.widget();
+        // let sw = widget.downcast_ref::<gtk::ScrolledWindow>().unwrap();
+        // sw.vadjustment().set_value(0.);
+    });
+    glib::Continue(true);
+}
+*/

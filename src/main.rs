@@ -3,6 +3,8 @@ extern crate derive_new;
 #[macro_use]
 extern crate derivative;
 
+use std::io::Write;
+
 use clap::{IntoApp, Parser};
 
 mod app;
@@ -83,7 +85,20 @@ fn main() {
         _ => "trace",
     };
     let env = env_logger::Env::default().default_filter_or(level);
-    env_logger::Builder::from_env(env).init();
+    env_logger::Builder::from_env(env)
+        .format(|buf, record| {
+            let styled_level = buf.default_styled_level(record.level());
+            writeln!(
+                buf,
+                "[{} {} {}:{}] {}",
+                chrono::Local::now().format("%X%.3f"),
+                styled_level,
+                record.target(),
+                record.line().unwrap(),
+                record.args()
+            )
+        })
+        .init();
     log::trace!("command line options: {:?}", opts);
     let app = Opts::command().allow_missing_positional(true);
     let title = app.get_bin_name().unwrap_or("rv");
