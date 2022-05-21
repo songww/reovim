@@ -25,7 +25,7 @@ First install the GTK development packages. On Debian/Ubuntu derivatives
 this can be done as follows:
 
 ```sh
-sudo apt install libgtk-4-dev>=4.6 libadawaita-1-dev>=1.0 clang
+sudo apt install libgtk-4-dev>=4.6 libadwaita-1-dev>=1.0 clang
 ```
 
 On Arch Linux derivatives this can be done as follows:
