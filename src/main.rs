@@ -8,6 +8,7 @@ use std::io::Write;
 use clap::{IntoApp, Parser};
 
 mod app;
+mod render;
 mod bridge;
 mod color;
 mod components;

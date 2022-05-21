@@ -27,16 +27,35 @@ async-trait = "0.1"
 derive_more = "0.99"
 pin-project = "1"
 parking_lot = "0.12"
-clap = { version = "3", features = [ "derive", "env" ] }
+clap = { version = "3", features = ["derive", "env"] }
 chan = { version = "0.5", package = "crossbeam-channel" }
-nvim = { version = "0.4", package = "nvim-rs", features = [ "use_tokio" ] }
+nvim = { version = "0.4", package = "nvim-rs", features = ["use_tokio"] }
 
-relm4 = {  version = "0.4", features = [ "tokio-rt", "libadwaita" ] }
+relm4 = { version = "0.4", features = ["tokio-rt", "libadwaita"] }
 relm-macros = { version = "0.4", package = "relm4-macros" }
 relm-components = { version = "0.4", package = "relm4-components" }
 
-tokio = { version = "1", features = ["process", "io-util", "sync", "rt", "time", "signal", "rt-multi-thread"] }
+tokio = { version = "1", features = [
+  "process",
+  "io-util",
+  "sync",
+  "rt",
+  "time",
+  "signal",
+  "rt-multi-thread",
+] }
 tokio-util = { version = "0.7", features = ["compat"] }
+
+libm = "0.2.2"
+font-kit = "0.11"
+
+[dependencies.harfbuzz]
+version = "2"
+package = "harfbuzz_rs"
+default-features = false
+
+[dependencies.harfbuzz-sys]
+features = ["build-native-harfbuzz"]
 
 [dependencies.adw]
 package = "libadwaita"
@@ -45,12 +64,12 @@ version = "0.1"
 [dependencies.cairo]
 version = "0.15"
 package = "cairo-rs"
-features = [ "v1_16", "png" ]
+features = ["v1_16", "png"]
 
 [dependencies.pango]
 version = "0.15"
 package = "pango"
-features = [ "v1_50" ]
+features = ["v1_50"]
 
 [dependencies.pangocairo]
 version = "0.15"
@@ -63,9 +82,13 @@ package = "graphene-rs"
 [dependencies.gtk]
 version = "0.4"
 package = "gtk4"
-features = [ "v4_6" ]
+features = ["v4_6"]
 
 [dependencies.glib]
 version = "0.15"
 package = "glib"
-features = [ "v2_70" ]
+features = ["v2_70"]
+
+[patch.crates-io.harfbuzz-sys]
+git = "https://github.com/songww/rust-harfbuzz"
+branch = "update-to-2.9.1"

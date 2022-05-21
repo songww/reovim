@@ -1,4 +1,5 @@
 # Reovim
+
 Neovim GUI written in Rust, using relm4 and gtk4-rs.
 
 Thanks [Neovide](https://github.com/neovide/neovide)
@@ -6,9 +7,11 @@ Thanks [Neovide](https://github.com/neovide/neovide)
 ## Configuration
 
 To setup font add next line to `init.vim`
+
 ```vim
 set guifont=Cascadia\ Code,Symbols\ Nerd\ Font\ Mono\ Light:h12
 ```
+
 or `init.lua`
 
 ```lua
@@ -25,10 +28,11 @@ First install the GTK development packages. On Debian/Ubuntu derivatives
 this can be done as follows:
 
 ```sh
-sudo apt install libgtk-4-dev>=4.6 libadawaita-1-dev>=1.0 clang
+sudo apt install libgtk-4-dev>=4.6 libadwaita-1-dev>=1.0 clang
 ```
 
 On Arch Linux derivatives this can be done as follows:
+
 ```sh
 pacman -S gtk4 libadwaita clang pkg-config
 ```

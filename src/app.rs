@@ -1088,12 +1088,12 @@ impl Widgets<AppModel, ()> for AppWidgets {
         let key_controller = gtk::EventControllerKey::builder()
             .name("vimview-key-controller")
             .build();
-        key_controller.set_im_context(&im_context);
+        key_controller.set_im_context(Some(&im_context));
         key_controller.connect_key_pressed(
             glib::clone!(@strong sender => move |c, keyval, _keycode, modifier| {
                 let event = c.current_event().unwrap();
 
-                if c.im_context().filter_keypress(&event) {
+                if c.im_context().unwrap().filter_keypress(&event) {
                     log::debug!("keypress handled by im-context.");
                     return gtk::Inhibit(true)
                 }
