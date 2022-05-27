@@ -54,9 +54,10 @@ features = [
 fontconfig = { version = "0.5", git = "https://github.com/songww/fontconfig-rs", package = "fontconfig", branch = "master" }
 
 [dependencies.harfbuzz-sys]
-git = "https://github.com/servo/rust-harfbuzz"
-branch = "master"
-# features = ["build-native-harfbuzz"]
+git = "https://github.com/songww/rust-harfbuzz"
+branch = "hb-latest"
+features = ["bindgen"]
+default-features = false
 
 [dependencies.adw]
 package = "libadwaita"
