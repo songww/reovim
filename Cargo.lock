@@ -766,7 +766,7 @@ dependencies = [
 [[package]]
 name = "harfbuzz-sys"
 version = "0.5.0"
-source = "git+https://github.com/songww/rust-harfbuzz?branch=hb-latest#6904675ac03f665fe4d4f6ebf66a79fe0f30cb9d"
+source = "git+https://github.com/servo/rust-harfbuzz?branch=master#b92eee0cc9797315e66ffc8ed9410c526148f860"
 dependencies = [
  "cc",
  "core-graphics",
@@ -774,16 +774,6 @@ dependencies = [
  "foreign-types",
  "freetype",
  "pkg-config",
-]
-
-[[package]]
-name = "harfbuzz_rs"
-version = "2.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "58c18cfc23920d010f7637b86240a5f8892dfdbcb4f0e60828f8a9dc6ff5521d"
-dependencies = [
- "bitflags",
- "harfbuzz-sys",
 ]
 
 [[package]]
@@ -1377,7 +1367,6 @@ dependencies = [
  "graphene-rs",
  "gtk4",
  "harfbuzz-sys",
- "harfbuzz_rs",
  "libadwaita",
  "libm",
  "log",
