@@ -8,13 +8,13 @@ use std::io::Write;
 use clap::{IntoApp, Parser};
 
 mod app;
-mod render;
 mod bridge;
 mod color;
 mod components;
 mod cursor;
 mod event_aggregator;
 mod factory;
+mod fontloader;
 mod grapheme;
 mod keys;
 mod loggingchan;
