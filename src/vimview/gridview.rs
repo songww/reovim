@@ -8,7 +8,8 @@ mod imp {
     use parking_lot::RwLock;
 
     use crate::metrics::Metrics;
-    use crate::vimview::{TextBuf, TextCell, TextLine};
+    use crate::text::{TextCell, TextLine};
+    use crate::vimview::TextBuf;
 
     use super::super::highlights::HighlightDefinitions;
 

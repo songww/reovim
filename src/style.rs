@@ -1,6 +1,6 @@
 use crate::color::{Color, Colors};
 
-#[derive(new, Copy, Clone, Debug, PartialEq)]
+#[derive(new, Copy, Clone, Debug, Default, PartialEq)]
 pub struct Style {
     pub colors: Colors,
     #[new(default)]

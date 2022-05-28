@@ -130,6 +130,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "cc"
+version = "1.0.73"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2fff2a6927b3bb87f9595d67196a70493f627687a71d87a0d692242c33f58c11"
+
+[[package]]
 name = "cexpr"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -232,10 +238,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "const-cstr"
-version = "0.3.0"
+name = "cmake"
+version = "0.1.48"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed3d0b5ff30645a68f35ece8cea4556ca14ef8a1651455f789a099a0513532a6"
+checksum = "e8ad8cef104ac57b68b89df3208164d228503abbdce70f6880ffa3d970e7443a"
+dependencies = [
+ "cc",
+]
 
 [[package]]
 name = "contracts"
@@ -363,15 +372,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dlib"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac1b7517328c04c2aa68422fc60a41b92208182142ed04a25879c26c8f878794"
-dependencies = [
- "libloading",
-]
-
-[[package]]
 name = "either"
 version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -401,14 +401,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fontconfig"
-version = "0.5.0"
-source = "git+https://github.com/songww/fontconfig-rs?branch=master#074f0ac430223ac7fbc1679564084eb45220d27b"
-dependencies = [
- "yeslogic-fontconfig-sys",
-]
-
-[[package]]
 name = "foreign-types"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -430,12 +422,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e9d758e60b45e8d749c89c1b389ad8aee550f86aa12e2b9298b546dda7a82ab1"
 
 [[package]]
-name = "freetype"
-version = "0.7.0"
+name = "freetype-rs"
+version = "0.30.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bee38378a9e3db1cc693b4f88d166ae375338a0ff75cb8263e1c601d51f35dc6"
+checksum = "43094e336bade627b9e9349bb17fa3fab6d8bac69bb250fc6a6dc88d95ef79d1"
 dependencies = [
+ "bitflags",
+ "freetype-sys",
  "libc",
+]
+
+[[package]]
+name = "freetype-sys"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac95ab6040ffce2a8e86c01e050bedf3d2763a17ae1719a5d4231da3078b1028"
+dependencies = [
+ "cmake",
+ "libc",
+ "pkg-config",
 ]
 
 [[package]]
@@ -810,15 +815,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "harfbuzz"
+version = "0.4.0"
+source = "git+https://github.com/songww/rust-harfbuzz?branch=migrate-to-meson#7b525878d608a91596c50f37a984ec7ab5520df2"
+dependencies = [
+ "harfbuzz-sys",
+]
+
+[[package]]
 name = "harfbuzz-sys"
 version = "0.5.0"
-source = "git+https://github.com/songww/rust-harfbuzz?branch=hb-latest#6904675ac03f665fe4d4f6ebf66a79fe0f30cb9d"
+source = "git+https://github.com/songww/rust-harfbuzz?branch=migrate-to-meson#7b525878d608a91596c50f37a984ec7ab5520df2"
 dependencies = [
  "bindgen",
  "core-graphics",
  "core-text",
  "foreign-types",
- "freetype",
+ "freetype-sys",
  "pkg-config",
  "regex",
 ]
@@ -852,9 +865,9 @@ checksum = "9a3a5bfb195931eeb336b2a7b4d761daec841b97f947d34394601737a7bba5e4"
 
 [[package]]
 name = "indexmap"
-version = "1.8.1"
+version = "1.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f647032dfaa1f8b6dc29bd3edb7bbef4861b8b8007ebb118d6db284fd59f6ee"
+checksum = "e6012d540c5baa3589337a98ce73408de9b5a25ec9fc2c6fd6be8f0d39e0ca5a"
 dependencies = [
  "autocfg",
  "hashbrown",
@@ -1435,12 +1448,13 @@ dependencies = [
  "derive-new",
  "derive_more",
  "env_logger",
- "fontconfig",
  "fragile",
+ "freetype-rs",
  "futures 0.3.21",
  "glib",
  "graphene-rs",
  "gtk4",
+ "harfbuzz",
  "harfbuzz-sys",
  "libadwaita",
  "libm",
@@ -1458,6 +1472,7 @@ dependencies = [
  "tokio",
  "tokio-util 0.7.2",
  "tracker",
+ "unicode-segmentation",
  "vector-map",
  "which",
 ]
@@ -1739,6 +1754,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d22af068fba1eb5edcb4aea19d382b2a3deb4c8f9d475c589b6ada9e0fd493ee"
 
 [[package]]
+name = "unicode-segmentation"
+version = "1.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7e8820f5d777f6224dc4be3632222971ac30164d4a258d595640799554ebfd99"
+
+[[package]]
 name = "unicode-width"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1874,14 +1895,3 @@ name = "windows_x86_64_msvc"
 version = "0.36.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c811ca4a8c853ef420abd8592ba53ddbbac90410fab6903b3e79972a631f7680"
-
-[[package]]
-name = "yeslogic-fontconfig-sys"
-version = "3.0.1"
-source = "git+https://github.com/songww/fontconfig-rs?branch=master#074f0ac430223ac7fbc1679564084eb45220d27b"
-dependencies = [
- "const-cstr",
- "dlib",
- "once_cell",
- "pkg-config",
-]

@@ -11,7 +11,6 @@ use std::sync::Arc;
 pub use gridview::VimGridView;
 pub use highlights::HighlightDefinitions;
 pub use messageview::{MessageViewWidgets, VimMessage, VimMessageView};
-pub use textbuf::{TextCell, TextLine};
 pub use widgets::{VimGrid, VimGridWidgets};
 
 #[derive(Clone, Debug)]

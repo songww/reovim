@@ -9,7 +9,7 @@ use relm4::drawing::DrawContext;
 use relm4::{MicroModel, MicroWidgets, Sender};
 
 use crate::grapheme::Coord;
-use crate::vimview::TextCell;
+use crate::text::TextCell;
 
 impl MicroModel for VimCursor {
     type Msg = CursorMessage;

@@ -14,7 +14,6 @@ mod components;
 mod cursor;
 mod event_aggregator;
 mod factory;
-mod fontloader;
 mod grapheme;
 mod keys;
 mod loggingchan;
@@ -23,6 +22,7 @@ mod metrics;
 mod running_tracker;
 mod settings;
 mod style;
+mod text;
 mod vimview;
 
 enum ConnectionMode {

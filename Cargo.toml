@@ -24,10 +24,12 @@ derive-new = "0.5"
 env_logger = "0.9"
 rustc-hash = "1"
 vector-map = "1"
+pin-project = "1"
 async-trait = "0.1"
 derive_more = "0.99"
-pin-project = "1"
-parking_lot = "0.12"
+freetype-rs = "0.30"
+unicode-segmentation = "1"
+
 clap = { version = "3", features = ["derive", "env"] }
 chan = { version = "0.5", package = "crossbeam-channel" }
 nvim = { version = "0.4", package = "nvim-rs", features = ["use_tokio"] }
@@ -37,6 +39,7 @@ relm-macros = { version = "0.4", package = "relm4-macros" }
 relm-components = { version = "0.4", package = "relm4-components" }
 
 tokio-util = { version = "0.7", features = ["compat"] }
+parking_lot = "0.12.0"
 
 [dependencies.tokio]
 version = "1"
@@ -50,12 +53,15 @@ features = [
   "rt-multi-thread",
 ]
 
-[target.'cfg(target_os = "linux")'.dependencies]
-fontconfig = { version = "0.5", git = "https://github.com/songww/fontconfig-rs", package = "fontconfig", branch = "master" }
-
 [dependencies.harfbuzz-sys]
 git = "https://github.com/songww/rust-harfbuzz"
-branch = "hb-latest"
+branch = "migrate-to-meson"
+features = ["bindgen"]
+default-features = false
+
+[dependencies.harfbuzz]
+git = "https://github.com/songww/rust-harfbuzz"
+branch = "migrate-to-meson"
 features = ["bindgen"]
 default-features = false
 

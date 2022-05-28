@@ -62,6 +62,7 @@ pub struct AppModel {
 
     pub font_description: Rc<RefCell<pango::FontDescription>>,
     pub font_changed: Rc<atomic::AtomicBool>,
+    pub fontset: Rc<pango::Fontset>,
 
     pub mode: EditorMode,
 
@@ -106,8 +107,8 @@ impl AppModel {
             .unwrap();
         let font_desc = FontDescription::from_string("monospace 11");
         let window_size = Rc::new(Cell::new((opts.width, opts.height)));
-        let pctx: Rc<pango::Context> = pangocairo::FontMap::default()
-            .unwrap()
+        let default_fontmap = pangocairo::FontMap::default().unwrap();
+        let pctx: Rc<pango::Context> = default_fontmap
             .create_context()
             .map(|ctx| {
                 // ctx.set_round_glyph_positions(true);
@@ -125,6 +126,9 @@ impl AppModel {
             })
             .unwrap()
             .into();
+        let fontset = default_fontmap
+            .load_fontset(&pctx, &font_desc, &pango::Language::default())
+            .unwrap();
         let hldefs = Rc::new(RwLock::new(vimview::HighlightDefinitions::new()));
         let metrics = Rc::new(Metrics::new().into());
         AppModel {
@@ -157,6 +161,7 @@ impl AppModel {
             metrics,
             font_description: Rc::new(RefCell::new(font_desc)),
             font_changed: Rc::new(false.into()),
+            fontset: Rc::new(fontset),
 
             hldefs,
             hlgroups: Rc::new(RwLock::new(FxHashMap::default())),
@@ -212,8 +217,8 @@ impl AppModel {
         });
 
         layout.set_text(SINGLE_WIDTH_CHARS);
-        let ascent = layout.baseline() as f64 / PANGO_SCALE;
-        let font_metrics = self.pctx.metrics(Some(&desc), None).unwrap();
+        // let ascent = layout.baseline() as f64 / PANGO_SCALE;
+        let font_metrics = self.fontset.metrics().unwrap();
         let fm_width = font_metrics.approximate_digit_width();
         let fm_height = font_metrics.height();
         let fm_ascent = font_metrics.ascent();
@@ -228,6 +233,7 @@ impl AppModel {
         } else {
             max_height as f64 / PANGO_SCALE
         };
+        let ascent = fm_ascent as f64 / PANGO_SCALE;
         if metrics.charheight() == charheight
             && metrics.charwidth() == charwidth
             && metrics.width() == width

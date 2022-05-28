@@ -6,7 +6,8 @@ use parking_lot::RwLock;
 use crate::color::Color;
 use crate::grapheme::Coord;
 use crate::metrics::Metrics;
-use crate::vimview::{HighlightDefinitions, TextCell};
+use crate::text::TextCell;
+use crate::vimview::HighlightDefinitions;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum CursorShape {

@@ -6,6 +6,7 @@ use glib::subclass::prelude::*;
 use parking_lot::RwLock;
 
 use super::highlights::HighlightDefinitions;
+use crate::text::{TextCell, TextLine};
 
 type Nr = usize;
 
@@ -17,6 +18,7 @@ mod imp {
     use glib::subclass::prelude::*;
     use parking_lot::{RwLock, RwLockReadGuard};
 
+    use crate::text::{TextCell, TextLine};
     use crate::vimview::HighlightDefinitions;
 
     use super::Nr;
@@ -31,7 +33,7 @@ mod imp {
         bottom: f64,
 
         #[derivative(Debug = "ignore")]
-        textlines: VecDeque<super::TextLine>,
+        textlines: VecDeque<TextLine>,
         metrics: Option<Rc<Cell<crate::metrics::Metrics>>>,
 
         #[derivative(Debug = "ignore")]
@@ -48,8 +50,8 @@ mod imp {
     }
 
     impl _TextBuf {
-        fn make_textlines(rows: usize, cols: usize) -> VecDeque<super::TextLine> {
-            let tl = super::TextLine::new(cols);
+        fn make_textlines(rows: usize, cols: usize) -> VecDeque<TextLine> {
+            let tl = TextLine::new(cols);
             let mut textlines = VecDeque::with_capacity(rows);
             textlines.resize(rows, tl);
             textlines
@@ -114,7 +116,7 @@ mod imp {
 
         fn append_rows(&mut self, rows: usize, nr: impl Into<Option<Nr>>) {
             log::error!("resizing extend {} from {}", rows, self.textlines.len());
-            let mut lines = vec![super::TextLine::new(self.cols); rows];
+            let mut lines = vec![TextLine::new(self.cols); rows];
             let nr = nr.into().unwrap_or_else(|| {
                 self.textlines
                     .back()
@@ -238,7 +240,7 @@ mod imp {
             if topusize < topnr {
                 // push_front 5 4 3 2 1
                 for nr in (topusize..topnr).rev() {
-                    let mut elt = super::TextLine::new(self.cols);
+                    let mut elt = TextLine::new(self.cols);
                     elt.nr = nr;
                     self.textlines.push_front(elt);
                 }
@@ -284,7 +286,7 @@ mod imp {
                 // lastnr - topusize
                 let mut afters = self.textlines.split_off(idx);
                 for nr in topusize..lastnr {
-                    let mut elt = super::TextLine::new(self.cols);
+                    let mut elt = TextLine::new(self.cols);
                     elt.nr = nr;
                     self.textlines.push_back(elt);
                 }
@@ -326,7 +328,7 @@ mod imp {
                     // at + rows 处 append (self.rows - rows)
                     let mut afters = self.textlines.split_off(at + rows_contiguous + 1);
                     for offset in 0..((self.rows - rows_contiguous).min(lacks)) {
-                        let mut elt = super::TextLine::new(self.cols);
+                        let mut elt = TextLine::new(self.cols);
                         elt.nr = prevnr + offset + 1;
                         self.textlines.push_back(elt);
                     }
@@ -408,7 +410,7 @@ mod imp {
                     // FIXME: invalid start_index
                     let end_index = start_index + text.len();
                     let attrs = Vec::new();
-                    let mut cell = super::TextCell {
+                    let mut cell = TextCell {
                         text: text.to_string(),
                         hldef: hldef.clone(),
                         double_width: *double_width,
@@ -521,7 +523,7 @@ mod imp {
                 if cols > old_cols {
                     for _ in 0..(cols - old_cols) {
                         cells.push({
-                            let mut cell = super::TextCell::default();
+                            let mut cell = TextCell::default();
                             cell.start_index = start_index;
                             cell.end_index = start_index + 1;
                             start_index += 1;
@@ -598,7 +600,7 @@ mod imp {
             self.inner.write().pango_context()
         }
 
-        pub fn cell(&self, row: usize, col: usize) -> Option<super::TextCell> {
+        pub fn cell(&self, row: usize, col: usize) -> Option<TextCell> {
             self.lines()
                 .get(row)
                 .and_then(|line| line.get(col))
@@ -659,7 +661,7 @@ mod imp {
     }
 
     impl<'a> Lines<'a> {
-        pub fn get(&self, no: usize) -> Option<&super::TextLine> {
+        pub fn get(&self, no: usize) -> Option<&TextLine> {
             self.guard.textlines.get(no)
         }
 
@@ -677,7 +679,7 @@ mod imp {
     }
 
     impl<'b, 'a: 'b> Iterator for LineIter<'a, 'b> {
-        type Item = &'b super::TextLine;
+        type Item = &'b TextLine;
         fn next(&mut self) -> Option<Self::Item> {
             let v = self.lines.get(self.index);
             self.index += 1;
@@ -779,218 +781,5 @@ impl TextBuf {
 
     pub fn discard(&self) {
         self.imp().discard();
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct TextCell {
-    pub text: String,
-    pub hldef: Option<u64>,
-    pub double_width: bool,
-    pub attrs: Vec<pango::Attribute>,
-    pub start_index: usize,
-    pub end_index: usize,
-}
-
-impl Default for TextCell {
-    fn default() -> TextCell {
-        TextCell {
-            text: String::from(" "),
-            hldef: None,
-            double_width: false,
-            attrs: Vec::new(),
-            start_index: 0,
-            end_index: 0,
-        }
-    }
-}
-
-impl TextCell {
-    fn reset_attrs(
-        &mut self,
-        _pctx: &pango::Context,
-        hldefs: &HighlightDefinitions,
-        _metrics: &crate::metrics::Metrics,
-    ) {
-        const U16MAX: f32 = u16::MAX as f32;
-
-        self.attrs.clear();
-        let attrs = pango::AttrList::new();
-
-        if self.end_index == self.start_index {
-            return;
-        }
-
-        let start_index = self.start_index as u32;
-        let end_index = self.end_index as u32;
-        let default_hldef = hldefs.get(HighlightDefinitions::DEFAULT).unwrap();
-        let default_colors = hldefs.defaults().unwrap();
-        let mut background = None;
-        let mut hldef = default_hldef;
-        if let Some(ref id) = self.hldef {
-            let style = hldefs.get(*id);
-            if let Some(style) = style {
-                background = style.background();
-                hldef = style;
-            }
-        }
-        if hldef.italic {
-            let mut attr = pango::AttrInt::new_style(pango::Style::Italic);
-            attr.set_start_index(start_index);
-            attr.set_end_index(end_index);
-            attrs.insert(attr);
-        }
-        if hldef.bold {
-            let mut attr = pango::AttrInt::new_weight(pango::Weight::Semibold);
-            attr.set_start_index(start_index);
-            attr.set_end_index(end_index);
-            attrs.insert(attr);
-        }
-        if hldef.strikethrough {
-            let mut attr = pango::AttrInt::new_strikethrough(true);
-            attr.set_start_index(start_index);
-            attr.set_end_index(end_index);
-            attrs.insert(attr);
-        }
-        if hldef.underline {
-            let mut attr = pango::AttrInt::new_underline(pango::Underline::Single);
-            attr.set_start_index(start_index);
-            attr.set_end_index(end_index);
-            attrs.insert(attr);
-        }
-        if hldef.undercurl {
-            let mut attr = pango::AttrInt::new_underline(pango::Underline::Error);
-            attr.set_start_index(start_index);
-            attr.set_end_index(end_index);
-            attrs.insert(attr);
-        }
-        // alpha color
-        // blend is 0 - 100. Could be used by UIs to support
-        // blending floating windows to the background or to
-        // signal a transparent cursor.
-        // let blend = u16::MAX as u32 * hldef.blend as u32 / 100;
-        // let mut attr = pango::AttrInt::new_background_alpha(blend as u16);
-        // log::info!("blend {}", hldef.blend);
-        // attr.set_start_index(start_index as _);
-        // attr.set_end_index(end_index as _);
-        // attrs.insert(attr);
-        if let Some(fg) = hldef.colors.foreground.or(default_colors.foreground) {
-            let mut attr = pango::AttrColor::new_foreground(
-                (fg.red() * U16MAX).round() as u16,
-                (fg.green() * U16MAX).round() as u16,
-                (fg.blue() * U16MAX).round() as u16,
-            );
-            attr.set_start_index(start_index);
-            attr.set_end_index(end_index);
-            attrs.insert(attr);
-        }
-        if let Some(bg) = background {
-            let mut attr = pango::AttrColor::new_background(
-                (bg.red() * U16MAX).round() as u16,
-                (bg.green() * U16MAX).round() as u16,
-                (bg.blue() * U16MAX).round() as u16,
-            );
-            attr.set_start_index(start_index);
-            attr.set_end_index(end_index);
-            attrs.insert(attr);
-        }
-        if let Some(special) = hldef.colors.special.or(default_colors.special) {
-            let mut attr = pango::AttrColor::new_underline_color(
-                (special.red() * U16MAX).round() as u16,
-                (special.green() * U16MAX).round() as u16,
-                (special.blue() * U16MAX).round() as u16,
-            );
-            attr.set_start_index(start_index);
-            attr.set_end_index(end_index);
-            attrs.insert(attr);
-        }
-
-        self.attrs = attrs.attributes();
-    }
-}
-
-#[derive(Default)]
-pub struct TextLine {
-    nr: Nr,
-    boxed: Box<[TextCell]>,
-    cache: Cell<Option<(pango::Layout, pango::LayoutLine)>>,
-}
-
-impl Clone for TextLine {
-    fn clone(&self) -> Self {
-        TextLine {
-            nr: self.nr,
-            boxed: self.boxed.clone(),
-            cache: Cell::new(unsafe { &*self.cache.as_ptr() }.clone()),
-        }
-    }
-}
-
-impl TextLine {
-    fn new(cols: usize) -> TextLine {
-        let mut line = Vec::with_capacity(cols);
-        line.resize(cols, TextCell::default());
-        line.iter_mut().enumerate().for_each(|(start_index, cell)| {
-            cell.start_index = start_index;
-            cell.end_index = start_index + 1;
-        });
-        Self {
-            nr: 0,
-            cache: Cell::new(None),
-            boxed: line.into_boxed_slice(),
-        }
-    }
-
-    pub fn nr(&self) -> Nr {
-        self.nr
-    }
-
-    pub fn cache(&self) -> Option<(pango::Layout, pango::LayoutLine)> {
-        unsafe { &*self.cache.as_ptr() }.clone()
-    }
-
-    pub fn set_cache(&self, layout: pango::Layout, line: pango::LayoutLine) {
-        self.cache.set((layout, line).into());
-    }
-}
-
-impl Deref for TextLine {
-    type Target = [TextCell];
-
-    fn deref(&self) -> &[TextCell] {
-        &self.boxed
-    }
-}
-
-impl DerefMut for TextLine {
-    fn deref_mut(&mut self) -> &mut [TextCell] {
-        &mut self.boxed
-    }
-}
-
-impl AsRef<[TextCell]> for TextLine {
-    fn as_ref(&self) -> &[TextCell] {
-        &self.boxed
-    }
-}
-
-impl AsMut<[TextCell]> for TextLine {
-    fn as_mut(&mut self) -> &mut [TextCell] {
-        &mut self.boxed
-    }
-}
-
-impl From<Box<[TextCell]>> for TextLine {
-    fn from(boxed: Box<[TextCell]>) -> Self {
-        TextLine {
-            boxed,
-            ..Default::default()
-        }
-    }
-}
-
-impl Into<Box<[TextCell]>> for TextLine {
-    fn into(self) -> Box<[TextCell]> {
-        self.boxed
     }
 }
