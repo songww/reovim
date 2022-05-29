@@ -6,6 +6,8 @@ pub struct TextCell {
     pub text: String,
     pub hldef: Option<u64>,
     pub style: Style,
+    pub start_index: usize,
+    pub end_index: usize,
 }
 
 impl Default for TextCell {
@@ -14,6 +16,8 @@ impl Default for TextCell {
             text: String::from(" "),
             hldef: None,
             style: Style::default(),
+            start_index: 0,
+            end_index: 0,
         }
     }
 }

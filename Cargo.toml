@@ -26,6 +26,7 @@ rustc-hash = "1"
 vector-map = "1"
 pin-project = "1"
 async-trait = "0.1"
+parking_lot = "0.12"
 derive_more = "0.99"
 freetype-rs = "0.30"
 unicode-segmentation = "1"
@@ -34,12 +35,16 @@ clap = { version = "3", features = ["derive", "env"] }
 chan = { version = "0.5", package = "crossbeam-channel" }
 nvim = { version = "0.4", package = "nvim-rs", features = ["use_tokio"] }
 
-relm4 = { version = "0.4", features = ["tokio-rt", "libadwaita"] }
-relm-macros = { version = "0.4", package = "relm4-macros" }
-relm-components = { version = "0.4", package = "relm4-components" }
+relm-macros = { version = "0.4", package = "relm4-macros", git = "https://github.com/songww/relm4", branch = "main" }
+relm-components = { version = "0.4", package = "relm4-components", git = "https://github.com/songww/relm4", branch = "main" }
 
 tokio-util = { version = "0.7", features = ["compat"] }
-parking_lot = "0.12.0"
+
+[dependencies.relm4]
+version = "0.4"
+features = ["all"]
+git = "https://github.com/songww/relm4"
+branch = "main"
 
 [dependencies.tokio]
 version = "1"
@@ -67,35 +72,42 @@ default-features = false
 
 [dependencies.adw]
 package = "libadwaita"
-version = "0.1"
+# version = "0.2"
+git = "https://gitlab.gnome.org/World/Rust/libadwaita-rs"
 
 [dependencies.cairo]
-version = "0.15"
+# version = "0.16"
 package = "cairo-rs"
-features = ["v1_16", "png"]
+features = ["v1_16", "png", "freetype"]
+git = "https://github.com/gtk-rs/gtk-rs-core"
 
 [dependencies.pango]
-version = "0.15"
+# version = "0.16"
 package = "pango"
 features = ["v1_50"]
+git = "https://github.com/gtk-rs/gtk-rs-core"
 
 [dependencies.pangocairo]
-version = "0.15"
+# version = "0.16"
 package = "pangocairo"
+git = "https://github.com/gtk-rs/gtk-rs-core"
 
 [dependencies.graphene]
-version = "0.15"
+# version = "0.16"
 package = "graphene-rs"
-
-[dependencies.gtk]
-version = "0.4"
-package = "gtk4"
-features = ["v4_6"]
+git = "https://github.com/gtk-rs/gtk-rs-core"
 
 [dependencies.glib]
-version = "0.15"
+# version = "0.16"
 package = "glib"
 features = ["v2_70"]
+git = "https://github.com/gtk-rs/gtk-rs-core"
+
+[dependencies.gtk]
+# version = "0.5"
+package = "gtk4"
+features = ["v4_6"]
+git = "https://github.com/gtk-rs/gtk4-rs"
 
 [profile.release]
 debug = true

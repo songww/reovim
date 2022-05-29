@@ -48,12 +48,16 @@ impl TextLine {
         self.nr
     }
 
-    pub fn cache(&self) -> Option<LayoutCache> {
-        unsafe { &*self.cache.as_ptr() }.clone()
+    pub fn cache(&self) -> Option<&LayoutCache> {
+        unsafe { &*self.cache.as_ptr() }.as_ref()
     }
 
     pub fn set_cache(&self, lc: LayoutCache) {
         self.cache.set(lc.into());
+    }
+
+    pub fn render(&self, cr: &cairo::Context) {
+        todo!()
     }
 }
 
