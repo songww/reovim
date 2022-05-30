@@ -167,19 +167,7 @@ impl Cursor {
     }
 
     pub fn set_cell(&mut self, cell: TextCell) {
-        let width = if cell.text.is_empty() {
-            0.
-        } else {
-            let character = cell.text.chars().next().unwrap();
-
-            if cell.double_width {
-                2.
-            } else if pango::is_zero_width(character) {
-                0.
-            } else {
-                1.
-            }
-        };
+        let width = cell.width as f64;
         self.cell = cell;
         self.width = width;
     }

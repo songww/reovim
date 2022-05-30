@@ -185,20 +185,20 @@ mod imp {
                 cr.move_to(0., y);
                 y += metrics.height();
 
-                let layoutline = if let Some((layout, layoutline)) = line.cache() {
-                    unsafe {
-                        let layout: *mut pango::ffi::PangoLayout = layout.to_glib_none().0;
-                        (*layoutline.to_glib_none().0).layout = layout;
-                    };
-                    pangocairo::update_layout(&cr, &layout);
-                    layoutline
-                } else {
-                    let layoutline = self.layoutline(&mut layout, line, &metrics);
-                    line.set_cache(layout.copy().unwrap(), layoutline.clone());
-                    pangocairo::update_layout(&cr, &layout);
-                    layoutline
-                };
-                pangocairo::show_layout_line(&cr, &layoutline);
+                // let layoutline = if let Some((layout, layoutline)) = line.cache() {
+                //     unsafe {
+                //         let layout: *mut pango::ffi::PangoLayout = layout.to_glib_none().0;
+                //         (*layoutline.to_glib_none().0).layout = layout;
+                //     };
+                //     pangocairo::update_layout(&cr, &layout);
+                //     layoutline
+                // } else {
+                //     let layoutline = self.layoutline(&mut layout, line, &metrics);
+                //     line.set_cache(layout.copy().unwrap(), layoutline.clone());
+                //     pangocairo::update_layout(&cr, &layout);
+                //     layoutline
+                // };
+                // pangocairo::show_layout_line(&cr, &layoutline);
             }
             let elapsed = instant.elapsed().as_secs_f32() * 1000.;
             log::info!("snapshot used: {:.3}ms", elapsed);
@@ -266,6 +266,7 @@ mod imp {
             (w.ceil() as i32, h.ceil() as i32)
         }
 
+        /*
         fn layoutline(
             &self,
             layout: &mut pango::Layout,
@@ -275,7 +276,7 @@ mod imp {
             let cols = line.len();
             let mut text = String::new();
             let mut chars: Vec<Option<CharAttr>> = vec![None; cols * 2];
-            let attrs = pango::AttrList::new();
+            // let attrs = pango::AttrList::new();
             for col in 0..cols {
                 let cell = line.get(col).expect("Invalid cols and rows");
                 if cell.start_index == cell.end_index {
@@ -320,10 +321,10 @@ mod imp {
                     index += c.to_string().bytes().len();
                 }
                 text.push_str(&cell.text);
-                cell.attrs
-                    .clone()
-                    .into_iter()
-                    .for_each(|attr| attrs.change(attr));
+                // cell.attrs
+                //     .clone()
+                //     .into_iter()
+                //     .for_each(|attr| attrs.change(attr));
             }
             layout.set_text(&text);
             layout.set_attributes(Some(&attrs));
@@ -444,6 +445,7 @@ mod imp {
             }
             from_glib_none(layoutline)
         }
+        */
     }
 }
 

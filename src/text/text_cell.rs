@@ -1,11 +1,12 @@
-use crate::style::Style;
-use crate::vimview::HighlightDefinitions;
+// use crate::style::Style;
+// use crate::vimview::HighlightDefinitions;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct TextCell {
     pub text: String,
     pub hldef: Option<u64>,
-    pub style: Style,
+    pub width: u8,
+    // pub style: Style,
     pub start_index: usize,
     pub end_index: usize,
 }
@@ -15,7 +16,8 @@ impl Default for TextCell {
         TextCell {
             text: String::from(" "),
             hldef: None,
-            style: Style::default(),
+            width: 1,
+            // style: Style::default(),
             start_index: 0,
             end_index: 0,
         }

@@ -1,4 +1,5 @@
 use std::cell::Cell;
+use std::fmt;
 use std::ops::{Deref, DerefMut};
 
 use super::{Nr, TextCell};
@@ -29,6 +30,16 @@ impl Clone for TextLine {
     }
 }
 
+impl fmt::Debug for TextLine {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            fmt,
+            "TextLine {{ nr: {}, cells: {:?} }}",
+            self.nr, self.boxed
+        )
+    }
+}
+
 impl TextLine {
     pub fn new(cols: usize) -> TextLine {
         let mut line = Vec::with_capacity(cols);
@@ -48,16 +59,24 @@ impl TextLine {
         self.nr
     }
 
-    pub fn cache(&self) -> Option<&LayoutCache> {
-        unsafe { &*self.cache.as_ptr() }.as_ref()
+    // pub fn cache(&self) -> Option<&LayoutCache> {
+    //     unsafe { &*self.cache.as_ptr() }.as_ref()
+    // }
+
+    // pub fn set_cache(&self, lc: LayoutCache) {
+    //     self.cache.set(lc.into());
+    // }
+
+    pub fn set_nr(&mut self, nr: Nr) {
+        self.nr = nr;
     }
 
-    pub fn set_cache(&self, lc: LayoutCache) {
-        self.cache.set(lc.into());
+    pub fn set_cells(&mut self, cells: Vec<TextCell>) {
+        self.boxed = cells.into_boxed_slice();
     }
 
-    pub fn render(&self, cr: &cairo::Context) {
-        todo!()
+    pub fn take_cells(&mut self) -> Box<[TextCell]> {
+        std::mem::take(&mut self.boxed)
     }
 }
 

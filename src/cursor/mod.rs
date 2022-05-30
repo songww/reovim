@@ -163,24 +163,24 @@ impl VimCursor {
             CursorShape::Block => {
                 use pango::AttrType;
                 let attrs = pango::AttrList::new();
-                cell.attrs
-                    .iter()
-                    .filter_map(|attr| match attr.type_() {
-                        AttrType::Family
-                        | AttrType::Style
-                        | AttrType::Weight
-                        | AttrType::Variant
-                        | AttrType::Underline
-                        | AttrType::Strikethrough
-                        | AttrType::Overline => {
-                            let mut attr = attr.clone();
-                            attr.set_start_index(0);
-                            attr.set_end_index(pango::ATTR_INDEX_TO_TEXT_END);
-                            Some(attr)
-                        }
-                        _ => None,
-                    })
-                    .for_each(|attr| attrs.insert(attr));
+                // cell.attrs
+                //     .iter()
+                //     .filter_map(|attr| match attr.type_() {
+                //         AttrType::Family
+                //         | AttrType::Style
+                //         | AttrType::Weight
+                //         | AttrType::Variant
+                //         | AttrType::Underline
+                //         | AttrType::Strikethrough
+                //         | AttrType::Overline => {
+                //             let mut attr = attr.clone();
+                //             attr.set_start_index(0);
+                //             attr.set_end_index(pango::ATTR_INDEX_TO_TEXT_END);
+                //             Some(attr)
+                //         }
+                //         _ => None,
+                //     })
+                //     .for_each(|attr| attrs.insert(attr));
                 log::debug!("cursor cell '{}' wide {}", cell.text, self.width);
                 let itemized = pango::itemize(
                     &self.pctx,

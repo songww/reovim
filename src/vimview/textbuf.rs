@@ -77,18 +77,18 @@ mod imp {
             self.textlines
                 .iter_mut()
                 .enumerate()
-                .for_each(|(idx, tl)| tl.nr = nr + idx);
+                .for_each(|(idx, tl)| tl.set_nr(nr + idx));
         }
 
         fn reset_cache(&mut self) {
             let pctx = self.pctx.as_ref().unwrap();
             let hldefs = self.hldefs.as_ref().unwrap().read();
             let metrics = self.metrics.as_ref().unwrap().get();
-            self.textlines.iter_mut().for_each(|line| {
-                line.iter_mut().for_each(|cell| {
-                    cell.reset_attrs(pctx, &hldefs, &metrics);
-                });
-            });
+            // self.textlines.iter_mut().for_each(|line| {
+            //     line.iter_mut().for_each(|cell| {
+            //         // cell.reset_attrs(pctx, &hldefs, &metrics);
+            //     });
+            // });
         }
 
         pub fn nlines(&self) -> usize {
@@ -126,7 +126,7 @@ mod imp {
             lines
                 .iter_mut()
                 .enumerate()
-                .for_each(|(idx, line)| line.nr = nr + idx);
+                .for_each(|(idx, line)| line.set_nr(nr + idx));
             self.textlines.extend(lines);
         }
 
@@ -201,7 +201,7 @@ mod imp {
         pub fn flush_nrs(&mut self) {
             let topnr = self.top.floor() as usize;
             for (idx, tl) in self.textlines.iter_mut().enumerate() {
-                tl.nr = topnr + idx;
+                tl.set_nr(topnr + idx);
             }
         }
 
@@ -241,7 +241,7 @@ mod imp {
                 // push_front 5 4 3 2 1
                 for nr in (topusize..topnr).rev() {
                     let mut elt = TextLine::new(self.cols);
-                    elt.nr = nr;
+                    elt.set_nr(nr);
                     self.textlines.push_front(elt);
                 }
                 log::error!("topusize: {} topnr: {}", topusize, topnr);
@@ -287,7 +287,7 @@ mod imp {
                 let mut afters = self.textlines.split_off(idx);
                 for nr in topusize..lastnr {
                     let mut elt = TextLine::new(self.cols);
-                    elt.nr = nr;
+                    elt.set_nr(nr);
                     self.textlines.push_back(elt);
                 }
                 self.textlines.append(&mut afters);
@@ -329,7 +329,7 @@ mod imp {
                     let mut afters = self.textlines.split_off(at + rows_contiguous + 1);
                     for offset in 0..((self.rows - rows_contiguous).min(lacks)) {
                         let mut elt = TextLine::new(self.cols);
-                        elt.nr = prevnr + offset + 1;
+                        elt.set_nr(prevnr + offset + 1);
                         self.textlines.push_back(elt);
                     }
                     self.textlines.append(&mut afters);
@@ -374,11 +374,11 @@ mod imp {
             //     return;
             // }
             let nr = self.top.floor() as usize + row;
-            let nrs = self.textlines.iter().map(|c| c.nr).collect::<Vec<_>>();
+            let nrs = self.textlines.iter().map(|c| c.nr()).collect::<Vec<_>>();
             let line = &mut self
                 .textlines
                 .iter_mut()
-                .find(|line| line.nr == nr)
+                .find(|line| line.nr() == nr)
                 .or_else(|| {
                     log::error!(
                         "current top: {} bottom: {} cols: {} rows: {}/{} of nr {} nrs: {:?}",
@@ -393,7 +393,7 @@ mod imp {
                     None
                 })
                 .unwrap();
-            line.cache.set(None);
+            // line.cache.set(None);
             let pctx = self.pctx.as_ref().unwrap();
             let hldefs = self.hldefs.as_ref().unwrap().read();
             let metrics = self.metrics.as_ref().unwrap().get();
@@ -409,16 +409,23 @@ mod imp {
                 for _ in 0..repeat.unwrap_or(1) {
                     // FIXME: invalid start_index
                     let end_index = start_index + text.len();
-                    let attrs = Vec::new();
+                    // let attrs = Vec::new();
+                    let width = if text.is_empty() || text.chars().all(pango::is_zero_width) {
+                        0
+                    } else if *double_width {
+                        2
+                    } else {
+                        1
+                    };
                     let mut cell = TextCell {
                         text: text.to_string(),
                         hldef: hldef.clone(),
-                        double_width: *double_width,
-                        attrs,
+                        width: double_width.then_some(1).unwrap_or(0),
+                        // attrs,
                         start_index,
                         end_index,
                     };
-                    cell.reset_attrs(pctx, &hldefs, &metrics);
+                    // cell.reset_attrs(pctx, &hldefs, &metrics);
                     log::trace!(
                         "Setting cell {}[{}] start_index {} end_index {}",
                         row,
@@ -461,7 +468,7 @@ mod imp {
             line.iter_mut().fold(0, |start_index, cell| {
                 cell.start_index = start_index;
                 cell.end_index = start_index + cell.text.len();
-                cell.reset_attrs(pctx, &hldefs, &metrics);
+                // cell.reset_attrs(pctx, &hldefs, &metrics);
                 cell.end_index
             });
         }
@@ -518,7 +525,7 @@ mod imp {
             }
             self.textlines.iter_mut().for_each(|tl| {
                 let mut start_index = tl.last().map(|last| last.start_index).unwrap_or(0);
-                let old = std::mem::take(&mut tl.boxed);
+                let old = tl.take_cells();
                 let mut cells: Vec<_> = old.into();
                 if cols > old_cols {
                     for _ in 0..(cols - old_cols) {
@@ -534,7 +541,7 @@ mod imp {
                     cells.truncate(cols);
                 }
                 assert_eq!(cells.len(), cols);
-                tl.boxed = cells.into_boxed_slice();
+                tl.set_cells(cells);
             });
             assert_eq!(self.textlines.len(), rows);
 
