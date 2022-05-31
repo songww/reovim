@@ -13,6 +13,7 @@ use crate::app::{self, Dragging};
 use crate::bridge::{MouseAction, MouseButton, SerialCommand, UiCommand};
 use crate::event_aggregator::EVENT_AGGREGATOR;
 use crate::grapheme::{Clamp, Coord, Pos, Rectangle};
+use crate::text::FontMap;
 
 use super::gridview::VimGridView;
 use super::TextBuf;
@@ -176,6 +177,10 @@ impl VimGrid {
 
     pub fn set_pango_context(&self, pctx: Rc<pango::Context>) {
         self.textbuf().set_pango_context(pctx);
+    }
+
+    pub fn set_fontmap(&self, fontmap: Rc<FontMap>) {
+        self.textbuf().set_fontmap(fontmap);
     }
 
     /// visible top-line - bottom-line

@@ -8,7 +8,7 @@ mod imp {
     use parking_lot::RwLock;
 
     use crate::metrics::Metrics;
-    use crate::text::{TextCell, TextLine};
+    use crate::text::{LayoutLine, TextCell, TextLine};
     use crate::vimview::TextBuf;
 
     use super::super::highlights::HighlightDefinitions;
@@ -144,8 +144,9 @@ mod imp {
             let instant = std::time::Instant::now();
             self.parent_snapshot(widget, snapshot);
             let textbuf = self.textbuf();
-            let pctx = textbuf.pango_context();
-            pctx.set_base_dir(pango::Direction::Ltr);
+            // let pctx = textbuf.pango_context();
+            // pctx.set_base_dir(pango::Direction::Ltr);
+            let fontmap = textbuf.fontmap();
 
             let (width, height) = self.size_required();
 
@@ -172,18 +173,22 @@ mod imp {
             let cr = snapshot.append_cairo(&rect);
 
             let mut y = metrics.ascent();
+            println!("{:?}", metrics);
+            println!("{:?}", fontmap.regular().metrics());
 
             // let rows = textbuf.rows();
             log::debug!("text to render:");
-            let desc = pctx.font_description();
-            let mut layout = pango::Layout::new(&pctx);
-            layout.set_auto_dir(false);
-            layout.set_font_description(desc.as_ref());
+            // let desc = pctx.font_description();
+            // let mut layout = pango::Layout::new(&pctx);
+            // layout.set_auto_dir(false);
+            // layout.set_font_description(desc.as_ref());
             let textbuf = self.textbuf();
             let lines = textbuf.lines();
             for line in lines.iter() {
-                cr.move_to(0., y);
-                y += metrics.height();
+                cr.translate(0., metrics.height());
+
+                let layoutline = LayoutLine::with(&fontmap, &line, &hldefs);
+                layoutline.show(&cr).unwrap();
 
                 // let layoutline = if let Some((layout, layoutline)) = line.cache() {
                 //     unsafe {

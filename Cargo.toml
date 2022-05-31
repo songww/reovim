@@ -59,14 +59,16 @@ features = [
 ]
 
 [dependencies.harfbuzz-sys]
-git = "https://github.com/songww/rust-harfbuzz"
-branch = "migrate-to-meson"
+# git = "https://github.com/songww/rust-harfbuzz"
+path = "../rust-harfbuzz/harfbuzz-sys"
+# branch = "migrate-to-meson"
 features = ["bindgen"]
 default-features = false
 
 [dependencies.harfbuzz]
-git = "https://github.com/songww/rust-harfbuzz"
-branch = "migrate-to-meson"
+# git = "https://github.com/songww/rust-harfbuzz"
+# branch = "migrate-to-meson"
+path = "../rust-harfbuzz/harfbuzz"
 features = ["bindgen"]
 default-features = false
 

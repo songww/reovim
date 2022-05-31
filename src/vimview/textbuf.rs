@@ -1,12 +1,11 @@
 use std::cell::Cell;
-use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 
 use glib::subclass::prelude::*;
 use parking_lot::RwLock;
 
 use super::highlights::HighlightDefinitions;
-use crate::text::{TextCell, TextLine};
+use crate::text::{FontMap, TextCell, TextLine};
 
 type Nr = usize;
 
@@ -18,7 +17,7 @@ mod imp {
     use glib::subclass::prelude::*;
     use parking_lot::{RwLock, RwLockReadGuard};
 
-    use crate::text::{TextCell, TextLine};
+    use crate::text::{FontMap, TextCell, TextLine};
     use crate::vimview::HighlightDefinitions;
 
     use super::Nr;
@@ -41,6 +40,8 @@ mod imp {
 
         #[derivative(Debug = "ignore")]
         pctx: Option<Rc<pango::Context>>,
+        #[derivative(Debug = "ignore")]
+        fontmap: Option<Rc<FontMap>>,
     }
 
     impl Default for _TextBuf {
@@ -68,6 +69,7 @@ mod imp {
                 pctx: None,
                 hldefs: None,
                 metrics: None,
+                fontmap: None,
             }
         }
 
@@ -356,6 +358,10 @@ mod imp {
             self.metrics.replace(metrics);
         }
 
+        pub fn set_fontmap(&mut self, fontmap: Rc<FontMap>) {
+            self.fontmap.replace(fontmap);
+        }
+
         pub fn set_pango_context(&mut self, pctx: Rc<pango::Context>) {
             self.pctx.replace(pctx);
         }
@@ -494,6 +500,10 @@ mod imp {
             // let _ = self.cells.splice(0..0, lines).collect::<Vec<_>>();
         }
 
+        pub fn fontmap(&self) -> Rc<FontMap> {
+            self.fontmap.clone().unwrap()
+        }
+
         fn pango_context(&self) -> Rc<pango::Context> {
             self.pctx.clone().unwrap()
         }
@@ -597,6 +607,12 @@ mod imp {
 
         pub(super) fn set_metrics(&self, metrics: Rc<Cell<crate::metrics::Metrics>>) {
             self.inner.write().set_metrics(metrics);
+        }
+        pub(super) fn set_fontmap(&self, fontmap: Rc<FontMap>) {
+            self.inner.write().set_fontmap(fontmap);
+        }
+        pub(super) fn fontmap(&self) -> Rc<FontMap> {
+            self.inner.read().fontmap()
         }
 
         pub(super) fn set_pango_context(&self, pctx: Rc<pango::Context>) {
@@ -768,6 +784,14 @@ impl TextBuf {
 
     pub fn pango_context(&self) -> Rc<pango::Context> {
         self.imp().pango_context()
+    }
+
+    pub fn set_fontmap(&self, fontmap: Rc<FontMap>) {
+        self.imp().set_fontmap(fontmap);
+    }
+
+    pub fn fontmap(&self) -> Rc<FontMap> {
+        self.imp().fontmap()
     }
 
     pub fn cell(&self, row: usize, col: usize) -> Option<TextCell> {

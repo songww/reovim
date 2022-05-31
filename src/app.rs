@@ -25,6 +25,7 @@ use crate::event_aggregator::EVENT_AGGREGATOR;
 use crate::grapheme::Coord;
 use crate::keys::ToInput;
 use crate::metrics::Metrics;
+use crate::text::FontMap;
 use crate::vimview::{self, VimGrid, VimMessage};
 use crate::Opts;
 
@@ -62,7 +63,7 @@ pub struct AppModel {
 
     pub font_description: Rc<RefCell<pango::FontDescription>>,
     pub font_changed: Rc<atomic::AtomicBool>,
-    pub fontset: Rc<pango::Fontset>,
+    pub fontmap: Rc<FontMap>,
 
     pub mode: EditorMode,
 
@@ -126,9 +127,7 @@ impl AppModel {
             })
             .unwrap()
             .into();
-        let fontset = default_fontmap
-            .load_fontset(&pctx, &font_desc, &pango::Language::default())
-            .unwrap();
+        let fontmap = FontMap::new(font_desc.clone(), None, None, None);
         let hldefs = Rc::new(RwLock::new(vimview::HighlightDefinitions::new()));
         let metrics = Rc::new(Metrics::new().into());
         AppModel {
@@ -161,7 +160,7 @@ impl AppModel {
             metrics,
             font_description: Rc::new(RefCell::new(font_desc)),
             font_changed: Rc::new(false.into()),
-            fontset: Rc::new(fontset),
+            fontmap: Rc::new(fontmap),
 
             hldefs,
             hlgroups: Rc::new(RwLock::new(FxHashMap::default())),
@@ -218,7 +217,7 @@ impl AppModel {
 
         layout.set_text(SINGLE_WIDTH_CHARS);
         // let ascent = layout.baseline() as f64 / PANGO_SCALE;
-        let font_metrics = self.fontset.metrics().unwrap();
+        let font_metrics = self.fontmap.metrics().unwrap();
         let fm_width = font_metrics.approximate_digit_width();
         let fm_height = font_metrics.height();
         let fm_ascent = font_metrics.ascent();
@@ -305,6 +304,10 @@ impl AppUpdate for AppModel {
                                 self.gtksettings.get().map(|settings| {
                                     settings.set_gtk_font_name(Some(&desc.to_str()));
                                 });
+
+                                let default_fontmap = pangocairo::FontMap::default().unwrap();
+                                self.fontmap =
+                                    Rc::new(FontMap::new(desc.clone(), None, None, None));
 
                                 self.guifont.replace(guifont);
                                 self.font_description.replace(desc);
@@ -481,6 +484,7 @@ impl AppUpdate for AppModel {
                                 self.font_description.clone(),
                             );
                             vgrid.set_pango_context(self.pctx.clone());
+                            vgrid.set_fontmap(self.fontmap.clone());
                             self.vgrids.insert(grid, vgrid);
                         };
                         if grid == 1 {
@@ -515,6 +519,7 @@ impl AppUpdate for AppModel {
                                 self.font_description.clone(),
                             );
                             vgrid.set_pango_context(self.pctx.clone());
+                            vgrid.set_fontmap(self.fontmap.clone());
                             self.vgrids.insert(grid, vgrid);
                             log::error!(
                                 "Add grid {} at {}x{} with {}x{}.",
@@ -571,6 +576,7 @@ impl AppUpdate for AppModel {
                             );
                             vgrid.set_viewport(top, bottom);
                             vgrid.set_pango_context(self.pctx.clone());
+                            vgrid.set_fontmap(self.fontmap.clone());
                             self.vgrids.insert(grid, vgrid);
                             log::info!(
                                 "Empty grid {} created cause of viewport({}, {}) event.",
@@ -754,6 +760,7 @@ impl AppUpdate for AppModel {
                             );
                             vgrid.show();
                             vgrid.set_pango_context(self.pctx.clone());
+                            vgrid.set_fontmap(self.fontmap.clone());
                             self.vgrids.insert(grid, vgrid);
                         }
                     }

@@ -43,7 +43,7 @@ unsafe impl Send for Builtin {}
 unsafe impl Sync for Builtin {}
 
 pub fn builtin(ptem: f32) -> Builtin {
-    static Font: Lazy<Builtin> = Lazy::new(|| {
+    static FONT: Lazy<Builtin> = Lazy::new(|| {
         let blob = harfbuzz::Blob::new_read_only(BOX_DRAWING);
         let mut face = harfbuzz::Face::new(&blob, 0);
         let hb = harfbuzz::Font::new(&mut face);
@@ -52,10 +52,10 @@ pub fn builtin(ptem: f32) -> Builtin {
         let ftface = ft.new_memory_face(data, 0).unwrap();
         Builtin { hb, ft: ftface }
     });
-    let ft = Font.ft.clone();
-    let mut hb = Font.hb.clone();
+    let ft = FONT.ft.clone();
+    let mut hb = FONT.hb.clone();
     hb.set_ptem(ptem);
-    ft.set_char_size((ptem * 64.) as isize, 0, 0, 0);
+    ft.set_char_size((ptem * 64.) as isize, 0, 0, 0).unwrap();
     Builtin { hb, ft }
 }
 
@@ -68,7 +68,8 @@ impl Builtin {
         static FT_FACE: cairo::UserDataKey<freetype::face::Face> = cairo::UserDataKey::new();
         // TODO: variations
         let face = cairo::FontFace::create_from_ft(&self.ft)?;
-        face.set_user_data(&FT_FACE, Rc::new(self.ft.clone()));
+        face.set_user_data(&FT_FACE, Rc::new(self.ft.clone()))
+            .unwrap();
         let upem = self.hb.ptem() as f64 / 72. * 96.;
         let (sx, sy) = (upem, upem);
         let ctm = cairo::Matrix::identity();
@@ -79,20 +80,68 @@ impl Builtin {
         let scaled_font = cairo::ScaledFont::new(&face, &font_matrix, &ctm, &options)?;
         Ok(scaled_font)
     }
+
+    fn hb(&self) -> harfbuzz::Font {
+        self.hb.clone()
+    }
+}
+
+trait FontExtManual {
+    fn hb(&self) -> harfbuzz::Font;
+}
+
+impl FontExtManual for pango::Font {
+    fn hb(&self) -> harfbuzz::Font {
+        let hb = unsafe {
+            let raw = pango::ffi::pango_font_get_hb_font(self.to_glib_none().0);
+            let raw = harfbuzz::sys::hb_font_reference(raw as *mut _);
+            harfbuzz::Font::from_raw(raw)
+        };
+        hb
+    }
+}
+
+impl FontExtManual for pangocairo::Font {
+    fn hb(&self) -> harfbuzz::Font {
+        self.upcast_ref::<pango::Font>().hb()
+    }
 }
 
 pub struct FontSet(Builtin, pango::Fontset);
 
 impl FontSet {
-    pub fn font(&self, wc: u32) -> Option<cairo::ScaledFont> {
+    pub fn font(&self, wc: u32) -> Option<(harfbuzz::Font, cairo::ScaledFont)> {
         if Builtin::has_char(char::from_u32(wc).unwrap_or('a')) {
-            self.0.scaled_font().ok()
+            log::info!(
+                "using builtin font for char {}",
+                char::from_u32(wc).unwrap()
+            );
+            self.0
+                .scaled_font()
+                .ok()
+                .map(|scaled_font| (self.0.hb(), scaled_font))
         } else {
             self.1
                 .font(wc)
+                /*
+                .map(|f| {
+                    println!(
+                        "using `{}` for char `{}`",
+                        f.describe().unwrap(),
+                        char::from_u32(wc).unwrap()
+                    );
+                    f
+                })
+                */
                 .and_then(|f| f.downcast().ok())
-                .and_then(|f: pangocairo::Font| f.scaled_font())
+                .and_then(|f: pangocairo::Font| {
+                    f.scaled_font().map(|scaled_font| (f.hb(), scaled_font))
+                })
         }
+    }
+
+    pub fn metrics(&self) -> Option<pango::FontMetrics> {
+        self.1.metrics()
     }
 }
 
@@ -112,8 +161,6 @@ pub struct FontMap {
     bold: FontSet,
     italic: FontSet,
     bold_italic: FontSet,
-
-    buf: harfbuzz::Buffer,
 }
 
 impl FontMap {
@@ -146,15 +193,11 @@ impl FontMap {
         let italic = fontmap.load_fontset(&ctx, &italic, &language).unwrap();
         let bold_italic = fontmap.load_fontset(&ctx, &bold_italic, &language).unwrap();
 
-        let buf = harfbuzz::Buffer::new();
-
         FontMap {
             regular: FontSet::from(regular),
             bold: FontSet::from(bold),
             italic: FontSet::from(italic),
             bold_italic: FontSet::from(bold_italic),
-
-            buf,
         }
     }
 
@@ -173,38 +216,59 @@ impl FontMap {
     pub fn bold_italic(&self) -> &FontSet {
         &self.bold_italic
     }
+
+    pub fn metrics(&self) -> Option<pango::FontMetrics> {
+        self.regular.metrics()
+    }
 }
 
 pub type Nr = usize;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Item<'a> {
     text: String,
-    font: cairo::ScaledFont,
     cells: Vec<&'a TextCell>,
+    scaled_font: cairo::ScaledFont,
+    hb_font: harfbuzz::Font,
+    glyphs: Vec<cairo::Glyph>,
+    clusters: Vec<cairo::TextCluster>,
 }
 
 impl<'a> Item<'a> {
-    fn new(text: String, font: cairo::ScaledFont, cell: &'a TextCell) -> Self {
+    fn new(
+        text: String,
+        hb_font: harfbuzz::Font,
+        scaled_font: cairo::ScaledFont,
+        cell: &'a TextCell,
+    ) -> Self {
         Item {
             text,
-            font,
+            hb_font,
+            scaled_font,
             cells: vec![cell],
+            glyphs: Vec::new(),
+            clusters: Vec::new(),
         }
     }
-    fn with_font(&self, font: cairo::ScaledFont) -> Self {
+    fn with_font(&self, hb_font: harfbuzz::Font, scaled_font: cairo::ScaledFont) -> Self {
         Item {
             text: self.text.clone(),
-            font,
+            hb_font,
+            scaled_font,
             cells: self.cells.clone(),
+            glyphs: Vec::new(),
+            clusters: Vec::new()
         }
     }
 
     fn with_cell(&self, cell: &'a TextCell) -> Self {
         Item {
             text: self.text.clone(),
-            font: self.font.clone(),
+            hb_font: self.hb_font.clone(),
+            scaled_font: self.scaled_font.clone(),
             cells: vec![cell],
+            glyphs: Vec::new(),
+            clusters: Vec::new()
         }
     }
 
@@ -220,33 +284,37 @@ impl<'a> Item<'a> {
 pub struct LayoutLine<'a> {
     text: String,
     items: Vec<Item<'a>>,
-    glyphs: Vec<cairo::Glyph>,
-    clusters: Vec<cairo::TextCluster>,
+    // glyphs: Vec<cairo::Glyph>,
+    // clusters: Vec<cairo::TextCluster>,
 }
 
 impl<'a> LayoutLine<'a> {
-    pub fn with(
-        fm: &mut FontMap,
-        tl: &'a TextLine,
-        hldefs: &HighlightDefinitions,
-    ) -> LayoutLine<'a> {
-        let (items, text) = fm.itemize(tl, hldefs);
-        let (glyphs, clusters) = fm.shape(&text, &items);
+    pub fn with(fm: &FontMap, tl: &'a TextLine, hldefs: &HighlightDefinitions) -> LayoutLine<'a> {
+        let mut buf = harfbuzz::Buffer::new();
+        let (mut items, text) = fm.itemize(tl, hldefs);
+        /* let (glyphs, clusters) =*/ fm.shape(&mut buf, &text, &mut items);
         LayoutLine {
             text,
             items,
-            glyphs,
-            clusters,
+            // glyphs,
+            // clusters,
         }
     }
 
-    pub fn render(&self, cr: &cairo::Context) -> anyhow::Result<()> {
-        cr.show_text_glyphs(
-            &self.text,
-            &self.glyphs,
-            &self.clusters,
-            cairo::TextClusterFlags::None,
-        )?;
+    pub fn show(&self, cr: &cairo::Context) -> anyhow::Result<()> {
+        // log::info!("show text glyphs");
+        // println!("{} {:?}", self.glyphs.len(), &self.glyphs);
+        // println!("{} {:?}", self.clusters.len(), &self.clusters);
+        // assert!(self.glyphs.len() == self.clusters.len());
+        for item in self.items.iter() {
+            cr.set_scaled_font(&item.scaled_font);
+            cr.show_text_glyphs(
+                &item.text,
+                &item.glyphs,
+                &item.clusters,
+                cairo::TextClusterFlags::None,
+            )?;
+        }
         Ok(())
     }
 }
@@ -262,12 +330,12 @@ impl FontMap {
         if tl.is_empty() {
             return (items, text);
         }
-        fn scaled_font(
+        fn _font(
             fm: &FontMap,
             hldefs: &HighlightDefinitions,
             cell: &TextCell,
             c: char,
-        ) -> cairo::ScaledFont {
+        ) -> (harfbuzz::Font, cairo::ScaledFont) {
             let hldef = cell.hldef.unwrap_or(HighlightDefinitions::DEFAULT);
             let style = hldefs.get(hldef).unwrap();
             if style.italic && style.bold {
@@ -282,20 +350,19 @@ impl FontMap {
         }
         let mut iter = tl.iter();
         let cell = iter.next().unwrap();
-        let item = Item::new(
-            String::new(),
-            self.regular().font('a' as u32).unwrap(),
-            cell,
-        );
+        let (hb_font, scaled_font) = self.regular().font('a' as u32).unwrap();
+        let item = Item::new(String::new(), hb_font, scaled_font, cell);
         items.push(item.clone());
         for (idx, c) in cell.text.chars().enumerate() {
-            let font = scaled_font(&self, hldefs, cell, c);
+            let (hb_font, scaled_font) = _font(&self, hldefs, cell, c);
+            let last_mut = items.last_mut().unwrap();
             if idx == 0 {
-                items.last_mut().unwrap().font = font;
-            } else if !font.is_same(&items.last().unwrap().font) {
+                last_mut.hb_font = hb_font;
+                last_mut.scaled_font = scaled_font;
+            } else if !scaled_font.is_same(&last_mut.scaled_font) {
                 panic!("{:?} with different font, {:?}", cell, tl);
             }
-            items.last_mut().unwrap().text.push(c);
+            last_mut.text.push(c);
         }
         text.push_str(&cell.text);
         for cell in iter {
@@ -309,14 +376,14 @@ impl FontMap {
 
             let mut chars = cell.text.chars();
             let c = chars.next().unwrap();
-            let font = scaled_font(&self, &hldefs, &cell, c);
-            if !font.is_same(&last.font) {
-                items.push(item.with_font(font));
+            let (hb, scaled_font) = _font(&self, &hldefs, &cell, c);
+            if !scaled_font.is_same(&last.scaled_font) {
+                items.push(item.with_font(hb, scaled_font));
             }
             let last = items.last().unwrap();
             for c in chars {
-                let font = scaled_font(&self, &hldefs, &cell, c);
-                if !font.is_same(&last.font) {
+                let (_, scaled_font) = _font(&self, &hldefs, &cell, c);
+                if !scaled_font.is_same(&last.scaled_font) {
                     panic!("{:?} with different font, {:?}", cell, tl);
                 }
             }
@@ -329,36 +396,47 @@ impl FontMap {
     }
 
     pub fn shape(
-        &mut self,
+        &self,
+        buf: &mut harfbuzz::Buffer,
         text: &str,
-        items: &[Item],
-    ) -> (Vec<cairo::Glyph>, Vec<cairo::TextCluster>) {
-        self.buf.clear_contents();
-        self.buf.add_str(&text, 0, None);
-        self.buf.guess_segment_properties();
-        self.buf.clear_contents();
+        items: &mut [Item],
+    ) {
+        buf.clear_contents();
+        buf.add_str(&text, 0, None);
+        buf.guess_segment_properties();
+        buf.clear_contents();
 
-        let mut glyphs = Vec::new();
-        let mut clusters = Vec::new();
+        // let mut glyphs = Vec::new();
+        // let mut clusters = Vec::new();
 
         let mut x = 0.;
         let mut y = 0.;
 
         let mut start_at = 0;
-        let iter = items.iter().peekable();
+        let iter = items.iter_mut().peekable();
+        // TODO: shape only with preview and next item.
         for item in iter {
-            let (glyphs_, clusters_) =
-                self.shape_(text, start_at, start_at + item.text.len(), &mut x, &mut y);
-            glyphs.extend(glyphs_);
-            clusters.extend(clusters_);
+            let (glyphs_, clusters_) = self.shape_(
+                &item.hb_font,
+                buf,
+                text,
+                start_at,
+                item.text.len(),
+                &mut x,
+                &mut y,
+            );
+            item.glyphs = glyphs_;
+            item.clusters = clusters_;
             start_at += item.text.len();
         }
 
-        (glyphs, clusters)
+        // (glyphs, clusters)
     }
 
     fn shape_(
-        &mut self,
+        &self,
+        font: &harfbuzz::Font,
+        buf: &mut harfbuzz::Buffer,
         text: &str,
         start_at: usize,
         end_at: usize,
@@ -369,16 +447,18 @@ impl FontMap {
             return (Vec::new(), Vec::new());
         }
 
-        self.buf.clear_contents();
-        self.buf.add_str(text, start_at, Some(end_at));
-        self.buf.guess_segment_properties();
-        self.buf.set_direction(harfbuzz::Direction::LTR);
+        buf.clear_contents();
+        buf.add_str(text, start_at, Some(end_at));
+        buf.guess_segment_properties();
+        buf.set_direction(harfbuzz::Direction::LTR);
 
-        let num_glyphs = self.buf.len();
-        let glyph_infos = self.buf.glyph_infos();
-        let glyph_positions = self.buf.glyph_positions();
+        harfbuzz::shape(font, buf, &[]);
 
-        self.buf.clear_contents();
+        let num_glyphs = buf.len();
+        let glyph_infos = buf.glyph_infos();
+        let glyph_positions = buf.glyph_positions();
+
+        buf.clear_contents();
 
         let mut glyphs = Vec::with_capacity(num_glyphs + 1);
 
@@ -397,12 +477,26 @@ impl FontMap {
 
         let scale_bits = -6;
 
-        let position = &glyph_positions[0];
-        for glyph_info in glyph_infos.iter() {
+        /*
+        log::info!("{}", text);
+        log::info!(
+            "text '{}', start_at {}, end_at {} x {} y {} glyph infos {:?}, glyph positions: {:?}",
+            &text[start_at..start_at + end_at],
+            start_at,
+            end_at,
+            x,
+            y,
+            &glyph_infos,
+            &glyph_positions
+        );
+        */
+        // let scale_bits = 0;
+        for (glyph_info, position) in glyph_infos.iter().zip(glyph_positions.iter()) {
             let index = glyph_info.codepoint() as u64;
             let x_ = libm::scalbn(position.x_offset() as f64 + *x, scale_bits);
-            let y_ = libm::scalbn(-position.x_offset() as f64 + *y, scale_bits);
-            glyphs.push(cairo::Glyph::new(index, x_, y_));
+            let y_ = libm::scalbn(-position.y_offset() as f64 + *y, scale_bits);
+            // println!("glyph {{ index: {index}, x: {x_}, y: {y_} }}", x_=x_ / 64.);
+            glyphs.push(cairo::Glyph::new(index, x_ / 16., y_));
 
             *x += position.x_advance() as f64;
             *y += -position.y_advance() as f64;
@@ -413,6 +507,8 @@ impl FontMap {
         //     libm::scalbn(x as f64, scale_bits),
         //     libm::scalbn(y as f64, scale_bits),
         // ));
+
+        // unicode_segmentation;
 
         if num_clusters > 0 {
             let mut index = 0;
@@ -427,14 +523,17 @@ impl FontMap {
                 if cluster1 != cluster2 {
                     assert!(cluster1 > cluster2);
                     let num_bytes = (cluster1 - cluster2) as i32;
+                    // println!("{} - {} = {}", cluster1, cluster2, num_bytes);
                     c.set_num_bytes(num_bytes);
                     bytes += num_bytes;
                     index += 1;
                 }
+                c = unsafe { clusters.get_unchecked_mut(index) };
                 c.set_num_glyphs(c.num_glyphs() + 1);
             }
             c = unsafe { clusters.get_unchecked_mut(index) };
-            c.set_num_bytes(text.len() as i32 - bytes);
+            c.set_num_bytes(end_at as i32 - bytes);
+            
         }
 
         (glyphs, clusters)

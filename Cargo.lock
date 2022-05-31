@@ -802,7 +802,6 @@ dependencies = [
 [[package]]
 name = "harfbuzz"
 version = "0.4.0"
-source = "git+https://github.com/songww/rust-harfbuzz?branch=migrate-to-meson#9e35543c9613b978b231b209bcfafca26d89136c"
 dependencies = [
  "harfbuzz-sys",
 ]
@@ -810,7 +809,6 @@ dependencies = [
 [[package]]
 name = "harfbuzz-sys"
 version = "0.5.0"
-source = "git+https://github.com/songww/rust-harfbuzz?branch=migrate-to-meson#9e35543c9613b978b231b209bcfafca26d89136c"
 dependencies = [
  "bindgen",
  "core-graphics",
