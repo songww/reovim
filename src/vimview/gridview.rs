@@ -170,11 +170,17 @@ mod imp {
             }
             snapshot.append_color(&background, &rect);
 
+            let mut font_options = cairo::FontOptions::new().unwrap();
+            // font_options.set_antialias(cairo::Antialias::None);
+            font_options.set_hint_style(cairo::HintStyle::None);
+            font_options.set_hint_metrics(cairo::HintMetrics::Off);
             let cr = snapshot.append_cairo(&rect);
+            cr.set_font_options(&font_options);
 
-            let mut y = metrics.ascent();
-            println!("{:?}", metrics);
-            println!("{:?}", fontmap.regular().metrics());
+            // let mut y = metrics.ascent();
+            // let mut y = 0.;
+            // println!("{:?}", metrics);
+            // println!("{:?}", fontmap.regular().metrics());
 
             // let rows = textbuf.rows();
             log::debug!("text to render:");
@@ -184,11 +190,13 @@ mod imp {
             // layout.set_font_description(desc.as_ref());
             let textbuf = self.textbuf();
             let lines = textbuf.lines();
-            for line in lines.iter() {
-                cr.translate(0., metrics.height());
 
+            cr.translate(0., metrics.ascent());
+
+            for line in lines.iter() {
                 let layoutline = LayoutLine::with(&fontmap, &line, &hldefs);
                 layoutline.show(&cr).unwrap();
+                cr.translate(0., metrics.height());
 
                 // let layoutline = if let Some((layout, layoutline)) = line.cache() {
                 //     unsafe {

@@ -295,7 +295,7 @@ impl AppUpdate for AppModel {
                         }
                         bridge::GuiOption::GuiFont(guifont) => {
                             if !guifont.trim().is_empty() {
-                                log::info!("gui font: {}", &guifont);
+                                log::error!("gui font: {}", &guifont);
                                 let desc = pango::FontDescription::from_string(
                                     &guifont.replace(":h", " "),
                                 );
@@ -305,9 +305,11 @@ impl AppUpdate for AppModel {
                                     settings.set_gtk_font_name(Some(&desc.to_str()));
                                 });
 
-                                let default_fontmap = pangocairo::FontMap::default().unwrap();
-                                self.fontmap =
-                                    Rc::new(FontMap::new(desc.clone(), None, None, None));
+                                // SAFETY:
+                                unsafe {
+                                    *Rc::get_mut_unchecked(&mut self.fontmap) =
+                                        FontMap::new(desc.clone(), None, None, None);
+                                }
 
                                 self.guifont.replace(guifont);
                                 self.font_description.replace(desc);

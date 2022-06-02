@@ -6,6 +6,8 @@ use glib::Cast;
 use once_cell::sync::Lazy;
 use pango::prelude::{FontExt, FontMapExt, FontsetExt};
 use pangocairo::traits::FontExt as PangoCairoFontExt;
+// use unicode_normalization::UnicodeNormalization;
+use xi_unicode::{is_keycap_base, EmojiExt};
 
 mod attributes;
 mod layout;
@@ -123,16 +125,17 @@ impl FontSet {
         } else {
             self.1
                 .font(wc)
-                /*
-                .map(|f| {
-                    println!(
-                        "using `{}` for char `{}`",
-                        f.describe().unwrap(),
-                        char::from_u32(wc).unwrap()
-                    );
-                    f
+                .inspect(|f| {
+                    let c = char::from_u32(wc).unwrap();
+                    if c != ' ' {
+                        log::info!(
+                            "using `{}` for char `{}` {:?}",
+                            f.describe().unwrap(),
+                            c,
+                            f.metrics(None)
+                        );
+                    }
                 })
-                */
                 .and_then(|f| f.downcast().ok())
                 .and_then(|f: pangocairo::Font| {
                     f.scaled_font().map(|scaled_font| (f.hb(), scaled_font))
@@ -161,6 +164,7 @@ pub struct FontMap {
     bold: FontSet,
     italic: FontSet,
     bold_italic: FontSet,
+    emoji: FontSet,
 }
 
 impl FontMap {
@@ -188,16 +192,23 @@ impl FontMap {
             desc.set_weight(pango::Weight::Bold);
             desc
         });
+        let emoji = {
+            let mut emoji = regular.clone();
+            emoji.set_family("emoji");
+            emoji
+        };
         let regular = fontmap.load_fontset(&ctx, &regular, &language).unwrap();
         let bold = fontmap.load_fontset(&ctx, &bold, &language).unwrap();
         let italic = fontmap.load_fontset(&ctx, &italic, &language).unwrap();
         let bold_italic = fontmap.load_fontset(&ctx, &bold_italic, &language).unwrap();
+        let emoji = fontmap.load_fontset(&ctx, &emoji, &language).unwrap();
 
         FontMap {
             regular: FontSet::from(regular),
             bold: FontSet::from(bold),
             italic: FontSet::from(italic),
             bold_italic: FontSet::from(bold_italic),
+            emoji: FontSet::from(emoji),
         }
     }
 
@@ -215,6 +226,10 @@ impl FontMap {
 
     pub fn bold_italic(&self) -> &FontSet {
         &self.bold_italic
+    }
+
+    pub fn emoji(&self) -> &FontSet {
+        &self.emoji
     }
 
     pub fn metrics(&self) -> Option<pango::FontMetrics> {
@@ -257,7 +272,7 @@ impl<'a> Item<'a> {
             scaled_font,
             cells: self.cells.clone(),
             glyphs: Vec::new(),
-            clusters: Vec::new()
+            clusters: Vec::new(),
         }
     }
 
@@ -268,7 +283,7 @@ impl<'a> Item<'a> {
             scaled_font: self.scaled_font.clone(),
             cells: vec![cell],
             glyphs: Vec::new(),
-            clusters: Vec::new()
+            clusters: Vec::new(),
         }
     }
 
@@ -281,21 +296,36 @@ impl<'a> Item<'a> {
     }
 }
 
-pub struct LayoutLine<'a> {
+pub struct Context {
+    hldefs: HighlightDefinitions,
+    serial1: usize,
+}
+
+pub struct LayoutLine<'a, 'b> {
     text: String,
     items: Vec<Item<'a>>,
+    hldefs: &'b HighlightDefinitions,
+    metrics: pango::FontMetrics,
     // glyphs: Vec<cairo::Glyph>,
     // clusters: Vec<cairo::TextCluster>,
 }
 
-impl<'a> LayoutLine<'a> {
-    pub fn with(fm: &FontMap, tl: &'a TextLine, hldefs: &HighlightDefinitions) -> LayoutLine<'a> {
+impl<'a, 'b> LayoutLine<'a, 'b> {
+    pub fn with(
+        fm: &FontMap,
+        tl: &'a TextLine,
+        hldefs: &'b HighlightDefinitions,
+    ) -> LayoutLine<'a, 'b> {
         let mut buf = harfbuzz::Buffer::new();
         let (mut items, text) = fm.itemize(tl, hldefs);
-        /* let (glyphs, clusters) =*/ fm.shape(&mut buf, &text, &mut items);
+        /* let (glyphs, clusters) =*/
+        fm.shape(&mut buf, &text, &mut items);
+        let metrics = fm.metrics().unwrap();
         LayoutLine {
             text,
             items,
+            hldefs,
+            metrics,
             // glyphs,
             // clusters,
         }
@@ -306,7 +336,36 @@ impl<'a> LayoutLine<'a> {
         // println!("{} {:?}", self.glyphs.len(), &self.glyphs);
         // println!("{} {:?}", self.clusters.len(), &self.clusters);
         // assert!(self.glyphs.len() == self.clusters.len());
+        let mut x = 0.;
+        let height = self.metrics.height() as f64;
+        let y = 0.;
         for item in self.items.iter() {
+            let defaults = self.hldefs.defaults().unwrap();
+            let hldef = item.cells[0].hldef.unwrap_or(HighlightDefinitions::DEFAULT);
+            let hldef = self.hldefs.get(hldef).unwrap();
+            let width =
+                item.cells.len() as f64 * self.metrics.approximate_digit_width() as f64 / 16.;
+
+            if let Some(background) = hldef.background() {
+                cr.set_source_rgba(
+                    background.red() as _,
+                    background.green() as _,
+                    background.blue() as _,
+                    background.alpha() as _,
+                );
+                cr.save()?;
+                cr.rectangle(x, y, width, height);
+                cr.fill()?;
+                cr.restore()?;
+            }
+            x += width as f64;
+            let foreground = hldef.foreground(&defaults);
+            cr.set_source_rgba(
+                foreground.red() as _,
+                foreground.green() as _,
+                foreground.blue() as _,
+                foreground.alpha() as _,
+            );
             cr.set_scaled_font(&item.scaled_font);
             cr.show_text_glyphs(
                 &item.text,
@@ -314,6 +373,15 @@ impl<'a> LayoutLine<'a> {
                 &item.clusters,
                 cairo::TextClusterFlags::None,
             )?;
+            if hldef.strikethrough {
+                // TODO:
+            }
+            if hldef.underline {
+                // TODO
+            }
+            if hldef.undercurl {
+                // TODO
+            }
         }
         Ok(())
     }
@@ -338,7 +406,9 @@ impl FontMap {
         ) -> (harfbuzz::Font, cairo::ScaledFont) {
             let hldef = cell.hldef.unwrap_or(HighlightDefinitions::DEFAULT);
             let style = hldefs.get(hldef).unwrap();
-            if style.italic && style.bold {
+            if !is_keycap_base(c) && c.is_emoji() {
+                fm.emoji.font(c as u32).unwrap()
+            } else if style.italic && style.bold {
                 fm.bold_italic.font(c as u32).unwrap()
             } else if style.italic {
                 fm.italic.font(c as u32).unwrap()
@@ -382,10 +452,10 @@ impl FontMap {
             }
             let last = items.last().unwrap();
             for c in chars {
-                let (_, scaled_font) = _font(&self, &hldefs, &cell, c);
-                if !scaled_font.is_same(&last.scaled_font) {
-                    panic!("{:?} with different font, {:?}", cell, tl);
-                }
+                // let (_, scaled_font) = _font(&self, &hldefs, &cell, c);
+                // if !scaled_font.is_same(&last.scaled_font) {
+                //     panic!("{:?} with different font, {:?}", cell, tl);
+                // }
             }
             let last = items.last_mut().unwrap();
             text.push_str(&cell.text);
@@ -395,12 +465,7 @@ impl FontMap {
         (items, text)
     }
 
-    pub fn shape(
-        &self,
-        buf: &mut harfbuzz::Buffer,
-        text: &str,
-        items: &mut [Item],
-    ) {
+    pub fn shape(&self, buf: &mut harfbuzz::Buffer, text: &str, items: &mut [Item]) {
         buf.clear_contents();
         buf.add_str(&text, 0, None);
         buf.guess_segment_properties();
@@ -533,7 +598,6 @@ impl FontMap {
             }
             c = unsafe { clusters.get_unchecked_mut(index) };
             c.set_num_bytes(end_at as i32 - bytes);
-            
         }
 
         (glyphs, clusters)

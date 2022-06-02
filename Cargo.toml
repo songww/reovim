@@ -29,6 +29,8 @@ async-trait = "0.1"
 parking_lot = "0.12"
 derive_more = "0.99"
 freetype-rs = "0.30"
+xi-unicode = "0.3"
+unicode-script = "0.5"
 unicode-segmentation = "1"
 
 clap = { version = "3", features = ["derive", "env"] }
@@ -113,3 +115,6 @@ git = "https://github.com/gtk-rs/gtk4-rs"
 
 [profile.release]
 debug = true
+
+[dev-dependencies]
+criterion = "0.3.5"
