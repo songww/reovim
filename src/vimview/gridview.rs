@@ -171,7 +171,6 @@ mod imp {
             snapshot.append_color(&background, &rect);
 
             let mut font_options = cairo::FontOptions::new().unwrap();
-            // font_options.set_antialias(cairo::Antialias::None);
             font_options.set_hint_style(cairo::HintStyle::None);
             font_options.set_hint_metrics(cairo::HintMetrics::Off);
             let cr = snapshot.append_cairo(&rect);
