@@ -919,6 +919,7 @@ checksum = "eabb4a44450da02c90444cf74558da904edde8fb4e9035a9a6a4e15445af0bd7"
 name = "harfbuzz"
 version = "0.4.0"
 dependencies = [
+ "bitflags",
  "harfbuzz-sys",
 ]
 

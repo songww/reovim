@@ -1,5 +1,5 @@
-use std::cell::Cell;
 use std::rc::Rc;
+use std::{cell::Cell, str::FromStr};
 
 // use pangocairo::prelude::FontExt as PangoCairoFontExt;
 use glib::translate::ToGlibPtr;
@@ -45,7 +45,7 @@ pub struct Builtin {
 unsafe impl Send for Builtin {}
 unsafe impl Sync for Builtin {}
 
-pub fn builtin(ptem: f32) -> Builtin {
+pub fn builtin(ptem: f32, x_scale: i32, y_scale: i32) -> Builtin {
     static FONT: Lazy<Builtin> = Lazy::new(|| {
         let blob = harfbuzz::Blob::new_read_only(BOX_DRAWING);
         let mut face = harfbuzz::Face::new(&blob, 0);
@@ -63,7 +63,8 @@ pub fn builtin(ptem: f32) -> Builtin {
     let ft = FONT.ft.clone();
     let mut hb = FONT.hb.clone();
     hb.set_ptem(ptem);
-    // ft.set_char_size((ptem * 64.) as isize, 0, 0, 0).unwrap();
+    hb.set_scale(x_scale, y_scale);
+    ft.set_char_size((ptem * 64.) as isize, 0, 0, 0).unwrap();
     let scaled_font = scaled_font(&ft, &hb);
 
     Builtin {
@@ -182,7 +183,7 @@ impl From<pango::Fontset> for FontSet {
         log::info!("scaled font ctm: {:?}", scaled_font.ctm());
         log::info!("scaled font font matrix: {:?}", scaled_font.font_matrix());
         log::info!("scaled font scale matrix: {:?}", scaled_font.scale_matrix());
-        let builtin = builtin(ptem);
+        let builtin = builtin(ptem, x_scale, y_scale);
         let scaled_font = builtin.scaled_font();
         log::info!("builtin font scale {:?}", builtin.hb().scale());
         log::info!("builtin scaled font extents: {:?}", scaled_font.extents());
@@ -406,12 +407,20 @@ impl<'a, 'b> LayoutLine<'a, 'b> {
                 foreground.alpha() as _,
             );
             cr.set_scaled_font(&item.scaled_font);
-            cr.show_text_glyphs(
-                &item.text,
-                &item.glyphs,
-                &item.clusters,
-                cairo::TextClusterFlags::None,
-            )?;
+            cr.show_glyphs(&item.glyphs).unwrap();
+            // cr.show_text_glyphs(
+            //     &item.text,
+            //     &item.glyphs,
+            //     &item.clusters,
+            //     cairo::TextClusterFlags::None,
+            // )
+            // .expect(&format!(
+            //     "{} glyphs: {:?}\n{} clusters: {:?}",
+            //     item.glyphs.len(),
+            //     &item.glyphs,
+            //     item.clusters.len(),
+            //     &item.clusters
+            // ));
             if hldef.strikethrough {
                 // TODO:
             }
@@ -475,7 +484,7 @@ impl FontMap {
         }
         text.push_str(&cell.text);
 
-        let prevhldef = u64::MAX;
+        let mut prevhldef = cell.hldef.unwrap_or(HighlightDefinitions::DEFAULT);
 
         for cell in iter {
             if cell.text.is_empty() {
@@ -489,8 +498,11 @@ impl FontMap {
             let mut chars = cell.text.chars();
             let c = chars.next().unwrap();
             let (hb, scaled_font) = _font(&self, &hldefs, &cell, c);
-            if cell.hldef.unwrap_or(HighlightDefinitions::DEFAULT) != prevhldef {
+            let hldef = cell.hldef.unwrap_or(HighlightDefinitions::DEFAULT);
+            if hldef != prevhldef {
+                log::info!("Item {}", hldef);
                 items.push(item.with_font(hb, scaled_font));
+                prevhldef = hldef;
             }
             // let last = items.last().unwrap();
             // for c in chars {
@@ -509,12 +521,6 @@ impl FontMap {
 
     pub fn shape(&self, buf: &mut harfbuzz::Buffer, text: &str, items: &mut [Item]) {
         buf.clear_contents();
-        buf.add_str(&text, 0, None);
-        buf.guess_segment_properties();
-        buf.clear_contents();
-
-        // let mut glyphs = Vec::new();
-        // let mut clusters = Vec::new();
 
         let mut x = 0.;
         let mut y = 0.;
@@ -523,18 +529,17 @@ impl FontMap {
         let iter = items.iter_mut().peekable();
         // TODO: shape only with preview and next item.
         for item in iter {
-            let (glyphs_, clusters_) = self.shape_(
-                &item.hb_font,
-                buf,
-                text,
-                start_at,
-                item.text.len(),
-                &mut x,
-                &mut y,
+            let end_at = start_at + item.text.len();
+            let (glyphs_, clusters_) =
+                self.shape_(&item.hb_font, buf, text, start_at, end_at, &mut x, &mut y);
+            log::info!(
+                "shaping {} '{}'",
+                end_at - start_at,
+                &text[start_at..end_at]
             );
             item.glyphs = glyphs_;
             item.clusters = clusters_;
-            start_at += item.text.len();
+            start_at = end_at;
         }
 
         // (glyphs, clusters)
@@ -555,11 +560,19 @@ impl FontMap {
         }
 
         buf.clear_contents();
-        buf.add_str(text, start_at, Some(end_at));
-        buf.guess_segment_properties();
+        buf.add_str(text, start_at, Some(end_at - start_at));
+        // buf.add_str(&text[start_at..start_at + end_at], 0, None);
         buf.set_direction(harfbuzz::Direction::LTR);
+        buf.set_flags(harfbuzz::BufferFlags::BOT | harfbuzz::BufferFlags::EOT);
+        buf.guess_segment_properties();
+        // buf.normalize_glyphs();
 
-        harfbuzz::shape(font, buf, &[]);
+        let mut features = Vec::new();
+        features.push(harfbuzz::Feature::from_str("calt=1").unwrap());
+        features.push(harfbuzz::Feature::from_str("ss02=1").unwrap());
+        features.push(harfbuzz::Feature::from_str("ss20=1").unwrap());
+
+        harfbuzz::shape(font, buf, &features);
 
         let num_glyphs = buf.len();
         let glyph_infos = buf.glyph_infos();
@@ -602,11 +615,17 @@ impl FontMap {
             let index = glyph_info.codepoint() as u64;
             let x_ = libm::scalbn(position.x_offset() as f64 + *x, scale_bits);
             let y_ = libm::scalbn(-position.y_offset() as f64 + *y, scale_bits);
-            // log::debug!("glyph {{ index: {index}, x: {x_}, y: {y_} }}", x_=x_ / 64.);
-            glyphs.push(cairo::Glyph::new(index, x_ / 16., y_));
+            // let x_ = position.x_offset() as f64 / 64. + *x;
+            // let y_ = -position.y_offset() as f64 / 64. + *y;
+            // log::info!("glyph {{ index: {index}, x: {x_}, y: {y_} }}",);
+            glyphs.push(cairo::Glyph::new(index, x_, y_));
 
-            *x += position.x_advance() as f64;
-            *y += -position.y_advance() as f64;
+            // *x += libm::scalbn(position.x_advance() as f64, 0);
+            *x += position.x_advance() as f64 / 16.;
+            *y -= position.y_advance() as f64 / 16.;
+            // *x += position.x_advance() as f64 / 64.;
+            // *y -= position.y_advance() as f64 / 64.;
+            // log::info!("x advance {} y advance {}", x, y);
         }
 
         // glyphs.push(cairo::Glyph::new(
@@ -630,7 +649,7 @@ impl FontMap {
                 if cluster1 != cluster2 {
                     assert!(cluster1 > cluster2);
                     let num_bytes = (cluster1 - cluster2) as i32;
-                    // log::info!("{} - {} = {}", cluster1, cluster2, num_bytes);
+                    log::trace!("{} - {} = {}", cluster1, cluster2, num_bytes);
                     c.set_num_bytes(num_bytes);
                     bytes += num_bytes;
                     index += 1;
@@ -639,7 +658,7 @@ impl FontMap {
                 c.set_num_glyphs(c.num_glyphs() + 1);
             }
             c = unsafe { clusters.get_unchecked_mut(index) };
-            c.set_num_bytes(end_at as i32 - bytes);
+            c.set_num_bytes(end_at as i32 - start_at as i32 - bytes);
         }
 
         (glyphs, clusters)

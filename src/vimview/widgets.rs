@@ -258,6 +258,11 @@ impl factory::FactoryPrototype for VimGrid {
             grid,
             height_request
         );
+        let content_height = if height_request > 1. {
+            height_request as i32
+        } else {
+            1
+        };
         let win = gtk::ScrolledWindow::builder()
             .child(&view)
             .has_frame(false)
@@ -265,8 +270,8 @@ impl factory::FactoryPrototype for VimGrid {
             .vscrollbar_policy(gtk::PolicyType::External)
             .hscrollbar_policy(gtk::PolicyType::Never)
             .kinetic_scrolling(false)
-            .max_content_height(height_request as i32)
-            .min_content_height(height_request as i32 - 1)
+            .max_content_height(content_height)
+            .min_content_height(content_height - 1)
             .propagate_natural_width(true)
             .build();
         let bin = adw::Bin::new();
@@ -435,9 +440,14 @@ impl factory::FactoryPrototype for VimGrid {
             let height_request = self.height as f64 * metrics.height();
             log::info!("resizing scrolled window max-height: {}", height_request);
             widgets.root.child().map(|child| {
+                let content_height = if height_request > 1. {
+                    height_request as i32
+                } else {
+                    1
+                };
                 let win = child.downcast_ref::<gtk::ScrolledWindow>().unwrap();
-                win.set_max_content_height(height_request as _);
-                win.set_min_content_height((height_request - 1.) as _);
+                win.set_max_content_height(content_height);
+                win.set_min_content_height(content_height - 1);
             });
 
             log::error!(

@@ -118,7 +118,7 @@ impl AppModel {
                 ctx.set_language(&pango::Language::from_string("en-US"));
                 let mut options = cairo::FontOptions::new().ok();
                 options.as_mut().map(|options| {
-                    // options.set_hint_style(cairo::HintStyle::Full);
+                    options.set_hint_style(cairo::HintStyle::None);
                     // options.set_antialias(cairo::Antialias::Subpixel);
                     options.set_hint_metrics(cairo::HintMetrics::On);
                 });
