@@ -153,6 +153,9 @@ impl VimCursor {
         cr.paint().expect("Couldn't fill context");
         // paintable.
         cr.set_operator(cairo::Operator::Over);
+        // let (xscale, yscale) = cr.target().device_scale();
+        // println!("cursor xscale {} yscale {}", xscale, yscale);
+
         let bg = self.background();
         let fg = self.foreground();
         let cell = self.cell();
@@ -161,7 +164,6 @@ impl VimCursor {
         log::debug!("drawing cursor at {}x{}.", x, y);
         match self.shape {
             CursorShape::Block => {
-                use pango::AttrType;
                 let attrs = pango::AttrList::new();
                 // cell.attrs
                 //     .iter()
@@ -182,7 +184,7 @@ impl VimCursor {
                 //     })
                 //     .for_each(|attr| attrs.insert(attr));
                 log::debug!("cursor cell '{}' wide {}", cell.text, self.width);
-                let itemized = pango::itemize(
+                let items = pango::itemize(
                     &self.pctx,
                     &cell.text,
                     0,
@@ -190,11 +192,11 @@ impl VimCursor {
                     &attrs,
                     None,
                 );
-                if itemized.is_empty() {
+                if items.is_empty() {
                     log::warn!("cursor cell '{:?}' got empty itemized.", cell);
                     return;
                 }
-                let itemized = &itemized[0];
+                let itemized = &items[0];
                 let mut glyph_string = pango::GlyphString::new();
                 pango::shape(&cell.text, itemized.analysis(), &mut glyph_string);
                 let glyphs = glyph_string.glyph_info_mut();

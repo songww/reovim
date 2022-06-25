@@ -4,6 +4,7 @@ mod imp {
     use std::rc::Rc;
 
     use glib::translate::{from_glib_none, ToGlibPtr};
+    use gtk::traits::WidgetExt;
     use gtk::{gdk::prelude::*, graphene::Rect, subclass::prelude::*};
     use parking_lot::RwLock;
 
@@ -173,7 +174,10 @@ mod imp {
             let mut font_options = cairo::FontOptions::new().unwrap();
             font_options.set_hint_style(cairo::HintStyle::None);
             font_options.set_hint_metrics(cairo::HintMetrics::Off);
+            let scale_factor = widget.scale_factor();
             let cr = snapshot.append_cairo(&rect);
+            cr.target()
+                .set_device_scale(scale_factor as f64, scale_factor as f64);
             cr.set_font_options(&font_options);
 
             // let mut y = metrics.ascent();

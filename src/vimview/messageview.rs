@@ -317,10 +317,10 @@ impl FactoryPrototype for VimMessage {
         view.set_margin_top(metrics.height() as _);
         view.set_margin_end(metrics.width() as _);
         let fg = colors.foreground.unwrap();
-        if matches!(self.kind, MessageKind::Echo) {
-        } else {
-            //
-        }
+        // if matches!(self.kind, MessageKind::Echo) {
+        // } else {
+        //     //
+        // }
         let style = format!(
             "border: 1px solid {}; padding: {}px {}px; background: {};",
             fg.to_str(),
