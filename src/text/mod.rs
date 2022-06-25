@@ -35,6 +35,8 @@ impl IsSame for cairo::ScaledFont {
     }
 }
 
+const PANGO_SCALE: f64 = pango::SCALE as f64;
+
 #[derive(Clone)]
 pub struct Builtin {
     hb: harfbuzz::FontMut,
@@ -63,11 +65,9 @@ pub fn builtin(ptem: f32, x_scale: i32, y_scale: i32) -> Builtin {
     let mut hb = FONT.hb.clone();
     log::warn!("ptem {}", ptem);
     hb.set_ptem(ptem);
-    // hb.set_scale(
-    //     ptem.round() as i32 * 2 * 1024 * 64,
-    //     ptem.round() as i32 * 2 * 1024 * 64,
-    // );
-    ft.set_char_size((ptem * 64.) as isize, 0, 0, 0).unwrap();
+    hb.set_scale(x_scale, y_scale);
+    ft.set_pixel_sizes(0, to_freetype_26_6(ptem as f64) as u32)
+        .unwrap();
     let scaled_font = scaled_font(&ft, &hb);
 
     Builtin {
@@ -771,17 +771,18 @@ impl FontMap {
         for (glyph_info, position) in glyph_infos.iter().zip(glyph_positions.iter()) {
             let index = glyph_info.codepoint() as u64;
             let x_ = libm::scalbn(position.x_offset() as f64 + *x, scale_bits);
-            let y_ = libm::scalbn(-position.y_offset() as f64 + *y, scale_bits);
-            // let x_ = position.x_offset() as f64 / 64. + *x;
-            // let y_ = -position.y_offset() as f64 / 64. + *y;
+            // let x_ = libm::scalbn(position.x_offset() as f64 + *y, scale_bits);
+            // let y_ = libm::scalbn(-position.y_offset() as f64 + *y, scale_bits);
+            let x_ = position.x_offset() as f64 / PANGO_SCALE + *x;
+            let y_ = -position.y_offset() as f64 / PANGO_SCALE + *y;
             // log::info!("glyph {{ index: {index}, x: {x_}, y: {y_} }}",);
             glyphs.push(cairo::Glyph::new(index, x_, y_));
 
-            *x += libm::scalbn(position.x_advance() as f64, scale_bits);
-            // *x += position.x_advance() as f64 / 64.;
-            *y -= position.y_advance() as f64 / 64.;
-            // *x += position.x_advance() as f64 / 64.;
-            // *y -= position.y_advance() as f64 / 64.;
+            // *x += libm::scalbn(position.x_advance() as f64, scale_bits);
+            // *x += position.x_advance() as f64 / 16.;
+            // *y -= position.y_advance() as f64 / 16.;
+            *x += position.x_advance() as f64 / PANGO_SCALE;
+            *y -= position.y_advance() as f64 / PANGO_SCALE;
             // log::info!("x advance {} y advance {}", x, y);
         }
 
