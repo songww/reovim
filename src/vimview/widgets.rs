@@ -600,7 +600,9 @@ impl VimGrid {
             value_to
         );
 
-        widgets.smoother.take().map(|handle| handle.remove());
+        if let Some(handle) = widgets.smoother.take() {
+            handle.remove()
+        };
 
         let frame_clock = widgets.root.frame_clock().unwrap();
         frame_clock.begin_updating();
@@ -611,7 +613,8 @@ impl VimGrid {
             let child = root.child().unwrap();
             let win = child.downcast_ref::<gtk::ScrolledWindow>().unwrap();
             let vadjustment = win.vadjustment();
-            let ratio = (frame_clock.frame_time() - startat) as f64 / 100000.;
+            // TODO: current smooth duration is 150ms, should be configurable.
+            let ratio = (frame_clock.frame_time() - startat) as f64 / 150000.;
             if ratio >= 1. {
                 frame_clock.end_updating();
                 vadjustment.set_value(value_to);

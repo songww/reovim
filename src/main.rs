@@ -33,7 +33,7 @@ enum ConnectionMode {
     RemoteTcp(String),
 }
 
-#[derive(Parser, Clone, Debug, Default, PartialEq)]
+#[derive(Parser, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Opts {
     /// Path to neovim binary
     #[clap(long = "nvim", env = "NVIM", value_name = "NVIM")]
