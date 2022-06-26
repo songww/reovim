@@ -1,7 +1,7 @@
 // use crate::style::Style;
 // use crate::vimview::HighlightDefinitions;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TextCell {
     pub text: String,
     pub hldef: Option<u64>,

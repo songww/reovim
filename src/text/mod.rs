@@ -13,6 +13,8 @@ mod layout;
 mod text_cell;
 mod text_line;
 
+use crate::metrics::Metrics;
+
 pub use text_cell::TextCell;
 pub use text_line::TextLine;
 
@@ -61,7 +63,7 @@ pub fn builtin(ptem: f32, x_scale: i32, y_scale: i32) -> Builtin {
     });
     let ft = FONT.ft.clone();
     let mut hb = FONT.hb.clone();
-    log::warn!("ptem {}", ptem);
+    log::info!("ptem {}", ptem);
     hb.set_ptem(ptem);
     hb.set_scale(x_scale, y_scale);
     ft.set_pixel_sizes(0, to_freetype_26_6(ptem as f64) as u32)
@@ -246,11 +248,11 @@ impl FontSet {
                 }
             });
             font.inspect(|f| {
-                log::debug!(
-                    "-> using `{}` for '{}' {}",
+                log::info!(
+                    "-> using `{}` for '{}'",
                     f.describe().unwrap(),
                     text,
-                    inspect(&f.metrics(None).unwrap())
+                    // inspect(&f.metrics(None).unwrap())
                 );
             })
             .and_then(|f| f.downcast::<pangocairo::Font>().ok())
@@ -490,12 +492,10 @@ pub struct Context {
 }
 
 pub struct LayoutLine<'a, 'b> {
-    text: String,
+    // text: String,
     items: Vec<Item<'a>>,
     hldefs: &'b HighlightDefinitions,
-    metrics: pango::FontMetrics,
-    // glyphs: Vec<cairo::Glyph>,
-    // clusters: Vec<cairo::TextCluster>,
+    metrics: Metrics,
 }
 
 impl<'a, 'b> LayoutLine<'a, 'b> {
@@ -503,14 +503,14 @@ impl<'a, 'b> LayoutLine<'a, 'b> {
         fm: &FontMap,
         tl: &'a TextLine,
         hldefs: &'b HighlightDefinitions,
+        metrics: Metrics,
     ) -> LayoutLine<'a, 'b> {
         let mut buf = harfbuzz::Buffer::new();
         let (mut items, text) = fm.itemize(tl, hldefs);
         /* let (glyphs, clusters) =*/
         fm.shape(&mut buf, &text, &mut items);
-        let metrics = fm.metrics().unwrap();
         LayoutLine {
-            text,
+            // text,
             items,
             hldefs,
             metrics,
@@ -520,6 +520,7 @@ impl<'a, 'b> LayoutLine<'a, 'b> {
     }
 
     pub fn show(&self, cr: &cairo::Context) -> anyhow::Result<()> {
+        cr.save()?;
         // log::info!("show text glyphs");
         // log::info!("{} {:?}", self.glyphs.len(), &self.glyphs);
         // log::info!("{} {:?}", self.clusters.len(), &self.clusters);
@@ -529,28 +530,28 @@ impl<'a, 'b> LayoutLine<'a, 'b> {
         options.set_hint_style(cairo::HintStyle::None);
         options.set_hint_metrics(cairo::HintMetrics::Off);
         cr.set_font_options(&options);
-        let y = 0.;
-        let mut x = 0.;
+        let y = -self.metrics.ascent();
+        let x = 0.;
         let height = self.metrics.height() as f64;
         for item in self.items.iter() {
             let defaults = self.hldefs.defaults().unwrap();
             let hldef = item.cells[0].hldef.unwrap_or(HighlightDefinitions::DEFAULT);
             let hldef = self.hldefs.get(hldef).unwrap();
-            let width = item.cells.len() as f64 * self.metrics.approximate_digit_width() as f64;
+            let width = item.cells.len() as f64 * self.metrics.charwidth();
 
             if let Some(background) = hldef.background() {
+                cr.save()?;
                 cr.set_source_rgba(
                     background.red() as _,
                     background.green() as _,
                     background.blue() as _,
                     background.alpha() as _,
                 );
-                cr.save()?;
                 cr.rectangle(x, y, width, height);
                 cr.fill()?;
                 cr.restore()?;
             }
-            x += width as f64;
+            // x += width as f64;
             let foreground = hldef.foreground(defaults);
             cr.set_source_rgba(
                 foreground.red() as _,
@@ -558,25 +559,57 @@ impl<'a, 'b> LayoutLine<'a, 'b> {
                 foreground.blue() as _,
                 foreground.alpha() as _,
             );
-            cr.set_scaled_font(&item.font.scaled_font().unwrap());
-            log::info!("using '{}' for '{}'", item.font.desc(), item.text);
+            log::debug!("using '{}' for '{}'", item.font.desc(), item.text);
 
-            // cr.show_glyphs(&item.glyphs).unwrap();
-            cr.show_text_glyphs(
-                &item.text,
-                &item.glyphs,
-                &item.clusters,
-                cairo::TextClusterFlags::None,
-            )
-            .unwrap_or_else(|_| {
-                panic!(
-                    "{} glyphs: {:?}\n{} clusters: {:?}",
-                    item.glyphs.len(),
-                    &item.glyphs,
-                    item.clusters.len(),
-                    &item.clusters
+            cr.set_scaled_font(&item.font.scaled_font().unwrap());
+
+            let mut index = 0;
+            let mut sbytes = 0;
+
+            for (glyph, cluster) in item.glyphs.iter().zip(item.clusters.iter()) {
+                let mut nbyte = 0;
+                let mut ncell = 0;
+                // println!("index {}", index);
+                // println!("sbytes {}", sbytes);
+                // println!("num bytes {}", cluster.num_bytes());
+                // println!("text len {}", item.text.len());
+                while nbyte < cluster.num_bytes() as usize {
+                    // println!("ncell {}", ncell);
+                    nbyte += item.cells[ncell + index].text.len();
+                    // println!(
+                    //     "text {} len {}",
+                    //     item.cells[ncell + index].text,
+                    //     item.cells[ncell + index].text.len()
+                    // );
+                    ncell += 1;
+                    // println!("nbyte {}", nbyte);
+                }
+                nbyte = cluster.num_bytes() as usize;
+                // println!("\"{}\"[{}:{}]", &item.text, sbytes, sbytes + nbyte,);
+                cr.show_text_glyphs(
+                    &item.text[sbytes..sbytes + nbyte],
+                    &[*glyph],
+                    &[*cluster],
+                    cairo::TextClusterFlags::None,
                 )
-            });
+                .unwrap_or_else(|_| {
+                    panic!(
+                        "\"{}\"[{}:{}] -> '{}' {}/{} {:?} {:?}",
+                        &item.text,
+                        sbytes,
+                        sbytes + nbyte,
+                        &item.text[sbytes..nbyte],
+                        item.glyphs.len(),
+                        item.clusters.len(),
+                        glyph,
+                        cluster
+                    )
+                });
+
+                index += ncell;
+                sbytes += nbyte;
+                cr.translate(self.metrics.width() * ncell as f64, 0.);
+            }
             if hldef.strikethrough {
                 // TODO:
             }
@@ -587,6 +620,7 @@ impl<'a, 'b> LayoutLine<'a, 'b> {
                 // TODO
             }
         }
+        cr.restore()?;
         Ok(())
     }
 }
@@ -656,16 +690,12 @@ impl FontMap {
     }
 
     pub fn shape(&self, buf: &mut harfbuzz::Buffer, text: &str, items: &mut [Item]) {
-        let mut x = 0.;
-        let mut y = 0.;
-
         let mut start_at = 0;
         let iter = items.iter_mut().peekable();
         // TODO: shape only with preview and next item.
         for item in iter {
             let end_at = start_at + item.text.len();
-            let (glyphs_, clusters_) =
-                self.shape_(&item.font.hb(), buf, text, start_at, end_at, &mut x, &mut y);
+            let (glyphs_, clusters_) = self.shape_(&item.font.hb(), buf, text, start_at, end_at);
             log::debug!(
                 "shaping {} '{}'",
                 end_at - start_at,
@@ -675,8 +705,6 @@ impl FontMap {
             item.clusters = clusters_;
             start_at = end_at;
         }
-
-        // (glyphs, clusters)
     }
 
     fn shape_(
@@ -686,8 +714,6 @@ impl FontMap {
         text: &str,
         start_at: usize,
         end_at: usize,
-        x: &mut f64,
-        y: &mut f64,
     ) -> (Vec<cairo::Glyph>, Vec<cairo::TextCluster>) {
         if text.is_empty() {
             return (Vec::new(), Vec::new());
@@ -744,24 +770,11 @@ impl FontMap {
         const SCALE_FACTOR: f64 = PANGO_SCALE;
         for (glyph_info, position) in glyph_infos.iter().zip(glyph_positions.iter()) {
             let index = glyph_info.codepoint() as u64;
-            let x_ = position.x_offset() as f64 / SCALE_FACTOR + *x;
-            let y_ = -position.y_offset() as f64 / SCALE_FACTOR + *y;
+            let x = position.x_offset() as f64 / SCALE_FACTOR;
+            let y = -position.y_offset() as f64 / SCALE_FACTOR;
             // log::info!("glyph {{ index: {index}, x: {x_}, y: {y_} }}",);
-            glyphs.push(cairo::Glyph::new(index, x_, y_));
-
-            // FIXME: use font_metrix.advance instead of position.advance
-            *x += position.x_advance() as f64 / SCALE_FACTOR;
-            *y -= position.y_advance() as f64 / SCALE_FACTOR;
-            // log::info!("x advance {} y advance {}", x, y);
+            glyphs.push(cairo::Glyph::new(index, x, y));
         }
-
-        // glyphs.push(cairo::Glyph::new(
-        //     u64::MAX,
-        //     libm::scalbn(x as f64, scale_bits),
-        //     libm::scalbn(y as f64, scale_bits),
-        // ));
-
-        // unicode_segmentation;
 
         if num_clusters > 0 {
             let mut index = 0;

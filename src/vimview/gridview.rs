@@ -7,6 +7,7 @@ mod imp {
     use gtk::traits::WidgetExt;
     use gtk::{gdk::prelude::*, graphene::Rect, subclass::prelude::*};
     use parking_lot::RwLock;
+    use relm4::WidgetPlus;
 
     use crate::metrics::Metrics;
     use crate::text::{LayoutLine, TextCell, TextLine};
@@ -169,6 +170,11 @@ mod imp {
                 let alpha = (100 - blend) as f32 / 100.;
                 background.set_alpha(alpha);
             }
+
+            // println!("background-color: {}", background);
+            // let style_context = widget.style_context();
+            // widget.inline_css(format!("background-color: {};", background).as_bytes());
+            // snapshot.render_background(&style_context, 0., 0., width as _, height as _);
             snapshot.append_color(&background, &rect);
 
             let mut font_options = cairo::FontOptions::new().unwrap();
@@ -185,36 +191,16 @@ mod imp {
             // println!("{:?}", metrics);
             // println!("{:?}", fontmap.regular().metrics());
 
-            // let rows = textbuf.rows();
             log::debug!("text to render:");
-            // let desc = pctx.font_description();
-            // let mut layout = pango::Layout::new(&pctx);
-            // layout.set_auto_dir(false);
-            // layout.set_font_description(desc.as_ref());
             let textbuf = self.textbuf();
             let lines = textbuf.lines();
 
-            cr.translate(0., metrics.ascent());
+            cr.translate(-metrics.width() / 2., metrics.ascent());
 
             for line in lines.iter() {
-                let layoutline = LayoutLine::with(&fontmap, &line, &hldefs);
+                let layoutline = LayoutLine::with(&fontmap, line, &hldefs, metrics);
                 layoutline.show(&cr).unwrap();
                 cr.translate(0., metrics.height());
-
-                // let layoutline = if let Some((layout, layoutline)) = line.cache() {
-                //     unsafe {
-                //         let layout: *mut pango::ffi::PangoLayout = layout.to_glib_none().0;
-                //         (*layoutline.to_glib_none().0).layout = layout;
-                //     };
-                //     pangocairo::update_layout(&cr, &layout);
-                //     layoutline
-                // } else {
-                //     let layoutline = self.layoutline(&mut layout, line, &metrics);
-                //     line.set_cache(layout.copy().unwrap(), layoutline.clone());
-                //     pangocairo::update_layout(&cr, &layout);
-                //     layoutline
-                // };
-                // pangocairo::show_layout_line(&cr, &layoutline);
             }
             let elapsed = instant.elapsed().as_secs_f32() * 1000.;
             log::info!("snapshot used: {:.3}ms", elapsed);
@@ -465,7 +451,7 @@ mod imp {
     }
 }
 
-use std::cell::{Cell, Ref};
+use std::cell::Cell;
 use std::rc::Rc;
 
 use glib::subclass::prelude::*;
@@ -523,6 +509,5 @@ impl VimGridView {
     pub fn resize(&self, width: u64, height: u64) {
         self.imp().set_width(width);
         self.imp().set_height(height);
-        // self.imp().textbuf().resize(height as _, width as _);
     }
 }

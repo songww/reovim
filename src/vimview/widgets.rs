@@ -263,19 +263,40 @@ impl factory::FactoryPrototype for VimGrid {
         } else {
             1
         };
-        let win = gtk::ScrolledWindow::builder()
+        // let win = gtk::ScrolledWindow::builder()
+        //     .child(&view)
+        //     .has_frame(false)
+        //     .vadjustment(&vadjustment)
+        //     .vscrollbar_policy(gtk::PolicyType::External)
+        //     .hscrollbar_policy(gtk::PolicyType::Never)
+        //     .kinetic_scrolling(false)
+        //     .max_content_height(content_height)
+        //     .min_content_height(content_height - 1)
+        //     .propagate_natural_width(true)
+        //     .build();
+        let vp = gtk::Viewport::builder()
             .child(&view)
-            .has_frame(false)
+            .scroll_to_focus(false)
+            .focus_on_click(false)
+            .receives_default(false)
+            .height_request(content_height)
+            .hexpand(true)
+            .vexpand(false)
             .vadjustment(&vadjustment)
-            .vscrollbar_policy(gtk::PolicyType::External)
-            .hscrollbar_policy(gtk::PolicyType::Never)
-            .kinetic_scrolling(false)
-            .max_content_height(content_height)
-            .min_content_height(content_height - 1)
-            .propagate_natural_width(true)
+            .build();
+        let clamp = adw::ClampScrollable::builder()
+            .child(&vp)
+            .maximum_size(content_height)
+            .height_request(content_height as i32)
+            // .tightening_threshold(content_height)
+            .receives_default(false)
+            .hexpand(true)
+            .vexpand(false)
+            .vadjustment(&vadjustment)
+            .vscroll_policy(gtk::ScrollablePolicy::Minimum)
             .build();
         let bin = adw::Bin::new();
-        bin.set_child(Some(&win));
+        bin.set_child(Some(&clamp));
 
         log::error!(
             "grid {} maximum_size ---------------------------> {}",
@@ -284,7 +305,19 @@ impl factory::FactoryPrototype for VimGrid {
         );
         {
             // Patch: disable scroll-controllers
-            let controllers = win.observe_controllers();
+            let controllers = clamp.observe_controllers();
+            let n = controllers.n_items();
+            let mut position = 0;
+            while position < n {
+                let object = controllers.item(position).unwrap();
+                let controller = object.downcast_ref::<gtk::EventController>().unwrap();
+                controller.set_propagation_phase(gtk::PropagationPhase::None);
+                position += 1;
+            }
+        }
+        {
+            // Patch: disable scroll-controllers
+            let controllers = vp.observe_controllers();
             let n = controllers.n_items();
             let mut position = 0;
             while position < n {
@@ -438,17 +471,17 @@ impl factory::FactoryPrototype for VimGrid {
         if self.width != p_width || self.height != p_height {
             let metrics = self.metrics.get();
             let height_request = self.height as f64 * metrics.height();
-            log::info!("resizing scrolled window max-height: {}", height_request);
-            widgets.root.child().map(|child| {
+            log::info!("resizing clamp max-height: {}", height_request);
+            if let Some(child) = widgets.root.child() {
                 let content_height = if height_request > 1. {
                     height_request as i32
                 } else {
                     1
                 };
-                let win = child.downcast_ref::<gtk::ScrolledWindow>().unwrap();
-                win.set_max_content_height(content_height);
-                win.set_min_content_height(content_height - 1);
-            });
+                let clamp = child.downcast_ref::<adw::ClampScrollable>().unwrap();
+                clamp.set_maximum_size(content_height);
+                // clamp.set_tightening_threshold(content_height);
+            }
 
             log::error!(
                 "grid {} maximum_size ---------------------------> {}",
@@ -611,8 +644,9 @@ impl VimGrid {
             // 40951.023317
             log::error!("frame_time {}", frame_clock.frame_time());
             let child = root.child().unwrap();
-            let win = child.downcast_ref::<gtk::ScrolledWindow>().unwrap();
-            let vadjustment = win.vadjustment();
+            let clamp = child.downcast_ref::<adw::ClampScrollable>().unwrap();
+                // return glib::Continue(false);
+            let vadjustment = clamp.vadjustment().unwrap();
             // TODO: current smooth duration is 150ms, should be configurable.
             let ratio = (frame_clock.frame_time() - startat) as f64 / 150000.;
             if ratio >= 1. {
@@ -621,7 +655,7 @@ impl VimGrid {
 
                 std::thread::spawn({
                     let textbuf = textbuf.clone();
-                    let old_clamps = old_clamps.clone();
+                    let old_clamps = old_clamps;
                     move || {
                         textbuf.discard();
                         let mut old_clamps = old_clamps.write();
@@ -642,7 +676,7 @@ impl VimGrid {
             log::debug!("vadjustment-upper: {}", vadjustment.upper());
             log::debug!("vadjustment-page-size: {}", vadjustment.page_size());
             log::debug!("textbuf height: {}", view.height());
-            win.queue_draw();
+            clamp.queue_draw();
             glib::Continue(true)
         }));
         widgets.smoother.set(Some(handle));
