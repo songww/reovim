@@ -82,7 +82,7 @@ impl ToInput for gdk::ModifierType {
             input.push_str("M-");
         }
 
-        Some(format!("{}", input).into())
+        Some(input.to_string())
     }
 }
 

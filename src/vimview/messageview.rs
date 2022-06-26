@@ -189,7 +189,7 @@ mod imp {
                 }
             }
             cols = max_cols.max(cols);
-            rows = rows + 1;
+            rows += 1;
             let textbuf = self.view.textbuf();
             textbuf.resize(rows, cols);
             for (no, cells) in lines.iter_mut().enumerate() {
@@ -204,7 +204,7 @@ mod imp {
                         },
                     );
                 }
-                textbuf.set_cells(no, 0, &cells);
+                textbuf.set_cells(no, 0, cells);
             }
         }
         pub fn set_pango_context(&self, pctx: Rc<pango::Context>) {

@@ -1,4 +1,4 @@
-use fontconfig::{properties, FontConfig, MatchKind, OwnedPattern, Pattern};
+use fontconfig::{properties, FontConfig, MatchKind, OwnedPattern};
 use std::io::Write;
 
 fn main() {

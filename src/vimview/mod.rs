@@ -21,8 +21,7 @@ unsafe impl Send for TextBuf {}
 
 impl TextBuf {
     pub fn new(rows: usize, cols: usize) -> Self {
-        let buf = TextBuf(Arc::new(textbuf::TextBuf::new(cols, rows)));
-        buf
+        TextBuf(Arc::new(textbuf::TextBuf::new(cols, rows)))
     }
 }
 

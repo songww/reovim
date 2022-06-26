@@ -111,7 +111,7 @@ fn platform_which(bin: &str) -> Option<String> {
 
 fn build_nvim_cmd_with_args(bin: &str, nvimargs: &[String]) -> TokioCommand {
     let mut args = vec!["--embed".to_string()];
-    args.extend(nvimargs.into_iter().cloned());
+    args.extend(nvimargs.iter().cloned());
 
     #[cfg(target_os = "windows")]
     if SETTINGS.get::<CmdLineSettings>().wsl {

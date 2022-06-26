@@ -5,7 +5,7 @@ use glib::subclass::prelude::*;
 use parking_lot::RwLock;
 
 use super::highlights::HighlightDefinitions;
-use crate::text::{FontMap, TextCell, TextLine};
+use crate::text::{FontMap, TextCell};
 
 type Nr = usize;
 
@@ -423,9 +423,9 @@ mod imp {
                     } else {
                         1
                     };
-                    let mut cell = TextCell {
+                    let cell = TextCell {
                         text: text.to_string(),
-                        hldef: hldef.clone(),
+                        hldef: *hldef,
                         width: double_width.then_some(1).unwrap_or(0),
                         // attrs,
                         start_index,
@@ -540,9 +540,11 @@ mod imp {
                 if cols > old_cols {
                     for _ in 0..(cols - old_cols) {
                         cells.push({
-                            let mut cell = TextCell::default();
-                            cell.start_index = start_index;
-                            cell.end_index = start_index + 1;
+                            let cell = TextCell {
+                                start_index,
+                                end_index: start_index + 1,
+                                ..Default::default()
+                            };
                             start_index += 1;
                             cell
                         });

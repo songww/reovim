@@ -269,15 +269,16 @@ impl ComponentUpdate<AppModel> for VimCmdPrompts {
                 todo!()
             }
             VimCmdEvent::Hide => {
-                self.prompts
+                if let Some(popover) = self
+                    .prompts
                     .pop_back()
                     .and_then(|mut top| top.widget.take())
-                    .map(|popover| {
-                        self.removed
-                            .get_mut()
-                            .get_or_insert(Vec::new())
-                            .push(popover);
-                    });
+                {
+                    self.removed
+                        .get_mut()
+                        .get_or_insert(Vec::new())
+                        .push(popover);
+                }
             }
             VimCmdEvent::Show(styled_content, position, start, prompt, indent, level) => {
                 let indent = indent as usize;
@@ -322,10 +323,8 @@ impl ComponentUpdate<AppModel> for VimCmdPrompts {
                     self.prompts.push_back(VimCommandPrompt::new(level, name));
                     self.prompts.append(&mut right);
                     prompt_opt = self.prompts.iter_mut().find(|p| p.level == level);
-                } else {
-                    prompt_opt.as_ref().map(|prompt| {
-                        prompt.changed.set(true);
-                    });
+                } else if let Some(prompt) = prompt_opt.as_ref() {
+                    prompt.changed.set(true);
                 }
                 let prompt = prompt_opt.unwrap();
 

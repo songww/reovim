@@ -28,7 +28,7 @@ impl ColorExt for Color {
     }
 }
 
-#[derive(new, Copy, Clone, Debug, Default, PartialEq)]
+#[derive(new, Copy, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Colors {
     pub foreground: Option<Color>,
     pub background: Option<Color>,

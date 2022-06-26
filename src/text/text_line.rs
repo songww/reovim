@@ -25,7 +25,7 @@ impl Clone for TextLine {
         TextLine {
             nr: self.nr,
             boxed: self.boxed.clone(),
-            cache: Cell::new(unsafe { &*self.cache.as_ptr() }.clone()),
+            cache: Cell::new(*unsafe { &*self.cache.as_ptr() }),
         }
     }
 }
@@ -115,8 +115,8 @@ impl From<Box<[TextCell]>> for TextLine {
     }
 }
 
-impl Into<Box<[TextCell]>> for TextLine {
-    fn into(self) -> Box<[TextCell]> {
-        self.boxed
+impl From<TextLine> for Box<[TextCell]> {
+    fn from(val: TextLine) -> Self {
+        val.boxed
     }
 }

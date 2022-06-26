@@ -117,11 +117,11 @@ impl AppModel {
                 ctx.set_base_dir(pango::Direction::Ltr);
                 ctx.set_language(&pango::Language::from_string("en-US"));
                 let mut options = cairo::FontOptions::new().ok();
-                options.as_mut().map(|options| {
+                if let Some(ref mut options) = options {
                     options.set_hint_style(cairo::HintStyle::None);
                     // options.set_antialias(cairo::Antialias::Subpixel);
                     options.set_hint_metrics(cairo::HintMetrics::On);
-                });
+                }
                 pangocairo::context_set_font_options(&ctx, options.as_ref());
                 ctx
             })
@@ -181,7 +181,7 @@ impl AppModel {
 
     pub fn calculate(&self) {
         const PANGO_SCALE: f64 = pango::SCALE as f64;
-        const SINGLE_WIDTH_CHARS: &'static str = concat!(
+        const SINGLE_WIDTH_CHARS: &str = concat!(
             " ! \" # $ % & ' ( ) * + , - . / ",
             "0 1 2 3 4 5 6 7 8 9 ",
             ": ; < = > ? @ ",
@@ -301,9 +301,9 @@ impl AppUpdate for AppModel {
                                 );
 
                                 self.pctx.set_font_description(&desc);
-                                self.gtksettings.get().map(|settings| {
+                                if let Some(settings) = self.gtksettings.get() {
                                     settings.set_gtk_font_name(Some(&desc.to_str()));
-                                });
+                                }
 
                                 // SAFETY:
                                 unsafe {
@@ -364,7 +364,9 @@ impl AppUpdate for AppModel {
                     }
                     RedrawEvent::Clear { grid } => {
                         log::info!("cleared grid {}", grid);
-                        self.vgrids.get_mut(grid).map(|grid| grid.clear());
+                        if let Some(grid) = self.vgrids.get_mut(grid) {
+                            grid.clear()
+                        }
                     }
                     RedrawEvent::GridLine {
                         grid,
@@ -382,10 +384,9 @@ impl AppUpdate for AppModel {
                         );
 
                         let grids: Vec<_> = self.vgrids.iter().map(|(k, _)| *k).collect();
-                        let vgrid = self.vgrids.get_mut(grid).expect(&format!(
-                            "grid {} not found, valid grids {:?}",
-                            grid, &grids
-                        ));
+                        let vgrid = self.vgrids.get_mut(grid).unwrap_or_else(|| {
+                            panic!("grid {} not found, valid grids {:?}", grid, &grids)
+                        });
                         vgrid
                             .textbuf()
                             .set_cells(row as _, column_start as _, &cells);
@@ -424,9 +425,9 @@ impl AppUpdate for AppModel {
                     } => {
                         let vgrid = self.vgrids.get_mut(grid).unwrap();
                         if rows.is_positive() {
-                            vgrid.up(rows.abs() as _);
+                            vgrid.up(rows.unsigned_abs() as _);
                         } else if rows.is_negative() {
-                            vgrid.down(rows.abs() as _);
+                            vgrid.down(rows.unsigned_abs() as _);
                         } else if columns.is_positive() {
                             unimplemented!("scroll left.");
                         } else if columns.is_negative() {
@@ -1033,7 +1034,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
         im_context.connect_commit(glib::clone!(@strong sender => move |ctx, text| {
             log::debug!("im-context({}) commit '{}'", ctx.context_id(), text);
             sender
-                .send(UiCommand::Serial(SerialCommand::Keyboard(text.replace("<", "<lt>").into())).into())
+                .send(UiCommand::Serial(SerialCommand::Keyboard(text.replace('<', "<lt>"))).into())
                 .unwrap();
         }));
 

@@ -96,3 +96,9 @@ impl HighlightDefinitions {
         self.imp().set_defaults(defaults)
     }
 }
+
+impl Default for HighlightDefinitions {
+    fn default() -> Self {
+        Self::new()
+    }
+}

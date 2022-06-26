@@ -33,12 +33,9 @@ impl Pos {
     }
 }
 
-impl Into<FixedPosition> for Pos {
-    fn into(self) -> FixedPosition {
-        FixedPosition {
-            x: self.x,
-            y: self.y,
-        }
+impl From<Pos> for FixedPosition {
+    fn from(val: Pos) -> Self {
+        FixedPosition { x: val.x, y: val.y }
     }
 }
 
@@ -94,4 +91,3 @@ impl Clamp {
         self.bot
     }
 }
-

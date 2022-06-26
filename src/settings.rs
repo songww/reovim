@@ -10,7 +10,7 @@ use std::{
 
 use crate::bridge::TxWrapper;
 
-pub static SETTINGS: Lazy<Settings> = Lazy::new(|| Settings::new());
+pub static SETTINGS: Lazy<Settings> = Lazy::new(Settings::new);
 
 pub trait SettingGroup {
     fn register(&self);
@@ -111,7 +111,7 @@ impl Settings {
             );
             nvim.command(&vimscript)
                 .await
-                .expect(&format!("Could not setup setting notifier for {}", name));
+                .unwrap_or_else(|_| panic!("Could not setup setting notifier for {}", name));
         }
     }
 
@@ -130,7 +130,6 @@ impl Settings {
 mod tests {
     use async_trait::async_trait;
     use nvim::{Handler, Neovim};
-    use tokio;
 
     use super::*;
     use crate::{
@@ -211,8 +210,8 @@ mod tests {
         let vt2 = TypeId::of::<f32>();
 
         let mut values = settings.settings.write();
-        values.insert(vt1, Box::new(v1.clone()));
-        values.insert(vt2, Box::new(v2.clone()));
+        values.insert(vt1, Box::new(v1));
+        values.insert(vt2, Box::new(v2));
 
         unsafe {
             settings.settings.force_unlock_write();

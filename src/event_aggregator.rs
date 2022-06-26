@@ -10,7 +10,7 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
 use crate::loggingchan::*;
 
-pub static EVENT_AGGREGATOR: Lazy<EventAggregator> = Lazy::new(|| EventAggregator::default());
+pub static EVENT_AGGREGATOR: Lazy<EventAggregator> = Lazy::new(EventAggregator::default);
 
 thread_local! {
     static THREAD_SENDERS: RwLock<HashMap<TypeId, Box<dyn Any + Send>>> = RwLock::new(HashMap::new());

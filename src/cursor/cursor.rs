@@ -9,7 +9,7 @@ use crate::metrics::Metrics;
 use crate::text::TextCell;
 use crate::vimview::HighlightDefinitions;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CursorShape {
     Block,
     Horizontal,
@@ -183,7 +183,7 @@ impl Cursor {
         } = cursor_mode;
 
         if let Some(shape) = shape {
-            self.shape = shape.clone();
+            self.shape = shape;
         }
 
         self.style = style;
@@ -247,19 +247,19 @@ mod tests {
     // use rustc_hash::FxHashMap;
     // use std::sync::Arc;
 
-    const COLORS: Lazy<Colors> = Lazy::new(|| Colors {
+    static COLORS: Lazy<Colors> = Lazy::new(|| Colors {
         foreground: Some(Color::new(0.1, 0.1, 0.1, 0.1)),
         background: Some(Color::new(0.2, 0.1, 0.1, 0.1)),
         special: Some(Color::new(0.3, 0.1, 0.1, 0.1)),
     });
 
-    const DEFAULT_COLORS: Lazy<Colors> = Lazy::new(|| Colors {
+    static DEFAULT_COLORS: Lazy<Colors> = Lazy::new(|| Colors {
         foreground: Some(Color::new(0.1, 0.2, 0.1, 0.1)),
         background: Some(Color::new(0.2, 0.2, 0.1, 0.1)),
         special: Some(Color::new(0.3, 0.2, 0.1, 0.1)),
     });
 
-    const NONE_COLORS: Lazy<Colors> = Lazy::new(|| Colors {
+    static NONE_COLORS: Lazy<Colors> = Lazy::new(|| Colors {
         foreground: None,
         background: None,
         special: None,

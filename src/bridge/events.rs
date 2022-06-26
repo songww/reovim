@@ -641,10 +641,7 @@ fn parse_grid_line(grid_line_arguments: Vec<Value>) -> Result<RedrawEvent> {
             }
             None => {}
         }
-        let double_width = match iter.peek() {
-            Some(cell) if cell.text.is_empty() => true,
-            _ => false,
-        };
+        let double_width = matches!(iter.peek(), Some(cell) if cell.text.is_empty());
         cell.hldef.replace(hldef.unwrap());
         cell.double_width = double_width;
     }

@@ -3,27 +3,16 @@ mod imp {
     use std::cell::Cell;
     use std::rc::Rc;
 
-    use glib::translate::{from_glib_none, ToGlibPtr};
     use gtk::traits::WidgetExt;
     use gtk::{gdk::prelude::*, graphene::Rect, subclass::prelude::*};
     use parking_lot::RwLock;
-    use relm4::WidgetPlus;
 
-    use crate::metrics::Metrics;
-    use crate::text::{LayoutLine, TextCell, TextLine};
+    use crate::text::LayoutLine;
     use crate::vimview::TextBuf;
 
     use super::super::highlights::HighlightDefinitions;
 
-    const PANGO_SCALE: f64 = pango::SCALE as f64;
-
-    #[derive(Clone, Debug)]
-    struct CharAttr<'c> {
-        c: char,
-        cell: &'c TextCell,
-        // visible width. how much cell used.
-        viswidth: f64,
-    }
+    // const PANGO_SCALE: f64 = pango::SCALE as f64;
 
     // #[derive(Debug)]
     pub struct VimGridView {

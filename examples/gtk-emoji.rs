@@ -1,8 +1,6 @@
 use gtk::prelude::*;
 use gtk::Application;
 
-use pangocairo::traits::FontExt;
-
 const APP_ID: &str = "org.gtk-rs.examples.gtk-emoji";
 
 fn main() {
