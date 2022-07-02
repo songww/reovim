@@ -37,6 +37,7 @@ pub static GridActived: Lazy<Arc<atomic::AtomicU64>> =
 pub enum AppMessage {
     Quit,
     ShowPointer,
+    Padding(gtk::Border),
     UiCommand(UiCommand),
     RedrawEvent(RedrawEvent),
 }
@@ -89,6 +90,8 @@ pub struct AppModel {
 
     pub dragging: Rc<Cell<Option<Dragging>>>,
     pub show_pointer: atomic::AtomicBool,
+
+    pub padding: gtk::Border,
 
     pub rt: tokio::runtime::Runtime,
 }
@@ -172,6 +175,8 @@ impl AppModel {
 
             dragging: Rc::new(Cell::new(None)),
             show_pointer: true.into(),
+
+            padding: gtk::Border::default(),
 
             opts,
 
@@ -273,6 +278,9 @@ impl AppUpdate for AppModel {
             }
             AppMessage::ShowPointer => {
                 self.show_pointer.store(true, atomic::Ordering::Relaxed);
+            }
+            AppMessage::Padding(padding) => {
+                self.padding = padding;
             }
             AppMessage::RedrawEvent(event) => {
                 match event {
@@ -914,6 +922,8 @@ impl Widgets<AppModel, ()> for AppWidgets {
                         connect_resize[sender = sender.clone(), metrics = model.metrics.clone(), size = model.window_size.clone()] => move |_da, width, height| {
                             log::error!("da resizing width: {}, height: {}", width, height);
                             let metrics = metrics.get();
+                            let vpadding = (height as f64 % metrics.height()).round() as i16;
+                            let hpadding = (width as f64 % metrics.width()).round() as i16;
                             let rows = (height as f64 / metrics.height()).floor();
                             let cols = (width as f64 / metrics.width()).floor();
                             size.set((width, height));
@@ -927,6 +937,19 @@ impl Widgets<AppModel, ()> for AppWidgets {
                                     .into(),
                                 )
                                 .unwrap();
+                            let top = vpadding / 2;
+                            let left = hpadding / 2;
+                            sender
+                                .send(
+                                    AppMessage::Padding(
+                                        gtk::Border::builder()
+                                            .top(top)
+                                            .bottom(vpadding - top)
+                                            .left(left)
+                                            .right(hpadding - left)
+                                            .build()
+                                    )
+                                ).unwrap();
                         },
                         set_draw_func[hldefs = model.hldefs.clone()] => move |_da, cr, w, h| {
                             let hldefs = hldefs.read();
@@ -943,6 +966,10 @@ impl Widgets<AppModel, ()> for AppWidgets {
                         set_widget_name: "grids-container",
                         set_visible: true,
                         set_focus_on_click: true,
+                        set_margin_top: model.padding.top().into(), // set paddings
+                        set_margin_bottom: model.padding.bottom().into(), // set paddings
+                        // set_margin_start: model.padding.left().into(), // set paddings
+                        // set_margin_end: model.padding.right().into(), // set paddings
                         factory!(model.vgrids),
                     },
                     add_overlay: float_win_container = &gtk::Fixed {
@@ -950,8 +977,18 @@ impl Widgets<AppModel, ()> for AppWidgets {
                         set_visible: false,
                         set_hexpand: false,
                         set_vexpand: false,
+                        set_margin_top: model.padding.top().into(), // set paddings
+                        set_margin_bottom: model.padding.bottom().into(), // set paddings
+                        // set_margin_start: model.padding.left().into(), // set paddings
+                        // set_margin_end: model.padding.right().into(), // set paddings
                     },
-                    add_overlay: model.cursor.root_widget(),
+                    add_overlay: cursor_overlay = &adw::Bin {
+                        set_child: Some(model.cursor.root_widget()),
+                        set_margin_top: model.padding.top().into(), // set paddings
+                        set_margin_bottom: model.padding.bottom().into(), // set paddings
+                        // set_margin_start: model.padding.left().into(), // set paddings
+                        // set_margin_end: model.padding.right().into(), // set paddings
+                    },
                     add_overlay: messages_container = &gtk::Box {
                         set_widget_name: "messages-container",
                         set_opacity: 0.95,
@@ -1007,7 +1044,7 @@ impl Widgets<AppModel, ()> for AppWidgets {
                 vbox.set_cursor_from_name(Some("text"));
             }),
         )));
-        let pointer_animation = adw::TimedAnimation::new(&vbox, 0., 1., 1000, &target);
+        let pointer_animation = adw::TimedAnimation::new(&vbox, 0., 1., 50000, &target);
         pointer_animation.set_easing(adw::Easing::Linear);
         pointer_animation.set_repeat_count(1);
         pointer_animation.connect_done(move |this| {
@@ -1141,6 +1178,9 @@ impl Widgets<AppModel, ()> for AppWidgets {
             atomic::Ordering::Acquire,
             atomic::Ordering::Relaxed,
         ) {
+            // self.pointer_animation
+            //     .widget()
+            //     .set_cursor_from_name(Some("text"));
             self.pointer_animation.play();
         }
         if let Ok(true) = model.background_changed.compare_exchange(
@@ -1203,5 +1243,32 @@ impl Widgets<AppModel, ()> for AppWidgets {
                 )
                 .unwrap();
         }
+
+        self.grids_container
+            .set_margin_top(model.padding.top().into());
+        self.grids_container
+            .set_margin_bottom(model.padding.bottom().into());
+        // self.grids_container
+        //     .set_margin_start(model.padding.left().into());
+        // self.grids_container
+        //     .set_margin_end(model.padding.right().into());
+
+        self.float_win_container
+            .set_margin_top(model.padding.top().into());
+        self.float_win_container
+            .set_margin_bottom(model.padding.bottom().into());
+        // self.float_win_container
+        //     .set_margin_start(model.padding.left().into());
+        // self.float_win_container
+        //     .set_margin_end(model.padding.right().into());
+
+        self.cursor_overlay
+            .set_margin_top(model.padding.top().into());
+        self.cursor_overlay
+            .set_margin_bottom(model.padding.bottom().into());
+        // self.cursor_overlay
+        //     .set_margin_start(model.padding.left().into());
+        // self.cursor_overlay
+        //     .set_margin_end(model.padding.right().into());
     }
 }

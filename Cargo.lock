@@ -1786,15 +1786,17 @@ dependencies = [
 
 [[package]]
 name = "songww-harfbuzz-sys"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "bindgen",
+ "cfg-if",
  "core-graphics",
  "core-text",
  "foreign-types",
  "freetype-sys",
  "pkg-config",
  "regex",
+ "which",
 ]
 
 [[package]]

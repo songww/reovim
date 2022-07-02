@@ -78,6 +78,7 @@ package = "songww-harfbuzz-rs"
 [dependencies.adw]
 package = "libadwaita"
 # version = "0.2"
+features = ["gtk_v4_6", "v1_1"]
 git = "https://gitlab.gnome.org/World/Rust/libadwaita-rs"
 
 [dependencies.cairo]
