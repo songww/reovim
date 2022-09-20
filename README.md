@@ -54,7 +54,7 @@ Font fallback supports rendering of emoji not contained in the configured font.
 
 ![Emoji](./assets/Emoji.png)
 
-## Planing
+## Planning
 
 - [ ]  Animated Cursor. [example](https://github.com/neovide/neovide#animated-cursor)  
 - [ ]  Animated Windows. [example](https://github.com/neovide/neovide#animated-windows)  
