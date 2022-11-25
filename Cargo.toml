@@ -47,7 +47,7 @@ package = "cairo-rs"
 features = [ "v1_16", "png" ]
 
 [dependencies.pango]
-version = "0.15"
+version = "0.16"
 package = "pango"
 features = [ "v1_50" ]
 
