@@ -4,7 +4,7 @@ extern crate derive_new;
 use clap::{CommandFactory, Parser};
 use relm4::RelmApp;
 
-use crate::app::{AppMessage, AppModel};
+use crate::app::{App, AppMessage};
 
 mod app;
 mod bridge;
@@ -48,7 +48,7 @@ pub struct Opts {
 
     /// A level of log, see: https://docs.rs/env_logger/latest/env_logger/#enabling-logging
     #[clap(short, long, value_name = "RUST_LOG", action = clap::ArgAction::Count)]
-    verbose: i32,
+    verbose: u8,
 
     /// files to open.
     #[clap(env = "FILES", value_name = "FILES")]
@@ -106,5 +106,5 @@ fn main() {
     let relm =
         RelmApp::<AppMessage>::new("me.songww.editor.reovim").with_args(vec![title.to_string()]);
 
-    relm.run::<AppModel>(opts);
+    relm.run::<App>(opts);
 }

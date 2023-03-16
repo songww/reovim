@@ -25,7 +25,7 @@ pub enum CursorMessage {
     SetCell(TextCell),
 }
 
-#[relm4::component]
+#[relm4::component(pub)]
 impl SimpleComponent for VimCursor {
     type Widgets = CursorWidgets;
     type Input = CursorMessage;
@@ -95,10 +95,8 @@ impl SimpleComponent for VimCursor {
         let instant = std::time::Instant::now();
         drawing_area.set_opacity(1.);
         drawing_area.remove_css_class("blink");
-        drawing_area
-            .style_context()
-            .remove_provider(&widgets.css_provider);
-        let cr = widgets.handle.get_context();
+        drawing_area.style_context().remove_provider(css_provider);
+        let cr = handle.get_context();
         self.drawing(&cr);
         drawing_area
             .style_context()

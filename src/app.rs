@@ -3,12 +3,10 @@ use std::convert::identity;
 use std::rc::Rc;
 use std::sync::{atomic, Arc, RwLock};
 
+use adw::prelude::*;
 use gtk::gdk;
 use gtk::gdk::prelude::FontMapExt;
 use gtk::gdk::ScrollDirection;
-use gtk::prelude::*;
-
-use adw::prelude::*;
 use once_cell::sync::{Lazy, OnceCell};
 use pango::FontDescription;
 use relm4::factory::FactoryVecDeque;
@@ -20,11 +18,13 @@ use crate::bridge;
 use crate::bridge::{
     EditorMode, MouseButton, ParallelCommand, RedrawEvent, SerialCommand, UiCommand, WindowAnchor,
 };
-use crate::components::{VimCmdEvent, VimCmdPrompts};
+use crate::components::bridge::VimBridge;
+use crate::components::{CommandPromptMessage, VimCommandPrompt, PROMPT_BROKER};
 use crate::cursor::{CursorMode, VimCursor};
 use crate::event_aggregator::EVENT_AGGREGATOR;
 use crate::grapheme::Coord;
 use crate::keys::ToInput;
+use crate::messager::VimMessager;
 use crate::metrics::Metrics;
 use crate::vimview::{self, VimGrid, VimMessage};
 use crate::widgets::board::Board;
@@ -49,7 +49,7 @@ impl From<UiCommand> for AppMessage {
 }
 
 #[derive(Debug)]
-pub struct AppModel {
+pub struct App {
     pub opts: Opts,
 
     pub title: String,
@@ -76,7 +76,7 @@ pub struct AppModel {
     pub cursor_mode: usize,
     pub cursor_modes: Vec<CursorMode>,
 
-    cmd_prompt: Controller<VimCmdPrompts>,
+    cmd_prompt: Controller<VimCommandPrompt>,
 
     pub pctx: Rc<pango::Context>,
     pub gtksettings: OnceCell<gtk::Settings>,
@@ -92,7 +92,9 @@ pub struct AppModel {
     pub dragging: Rc<Cell<Option<Dragging>>>,
     pub show_pointer: atomic::AtomicBool,
 
-    pub rt: tokio::runtime::Runtime,
+    pub messager: Controller<VimMessager>,
+    pub bridge: Option<Controller<VimBridge>>,
+    // pub rt: tokio::runtime::Runtime,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -101,7 +103,7 @@ pub struct Dragging {
     pub pos: (u32, u32),
 }
 
-impl AppModel {
+impl App {
     pub fn calculate(&self) {
         const PANGO_SCALE: f64 = pango::SCALE as f64;
         const SINGLE_WIDTH_CHARS: &'static str = concat!(
@@ -170,10 +172,183 @@ impl AppModel {
         info!("char-ascent {:?}", metrics.ascent());
         self.metrics.replace(metrics);
     }
+
+    fn post_init(&mut self, widgets: &AppWidgets, sender: ComponentSender<Self>) {
+        let AppWidgets {
+            ref main_window,
+            ref da,
+            ref vbox,
+            ref overlays,
+            ref vimgrids,
+            ref vimmessages,
+            ref vimfloatwins,
+            ref pointer_animation,
+        } = widgets;
+
+        vimgrids.set_widget_name("vim-grids");
+        vimgrids.set_visible(true);
+        vimgrids.set_focus_on_click(true);
+        overlays.add_overlay(vimgrids);
+        vimgrids.set_child(self.vgrids.widget().into());
+
+        vimfloatwins.set_widget_name("vim-float-wins");
+        vimfloatwins.set_visible(false);
+        vimfloatwins.set_hexpand(false);
+        vimfloatwins.set_vexpand(false);
+        overlays.add_overlay(vimfloatwins);
+
+        // add_overlay: model.cursor.root_widget(),
+
+        vimmessages.set_widget_name("vim-messages");
+        vimmessages.set_opacity(0.95);
+        vimmessages.set_spacing(5);
+        vimmessages.set_visible(false);
+        vimmessages.set_hexpand(true);
+        vimmessages.set_width_request(0);
+        vimmessages.set_homogeneous(false);
+        vimmessages.set_focus_on_click(false);
+        vimmessages.set_halign(gtk::Align::End);
+        vimmessages.set_valign(gtk::Align::Start);
+        vimmessages.set_overflow(gtk::Overflow::Visible);
+        vimmessages.set_orientation(gtk::Orientation::Vertical);
+        vimmessages.append(self.messages.widget());
+        overlays.add_overlay(vimmessages);
+        // add_overlay: components.cmd_prompt.root_widget() ,
+
+        self.calculate();
+        self.gtksettings.set(overlays.settings()).ok();
+        let metrics = self.metrics.get();
+        let rows = (self.opts.height as f64 / metrics.height()).ceil() as i64;
+        let cols = (self.opts.width as f64 / metrics.width()).ceil() as i64;
+        let mut opts = self.opts.clone();
+        opts.size.replace((cols, rows));
+        self.bridge
+            .replace(VimBridge::builder().launch(opts).detach());
+
+        da.queue_allocate();
+        da.queue_resize();
+        da.queue_draw();
+
+        pointer_animation.set_easing(adw::Easing::Linear);
+        pointer_animation.set_repeat_count(1);
+        pointer_animation.connect_done(move |this| {
+            this.widget().set_cursor_from_name(Some("none"));
+        });
+
+        let im_context = gtk::IMMulticontext::new();
+        im_context.set_use_preedit(false);
+        im_context.set_client_widget(Some(overlays));
+
+        im_context.set_input_purpose(gtk::InputPurpose::Terminal);
+
+        im_context.set_cursor_location(&gdk::Rectangle::new(0, 0, 5, 10));
+        // im_context.connect_preedit_start(|_| {
+        //     debug!("preedit started.");
+        // });
+        // im_context.connect_preedit_end(|im_context| {
+        //     debug!("preedit done, '{}'", im_context.preedit_string().0);
+        // });
+        // im_context.connect_preedit_changed(|im_context| {
+        //     debug!("preedit changed, '{}'", im_context.preedit_string().0);
+        // });
+
+        im_context.connect_commit(gtk::glib::clone!(@strong sender => move |ctx, text| {
+            debug!("im-context({}) commit '{}'", ctx.context_id(), text);
+            sender
+                .output(UiCommand::Serial(SerialCommand::Keyboard(text.replace("<", "<lt>").into())).into());
+        }));
+
+        main_window.set_focus_widget(Some(overlays));
+        main_window.set_default_widget(Some(overlays));
+
+        let grids_container = vimgrids;
+
+        let listener = gtk::EventControllerScroll::builder()
+            .flags(gtk::EventControllerScrollFlags::all())
+            .name("vimview-scrolling-listener")
+            .build();
+        listener.connect_scroll(glib::clone!(@strong sender, @strong self.mouse_on as mouse_on, @strong grids_container => move |c, x, y| {
+            if !mouse_on.load(atomic::Ordering::Relaxed) {
+                return gtk::Inhibit(false)
+            }
+            let event = c.current_event().unwrap().downcast::<gdk::ScrollEvent>().unwrap();
+            let modifier = event.modifier_state();
+            let id = GridActived.load(atomic::Ordering::Relaxed);
+            let direction = match event.direction() {
+                ScrollDirection::Up => {
+                    "up"
+                },
+                    ScrollDirection::Down => {
+                    "down"
+                }
+                ScrollDirection::Left => {
+                    "left"
+                }
+                ScrollDirection::Right => {
+                    "right"
+                }
+                _ => {
+                    return gtk::Inhibit(false)
+                }
+            };
+            debug!("scrolling grid {} x: {}, y: {} {}", id, x, y, &direction);
+            let command = UiCommand::Serial(SerialCommand::Scroll { direction: direction.into(), grid_id: id, position: (0, 1), modifier });
+            sender.output(AppMessage::UiCommand(command)).unwrap();
+            gtk::Inhibit(false)
+        }));
+
+        main_window.add_controller(listener);
+
+        let focus_controller = gtk::EventControllerFocus::builder()
+            .name("vimview-focus-controller")
+            .build();
+        focus_controller.connect_enter(
+            glib::clone!(@strong sender, @strong im_context => move |_| {
+                info!("FocusGained");
+                im_context.focus_in();
+                sender.output(UiCommand::Parallel(ParallelCommand::FocusGained).into()).unwrap();
+            }),
+        );
+        focus_controller.connect_leave(
+            glib::clone!(@strong sender, @strong im_context  => move |_| {
+                info!("FocusLost");
+                im_context.focus_out();
+                sender.output(UiCommand::Parallel(ParallelCommand::FocusLost).into()).unwrap();
+            }),
+        );
+        main_window.add_controller(focus_controller);
+
+        let key_controller = gtk::EventControllerKey::builder()
+            .name("vimview-key-controller")
+            .build();
+        key_controller.set_im_context(Some(&im_context));
+        key_controller.connect_key_pressed(
+            glib::clone!(@strong sender => move |c, keyval, _keycode, modifier| {
+                let event = c.current_event().unwrap();
+
+                if let Some(true) = c.im_context().map(|imctx|imctx.filter_keypress(&event)) {
+                    debug!("keypress handled by im-context.");
+                    return gtk::Inhibit(true)
+                }
+                let keypress = (keyval, modifier);
+                debug!("keypress : {:?}", keypress);
+                if let Some(keypress) = keypress.to_input() {
+                    debug!("keypress {} sent to neovim.", keypress);
+                    sender.output(UiCommand::Serial(SerialCommand::Keyboard(keypress)).into()).unwrap();
+                    gtk::Inhibit(true)
+                } else {
+                    info!("keypress ignored: {:?}", keyval.name());
+                    gtk::Inhibit(false)
+                }
+            }),
+        );
+        overlays.add_controller(key_controller);
+        self.im_context.set(im_context).unwrap();
+    }
 }
 
-#[relm4::component]
-impl Component for AppModel {
+#[relm4::component(pub)]
+impl Component for App {
     type Init = Opts;
 
     type Input = AppMessage;
@@ -201,7 +376,7 @@ impl Component for AppModel {
 
                 // set_child: Add tabline
 
-                append: overlay = &gtk::Overlay {
+                append: overlays = &gtk::Overlay {
                     set_focusable: true,
                     set_sensitive: true,
                     set_can_focus: true,
@@ -241,44 +416,6 @@ impl Component for AppModel {
                             }
                         }
                     },
-                    #[name(grids_container)]
-                    add_overlay = &Board {
-                        set_widget_name: "grids-container",
-                        set_visible: true,
-                        set_focus_on_click: true,
-
-                        #[local_ref]
-                        vgrids -> gtk::Box {
-                            //
-                        }
-                    },
-                    add_overlay: float_win_container = &gtk::Fixed {
-                        set_widget_name: "float-win-container",
-                        set_visible: false,
-                        set_hexpand: false,
-                        set_vexpand: false,
-                    },
-                    // add_overlay: model.cursor.root_widget(),
-                    add_overlay: messages_container = &gtk::Box {
-                        set_widget_name: "messages-container",
-                        set_opacity: 0.95,
-                        set_spacing: 5,
-                        set_visible: false,
-                        set_hexpand: true,
-                        // It dosenot matter.
-                        set_width_request: 0,
-                        set_homogeneous: false,
-                        set_focus_on_click: false,
-                        set_halign: gtk::Align::End,
-                        set_valign: gtk::Align::Start,
-                        set_overflow: gtk::Overflow::Visible,
-                        set_orientation: gtk::Orientation::Vertical,
-                        #[local_ref]
-                        messages -> gtk::Box {
-                            //
-                        }
-                    },
-                    // add_overlay: components.cmd_prompt.root_widget() ,
                 }
             },
             connect_close_request[sender = sender.clone()] => move |_| {
@@ -290,6 +427,9 @@ impl Component for AppModel {
 
     additional_fields! {
         pointer_animation: adw::TimedAnimation,
+        vimfloatwins : gtk::Fixed,
+        vimmessages : gtk::Box,
+        vimgrids : adw::Bin,
     }
 
     fn pre_view() {
@@ -359,146 +499,16 @@ impl Component for AppModel {
         }
     }
 
-    fn post_view() {
-        self.calculate();
-        self.gtksettings.set(widgets.overlay.settings()).ok();
-        let metrics = self.metrics.get();
-        let rows = (self.opts.height as f64 / metrics.height()).ceil() as i64;
-        let cols = (self.opts.width as f64 / metrics.width()).ceil() as i64;
-        let mut opts = self.opts.clone();
-        opts.size.replace((cols, rows));
-        self.rt.spawn(bridge::open(opts));
-        widgets.da.queue_allocate();
-        widgets.da.queue_resize();
-        widgets.da.queue_draw();
-
-        pointer_animation.set_easing(adw::Easing::Linear);
-        pointer_animation.set_repeat_count(1);
-        pointer_animation.connect_done(move |this| {
-            this.widget().set_cursor_from_name(Some("none"));
-        });
-
-        let im_context = gtk::IMMulticontext::new();
-        im_context.set_use_preedit(false);
-        im_context.set_client_widget(Some(&widgets.overlay));
-
-        im_context.set_input_purpose(gtk::InputPurpose::Terminal);
-
-        im_context.set_cursor_location(&gdk::Rectangle::new(0, 0, 5, 10));
-        // im_context.connect_preedit_start(|_| {
-        //     debug!("preedit started.");
-        // });
-        // im_context.connect_preedit_end(|im_context| {
-        //     debug!("preedit done, '{}'", im_context.preedit_string().0);
-        // });
-        // im_context.connect_preedit_changed(|im_context| {
-        //     debug!("preedit changed, '{}'", im_context.preedit_string().0);
-        // });
-
-        im_context.connect_commit(gtk::glib::clone!(@strong sender => move |ctx, text| {
-            debug!("im-context({}) commit '{}'", ctx.context_id(), text);
-            sender
-                .output(UiCommand::Serial(SerialCommand::Keyboard(text.replace("<", "<lt>").into())).into());
-        }));
-
-        main_window.set_focus_widget(Some(&widgets.overlay));
-        main_window.set_default_widget(Some(&widgets.overlay));
-
-        let grids_container = widgets.grids_container;
-
-        let listener = gtk::EventControllerScroll::builder()
-            .flags(gtk::EventControllerScrollFlags::all())
-            .name("vimview-scrolling-listener")
-            .build();
-        listener.connect_scroll(glib::clone!(@strong sender, @strong self.mouse_on as mouse_on, @strong grids_container => move |c, x, y| {
-            if !mouse_on.load(atomic::Ordering::Relaxed) {
-                return gtk::Inhibit(false)
-            }
-            let event = c.current_event().unwrap().downcast::<gdk::ScrollEvent>().unwrap();
-            let modifier = event.modifier_state();
-            let id = GridActived.load(atomic::Ordering::Relaxed);
-            let direction = match event.direction() {
-                ScrollDirection::Up => {
-                    "up"
-                },
-                    ScrollDirection::Down => {
-                    "down"
-                }
-                ScrollDirection::Left => {
-                    "left"
-                }
-                ScrollDirection::Right => {
-                    "right"
-                }
-                _ => {
-                    return gtk::Inhibit(false)
-                }
-            };
-            debug!("scrolling grid {} x: {}, y: {} {}", id, x, y, &direction);
-            let command = UiCommand::Serial(SerialCommand::Scroll { direction: direction.into(), grid_id: id, position: (0, 1), modifier });
-            sender.output(AppMessage::UiCommand(command));
-            gtk::Inhibit(false)
-        }));
-
-        main_window.add_controller(listener);
-
-        let focus_controller = gtk::EventControllerFocus::builder()
-            .name("vimview-focus-controller")
-            .build();
-        focus_controller.connect_enter(
-            glib::clone!(@strong sender, @strong im_context => move |_| {
-                info!("FocusGained");
-                im_context.focus_in();
-                sender.output(UiCommand::Parallel(ParallelCommand::FocusGained).into());
-            }),
-        );
-        focus_controller.connect_leave(
-            glib::clone!(@strong sender, @strong im_context  => move |_| {
-                info!("FocusLost");
-                im_context.focus_out();
-                sender.output(UiCommand::Parallel(ParallelCommand::FocusLost).into());
-            }),
-        );
-        main_window.add_controller(focus_controller);
-
-        let key_controller = gtk::EventControllerKey::builder()
-            .name("vimview-key-controller")
-            .build();
-        key_controller.set_im_context(Some(&im_context));
-        key_controller.connect_key_pressed(
-            glib::clone!(@strong sender => move |c, keyval, _keycode, modifier| {
-                let event = c.current_event().unwrap();
-
-                if let Some(true) = c.im_context().map(|imctx|imctx.filter_keypress(&event)) {
-                    debug!("keypress handled by im-context.");
-                    return gtk::Inhibit(true)
-                }
-                let keypress = (keyval, modifier);
-                debug!("keypress : {:?}", keypress);
-                if let Some(keypress) = keypress.to_input() {
-                    debug!("keypress {} sent to neovim.", keypress);
-                    sender.output(UiCommand::Serial(SerialCommand::Keyboard(keypress)).into()).unwrap();
-                    gtk::Inhibit(true)
-                } else {
-                    info!("keypress ignored: {:?}", keyval.name());
-                    gtk::Inhibit(false)
-                }
-            }),
-        );
-        widgets.overlay.add_controller(key_controller);
-        self.im_context.set(im_context).unwrap();
-    }
-
     fn init(
         opts: Opts,
         main_window: &Self::Root,
         sender: ComponentSender<Self>,
-    ) -> ComponentParts<AppModel> {
-        let rt = tokio::runtime::Builder::new_multi_thread()
-            .enable_time()
-            .enable_io()
-            .build()
-            .unwrap();
+    ) -> ComponentParts<App> {
+        // let rt = tokio::runtime::Builder::new_multi_thread()
+        //     .enable_time()
+        //     .enable_io()
+        //     .build()
+        //     .unwrap();
         let font_desc = FontDescription::from_string("monospace 11");
         let size = Rc::new(Cell::new((opts.width, opts.height)));
         let pctx: Rc<pango::Context> = {
@@ -520,7 +530,7 @@ impl Component for AppModel {
         let hldefs = Rc::new(RwLock::new(vimview::HighlightDefinitions::new()));
         let metrics = Rc::new(Metrics::new().into());
 
-        let mut model = AppModel {
+        let mut model = App {
             size,
             title: opts.title.clone(),
             default_width: opts.width,
@@ -556,31 +566,38 @@ impl Component for AppModel {
 
             background_changed: Rc::new(false.into()),
 
+            bridge: None,
             vgrids: crate::factory::Factory::new(Board::default(), sender.input_sender()),
             messages: FactoryVecDeque::new(gtk::Box::default(), sender.input_sender()),
-            cmd_prompt: VimCmdPrompts::builder()
+            cmd_prompt: VimCommandPrompt::builder()
                 // .transient_for(main_window)
-                .launch(hldefs.clone())
-                .forward(sender.input_sender(), identity),
+                .launch_with_broker(hldefs.clone(), &PROMPT_BROKER)
+                .detach(),
+            messager: VimMessager::builder().launch(()).detach(),
+
             dragging: Rc::new(Cell::new(None)),
             show_pointer: true.into(),
 
             opts,
-
-            rt,
         };
 
-        let vgrids = model.vgrids.widget();
-        let messages = model.messages.widget();
+        let vboard = model.vgrids.widget();
+        let messagebox = model.messages.widget();
+
+        let vimfloatwins = gtk::Fixed::new();
+        let vimmessages = gtk::Box::default();
+        let vimgrids = adw::Bin::default();
 
         let target =
             adw::CallbackAnimationTarget::new(glib::clone!(@weak main_window => move |_| {
                 main_window.set_cursor_from_name(Some("text"));
             }));
 
-        let pointer_animation = adw::TimedAnimation::new(vgrids, 0., 1., 1000, target);
+        let pointer_animation = adw::TimedAnimation::new(vboard, 0., 1., 1000, target);
 
         let widgets = view_output!();
+
+        model.post_init(&widgets, sender);
 
         ComponentParts { model, widgets }
     }
@@ -1113,7 +1130,7 @@ impl Component for AppModel {
                     } => {
                         self.cmd_prompt
                             .sender()
-                            .send(VimCmdEvent::Show(
+                            .send(CommandPromptMessage::Show(
                                 content,
                                 position,
                                 first_character,
@@ -1124,12 +1141,15 @@ impl Component for AppModel {
                             .unwrap();
                     }
                     RedrawEvent::CommandLineHide => {
-                        self.cmd_prompt.sender().send(VimCmdEvent::Hide).unwrap();
+                        self.cmd_prompt
+                            .sender()
+                            .send(CommandPromptMessage::Hide)
+                            .unwrap();
                     }
                     RedrawEvent::CommandLineBlockHide => {
                         self.cmd_prompt
                             .sender()
-                            .send(VimCmdEvent::BlockHide)
+                            .send(CommandPromptMessage::BlockHide)
                             .unwrap();
                     }
                     _ => {

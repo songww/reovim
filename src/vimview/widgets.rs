@@ -131,9 +131,7 @@ impl VimGrid {
         debug!("scroll-region {} rows moved up.", rows);
         debug!(
             "Origin Region {:?} {}x{}",
-            self.coord,
-            self.width,
-            self.height
+            self.coord, self.width, self.height
         );
         self.textbuf().borrow_mut().up(rows);
     }
@@ -143,9 +141,7 @@ impl VimGrid {
         debug!("scroll-region {} rows moved down.", rows);
         debug!(
             "Origin Region {:?} {}x{}",
-            self.coord,
-            self.width,
-            self.height
+            self.coord, self.width, self.height
         );
         self.textbuf().borrow_mut().down(rows);
     }
@@ -249,6 +245,8 @@ impl FactoryComponent for VimGrid {
     ) -> VimGridWidgets {
         let widgets = view_output!();
 
+        let view = &widgets.view;
+
         let click_listener = gtk::GestureClick::builder()
             .button(0)
             .exclusive(false)
@@ -256,6 +254,7 @@ impl FactoryComponent for VimGrid {
             .n_points(1)
             .name("click-listener")
             .build();
+        let gridid = self.grid;
         click_listener.connect_pressed(
             glib::clone!(@strong sender, @weak self.dragging as dragging, @weak self.metrics as metrics => move |c, n_press, x, y| {
                 sender.command_sender().send(app::AppMessage::ShowPointer).unwrap();
@@ -264,7 +263,7 @@ impl FactoryComponent for VimGrid {
                 let height = metrics.height();
                 let cols = x as f64 / width;
                 let rows = y as f64 / height;
-                trace!("grid {} mouse pressed {} times at {}x{} -> {}x{}", self.grid, n_press, x, y, cols, rows);
+                trace!("grid {} mouse pressed {} times at {}x{} -> {}x{}", gridid, n_press, x, y, cols, rows);
                 let position = (cols.floor() as u32, rows.floor() as u32);
                 let modifier = c.current_event_state().to_string();
                 let btn = match c.current_button() {
@@ -279,11 +278,11 @@ impl FactoryComponent for VimGrid {
                         action: MouseAction::Press,
                         button: btn,
                         modifier: c.current_event_state(),
-                        grid_id: self.grid,
+                        grid_id: gridid,
                         position
                     })
                 );
-                trace!("grid {} release button {} current_button {} modifier {}", self.grid, c.button(), c.current_button(), modifier);
+                trace!("grid {} release button {} current_button {} modifier {}", gridid, c.button(), c.current_button(), modifier);
             }),
         );
         click_listener.connect_released(
@@ -294,7 +293,7 @@ impl FactoryComponent for VimGrid {
                 let height = metrics.height();
                 let cols = x as f64 / width;
                 let rows = y as f64 / height;
-                trace!("grid {} mouse released {} times at {}x{} -> {}x{}", self.grid, n_press, x, y, cols, rows);
+                trace!("grid {} mouse released {} times at {}x{} -> {}x{}", gridid, n_press, x, y, cols, rows);
                 let modifier = c.current_event_state().to_string();
                 dragging.set(None);
                 let btn = match c.current_button() {
@@ -308,11 +307,11 @@ impl FactoryComponent for VimGrid {
                         action: MouseAction::Release,
                         button: btn,
                         modifier: c.current_event_state(),
-                        grid_id: self.grid,
+                        grid_id: gridid,
                         position: (cols.floor() as u32, rows.floor() as u32)
                     })
                 );
-                trace!("grid {} release button {} current_button {} modifier {}", self.grid, c.button(), c.current_button(), modifier);
+                trace!("grid {} release button {} current_button {} modifier {}", gridid, c.button(), c.current_button(), modifier);
             }),
         );
         view.add_controller(click_listener);
@@ -338,7 +337,7 @@ impl FactoryComponent for VimGrid {
                         UiCommand::Serial(SerialCommand::Drag {
                             button: btn,
                             modifier: c.current_event_state(),
-                            grid_id: self.grid,
+                            grid_id: gridid,
                             position,
                         })
                     );
@@ -351,7 +350,7 @@ impl FactoryComponent for VimGrid {
         }));
         view.add_controller(motion_listener);
 
-        VimGridWidgets { view }
+        widgets
     }
 
     // fn position(&self, _: &u64) -> FixedPosition {
