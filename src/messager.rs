@@ -10,16 +10,18 @@ use crate::{
 
 pub struct VimMessager {}
 
+pub struct RuntimeRef<'a>(&'a tokio::runtime::Runtime);
+
 impl Worker for VimMessager {
-    type Init<'m> = &'m app::AppModel;
+    type Init = RuntimeRef<'_>;
     type Input = RedrawEvent;
     type Output = AppMessage;
 
-    fn init(app_model: Self::Init, sender: ComponentSender<Self>) -> Self {
+    fn init(RuntimeRef(rt): Self::Init, sender: ComponentSender<Self>) -> Self {
         let mut rx = EVENT_AGGREGATOR.register_event::<RedrawEvent>();
         let sender = sender.clone();
         let running_tracker = RUNNING_TRACKER.clone();
-        app_model.rt.spawn(async move {
+        rt.spawn(async move {
             loop {
                 tokio::select! {
                     _ = running_tracker.wait_quit() => {

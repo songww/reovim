@@ -1181,6 +1181,7 @@ checksum = "456c603be3e8d448b072f410900c09faf164fbce2d480456f50eea6e25f9c848"
 [[package]]
 name = "relm4"
 version = "0.6.0-alpha.2"
+source = "git+https://github.com/songww/Relm4?branch=next#05e0326a8cfd883e1d08b92153d8029dd37d1b66"
 dependencies = [
  "async-trait",
  "flume",
@@ -1197,6 +1198,7 @@ dependencies = [
 [[package]]
 name = "relm4-macros"
 version = "0.6.0-alpha.2"
+source = "git+https://github.com/songww/Relm4?branch=next#05e0326a8cfd883e1d08b92153d8029dd37d1b66"
 dependencies = [
  "proc-macro2",
  "quote",
