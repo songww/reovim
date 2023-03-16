@@ -1,28 +1,31 @@
 use std::cell::{Cell, RefCell};
+use std::fmt::Debug;
 use std::rc::Rc;
-use std::sync::atomic;
+use std::sync::{atomic, RwLock};
 
 use gtk::prelude::*;
-use parking_lot::RwLock;
-use relm4::factory::positions::FixedPosition;
-use relm4::*;
+use relm4::factory::{FactoryView, Position};
+use relm4::prelude::*;
+use tracing::{debug, trace};
 
-use crate::app::{self, Dragging};
+use crate::app::{self, AppMessage, Dragging};
 use crate::bridge::{MouseAction, MouseButton, SerialCommand, UiCommand};
 use crate::event_aggregator::EVENT_AGGREGATOR;
 use crate::grapheme::{Coord, Pos, Rectangle};
+use crate::metrics;
 
 use super::gridview::VimGridView;
 use super::TextBuf;
 
 type HighlightDefinitions = Rc<RwLock<crate::vimview::HighlightDefinitions>>;
 
+#[derive(Clone, Debug)]
 pub struct VimGrid {
     win: u64,
     grid: u64,
     pos: Pos,
     coord: Coord,
-    move_to: Cell<Option<FixedPosition>>,
+    move_to: Cell<Option<Pos>>,
     width: usize,
     height: usize,
     is_float: bool,
@@ -36,6 +39,18 @@ pub struct VimGrid {
     visible: bool,
     // animation: Option<adw::TimedAnimation>,
 }
+
+// impl Debug for VimGrid {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         f.debug_struct("VimGrid")
+//             .field("win-id", self.win)
+//             .field("grid-id", self.grid)
+//             .field("pos", self.pos)
+//             .field("coord", self.coord)
+//             .field("move-to", &self.move_to)
+//             .finish()
+//     }
+// }
 
 impl VimGrid {
     pub fn new(
@@ -113,8 +128,8 @@ impl VimGrid {
         rows: usize,
         // cols: usize,
     ) {
-        log::debug!("scroll-region {} rows moved up.", rows);
-        log::debug!(
+        debug!("scroll-region {} rows moved up.", rows);
+        debug!(
             "Origin Region {:?} {}x{}",
             self.coord,
             self.width,
@@ -125,8 +140,8 @@ impl VimGrid {
 
     // content go down, view go up, eat tail of rows.
     pub fn down(&mut self, rows: usize) {
-        log::debug!("scroll-region {} rows moved down.", rows);
-        log::debug!(
+        debug!("scroll-region {} rows moved down.", rows);
+        debug!(
             "Origin Region {:?} {}x{}",
             self.coord,
             self.width,
@@ -144,10 +159,9 @@ impl VimGrid {
     pub fn set_coord(&mut self, col: f64, row: f64) {
         let metrics = self.metrics.get();
         let pos: Pos = (col * metrics.width(), row * metrics.height()).into();
-        let move_to: FixedPosition = pos.into();
         self.pos = pos;
         self.coord = Coord { col, row };
-        self.move_to.replace(move_to.into());
+        self.move_to.replace(pos.into());
     }
 
     pub fn set_is_float(&mut self, is_float: bool) {
@@ -163,37 +177,77 @@ impl VimGrid {
     }
 }
 
-#[derive(Debug)]
-pub struct VimGridWidgets {
-    view: VimGridView,
+impl Position<crate::widgets::board::BoardPosition> for VimGrid {
+    fn position(&self, _index: usize) -> crate::widgets::board::BoardPosition {
+        crate::widgets::board::BoardPosition {
+            x: self.pos.x,
+            y: self.pos.y,
+        }
+    }
 }
 
-impl factory::FactoryPrototype for VimGrid {
-    type Factory = crate::factory::FactoryMap<Self>;
+#[relm4::factory(pub)]
+impl FactoryComponent for VimGrid {
     type Widgets = VimGridWidgets;
-    type Root = VimGridView;
-    type View = gtk::Fixed;
-    type Msg = app::AppMessage;
+    type ParentWidget = crate::widgets::board::Board;
+    type ParentInput = ();
+    type CommandOutput = AppMessage;
+    type Input = ();
+    type Output = ();
 
-    fn init_view(&self, grid: &u64, sender: Sender<app::AppMessage>) -> VimGridWidgets {
-        let grid = *grid;
-        view! {
-            view = VimGridView::new(grid, self.width as _, self.height as _) {
-                set_widget_name: &format!("vim-grid-{}-{}", self.win, grid),
-                set_textbuf: self.textbuf.clone(),
+    type Init = (
+        u64,
+        u64,
+        Coord,
+        Rectangle,
+        HighlightDefinitions,
+        Rc<Cell<Option<Dragging>>>,
+        Rc<Cell<crate::metrics::Metrics>>,
+        Rc<RefCell<pango::FontDescription>>,
+    );
 
-                set_visible: self.visible,
-                set_can_focus: true,
-                set_focusable: true,
-                set_focus_on_click: true,
+    view! {
+        view = VimGridView::new(self.grid, self.width as _, self.height as _) {
+            set_widget_name: &format!("vim-grid-{}-{}", self.win, self.grid),
+            set_textbuf: self.textbuf.clone(),
 
-                set_overflow: gtk::Overflow::Hidden,
+            set_visible: self.visible,
+            set_can_focus: true,
+            set_focusable: true,
+            set_focus_on_click: true,
 
-                set_font_description: &self.font_description.borrow(),
+            set_overflow: gtk::Overflow::Hidden,
 
-                set_css_classes: &["vim-view-grid", &format!("vim-view-grid-{}", self.grid)],
-            }
+            set_font_description: &self.font_description.borrow(),
+
+            set_css_classes: &["vim-view-grid", &format!("vim-view-grid-{}", self.grid)],
         }
+    }
+
+    fn init_model(
+        (id, winid, coord, rect, hldefs, dragging, metrics, font_description): Self::Init,
+        index: &DynamicIndex,
+        sender: FactorySender<Self>,
+    ) -> Self {
+        VimGrid::new(
+            id,
+            winid,
+            coord,
+            rect,
+            hldefs,
+            dragging,
+            metrics,
+            font_description,
+        )
+    }
+    fn init_widgets(
+        &mut self,
+        _index: &DynamicIndex,
+        view: &Self::Root,
+        returned_widget: &<Self::ParentWidget as FactoryView>::ReturnedWidget,
+        sender: FactorySender<Self>,
+    ) -> VimGridWidgets {
+        let widgets = view_output!();
 
         let click_listener = gtk::GestureClick::builder()
             .button(0)
@@ -204,13 +258,13 @@ impl factory::FactoryPrototype for VimGrid {
             .build();
         click_listener.connect_pressed(
             glib::clone!(@strong sender, @weak self.dragging as dragging, @weak self.metrics as metrics => move |c, n_press, x, y| {
-                sender.send(app::AppMessage::ShowPointer).unwrap();
+                sender.command_sender().send(app::AppMessage::ShowPointer).unwrap();
                 let metrics = metrics.get();
                 let width = metrics.width();
                 let height = metrics.height();
                 let cols = x as f64 / width;
                 let rows = y as f64 / height;
-                log::trace!("grid {} mouse pressed {} times at {}x{} -> {}x{}", grid, n_press, x, y, cols, rows);
+                trace!("grid {} mouse pressed {} times at {}x{} -> {}x{}", self.grid, n_press, x, y, cols, rows);
                 let position = (cols.floor() as u32, rows.floor() as u32);
                 let modifier = c.current_event_state().to_string();
                 let btn = match c.current_button() {
@@ -225,22 +279,22 @@ impl factory::FactoryPrototype for VimGrid {
                         action: MouseAction::Press,
                         button: btn,
                         modifier: c.current_event_state(),
-                        grid_id: grid,
+                        grid_id: self.grid,
                         position
                     })
                 );
-                log::trace!("grid {} release button {} current_button {} modifier {}", grid, c.button(), c.current_button(), modifier);
+                trace!("grid {} release button {} current_button {} modifier {}", self.grid, c.button(), c.current_button(), modifier);
             }),
         );
         click_listener.connect_released(
             glib::clone!(@strong sender, @weak self.dragging as dragging, @weak self.metrics as metrics => move |c, n_press, x, y| {
-                sender.send(app::AppMessage::ShowPointer).unwrap();
+                sender.command_sender().send(app::AppMessage::ShowPointer);
                 let metrics = metrics.get();
                 let width = metrics.width();
                 let height = metrics.height();
                 let cols = x as f64 / width;
                 let rows = y as f64 / height;
-                log::trace!("grid {} mouse released {} times at {}x{} -> {}x{}", grid, n_press, x, y, cols, rows);
+                trace!("grid {} mouse released {} times at {}x{} -> {}x{}", self.grid, n_press, x, y, cols, rows);
                 let modifier = c.current_event_state().to_string();
                 dragging.set(None);
                 let btn = match c.current_button() {
@@ -254,23 +308,23 @@ impl factory::FactoryPrototype for VimGrid {
                         action: MouseAction::Release,
                         button: btn,
                         modifier: c.current_event_state(),
-                        grid_id: grid,
+                        grid_id: self.grid,
                         position: (cols.floor() as u32, rows.floor() as u32)
                     })
                 );
-                log::trace!("grid {} release button {} current_button {} modifier {}", grid, c.button(), c.current_button(), modifier);
+                trace!("grid {} release button {} current_button {} modifier {}", self.grid, c.button(), c.current_button(), modifier);
             }),
         );
-        view.add_controller(&click_listener);
+        view.add_controller(click_listener);
 
         let motion_listener = gtk::EventControllerMotion::new();
-        let grid_id = grid;
+        let grid_id = self.grid;
         motion_listener.connect_enter(move |_, _, _| {
             app::GridActived.store(grid_id, atomic::Ordering::Relaxed);
         });
         motion_listener.connect_motion(glib::clone!(@strong sender, @weak self.dragging as dragging, @weak self.metrics as metrics => move |c, x, y| {
-            sender.send(app::AppMessage::ShowPointer).unwrap();
-            log::trace!("cursor motion {} {}", x, y);
+            sender.command_sender().send(app::AppMessage::ShowPointer);
+            trace!("cursor motion {} {}", x, y);
             if let Some(Dragging { btn, pos }) = dragging.get() {
                 let metrics = metrics.get();
                 let width = metrics.width();
@@ -278,13 +332,13 @@ impl factory::FactoryPrototype for VimGrid {
                 let cols = x as f64 / width;
                 let rows = y as f64 / height;
                 let position = (cols.floor() as u32, rows.floor() as u32);
-                log::trace!("Dragging {} from {:?} to {:?}", btn, pos, position);
+                trace!("Dragging {} from {:?} to {:?}", btn, pos, position);
                 if pos != position {
                     EVENT_AGGREGATOR.send(
                         UiCommand::Serial(SerialCommand::Drag {
                             button: btn,
                             modifier: c.current_event_state(),
-                            grid_id: grid,
+                            grid_id: self.grid,
                             position,
                         })
                     );
@@ -295,23 +349,20 @@ impl factory::FactoryPrototype for VimGrid {
             // if motion show one second.
 
         }));
-        view.add_controller(&motion_listener);
+        view.add_controller(motion_listener);
 
         VimGridWidgets { view }
     }
 
-    fn position(&self, _: &u64) -> FixedPosition {
-        log::debug!("requesting position of grid {}", self.grid);
-        self.pos.into()
-    }
+    // fn position(&self, _: &u64) -> FixedPosition {
+    //     debug!("requesting position of grid {}", self.grid);
+    //     self.pos.into()
+    // }
 
-    fn view(&self, index: &u64, widgets: &VimGridWidgets) {
-        log::debug!(
+    fn post_view() {
+        debug!(
             "vim grid {} update pos {:?} size {}x{}",
-            index,
-            self.pos,
-            self.width,
-            self.height
+            self.grid, self.pos, self.width, self.height
         );
         let view = &widgets.view;
 
@@ -338,9 +389,5 @@ impl factory::FactoryPrototype for VimGrid {
 
         view.queue_allocate();
         view.queue_resize();
-    }
-
-    fn root_widget(widgets: &VimGridWidgets) -> &VimGridView {
-        &widgets.view
     }
 }

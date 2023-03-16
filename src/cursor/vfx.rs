@@ -1,5 +1,6 @@
 use grapheme::Point;
 use nvim::Value;
+use tracing::error;
 
 use super::cursor::Cursor;
 use crate::{
@@ -59,12 +60,12 @@ impl ParseFromValue for VfxMode {
                 "pixiedust" => VfxMode::Trail(TrailMode::PixieDust),
                 "" => VfxMode::Disabled,
                 value => {
-                    log::error!("Expected a VfxMode name, but received {:?}", value);
+                    error!("Expected a VfxMode name, but received {:?}", value);
                     return;
                 }
             };
         } else {
-            log::error!("Expected a VfxMode string, but received {:?}", value);
+            error!("Expected a VfxMode string, but received {:?}", value);
         }
     }
 }

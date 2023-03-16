@@ -3,7 +3,7 @@ use std::{
     process::{Command as StdCommand, Stdio},
 };
 
-use log::{error, info, warn};
+use tracing::{error, info, warn};
 use tokio::process::Command as TokioCommand;
 
 #[cfg(target_os = "windows")]

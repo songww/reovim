@@ -1,12 +1,12 @@
-use std::{cell::Cell, collections::LinkedList, rc::Rc};
+use std::{cell::Cell, collections::LinkedList, rc::Rc, sync::RwLock};
 
 use gtk::prelude::*;
 use once_cell::sync::OnceCell;
-use parking_lot::RwLock;
 use relm4::{
-    factory::{FactoryPrototype, FactoryVec},
-    ComponentUpdate, Model, Sender, WidgetPlus, Widgets,
+    factory::{FactoryComponent, FactoryVecDeque},
+    prelude::*,
 };
+use tracing::{debug, error, info};
 
 use crate::{
     app::{AppMessage, AppModel},
@@ -24,11 +24,8 @@ pub enum VimNotifactionEvent {
     SetPosition(f64),
 }
 
-// #[derive(Debug)]
-pub struct VimNotifactions {
-    visible: bool,
-    hldefs: Rc<RwLock<HighlightDefinitions>>,
-    messages: FactoryVec<VimMessage>,
+pub struct VimMessageWidgets {
+    view: gtk::Frame,
 }
 
 #[derive(Debug)]
@@ -38,36 +35,82 @@ pub struct VimMessage {
     pub hldefs: Rc<RwLock<vimview::HighlightDefinitions>>,
 }
 
-impl FactoryPrototype for VimMessage {
-    type Factory = FactoryVec<Self>;
-    type Widgets = VimNotifactionWidgets;
-    type Root = gtk::Frame;
-    type View = gtk::Box;
-    type Msg = VimNotifactionEvent;
+impl FactoryComponent for VimMessage {
+    type Widgets = VimMessageWidgets;
+    type Root = gtk::Box;
+    type Input = ();
+    type Output = ();
+    type ParentWidget = relm4::gtk::Box;
+    type ParentInput = AppMessage;
+    type CommandOutput = ();
+    type Init = (
+        MessageKind,
+        Vec<(u64, String)>,
+        Rc<RwLock<vimview::HighlightDefinitions>>,
+    );
+    // type Input = VimNotifactionEvent;
+    // type Output = ();
 
-    fn init_view(
-        &self,
-        _key: &<Self::Factory as relm4::factory::Factory<Self, Self::View>>::Key,
-        _sender: Sender<Self::Msg>,
+    fn init_widgets(
+        &mut self,
+        index: &DynamicIndex,
+        root: &Self::Root,
+        returned_widget: &<Self::ParentWidget as relm4::factory::FactoryView>::ReturnedWidget,
+        sender: FactorySender<Self>,
     ) -> Self::Widgets {
-        let view = gtk::Frame::new(None);
-        let child = gtk::TextView::new();
-        child.set_editable(false);
-        child.set_cursor_visible(false);
-        child.set_widget_name("vim-message-text");
-        child.set_overflow(gtk::Overflow::Hidden);
-        view.set_child(Some(&child));
-        view.set_focusable(false);
-        view.set_focus_on_click(false);
-        view.set_widget_name("vim-message-frame");
-        VimNotifactionWidgets { view }
+        relm4::view! {
+            #[local_ref]
+            root -> gtk::Box {
+                #[name(view)]
+                gtk::Frame {
+                    set_focusable: false,
+                    set_focus_on_click: false,
+                    set_widget_name: "vim-message-frame",
+
+                    #[name(child)]
+                    gtk::TextView {
+                        set_editable: false,
+                        set_cursor_visible: false,
+                        set_widget_name: "vim-message-text",
+                        set_overflow: gtk::Overflow::Hidden,
+                    }
+                }
+            }
+        }
+
+        VimMessageWidgets { view }
     }
 
-    fn view(
-        &self,
-        _: &<Self::Factory as relm4::factory::Factory<Self, Self::View>>::Key,
-        _widgets: &Self::Widgets,
-    ) {
+    fn output_to_parent_input(_output: Self::Output) -> Option<Self::ParentInput> {
+        None
+    }
+
+    fn init_model(
+        (kind, content, hldefs): Self::Init,
+        index: &DynamicIndex,
+        sender: FactorySender<Self>,
+    ) -> Self {
+        VimMessage {
+            kind,
+            content,
+            hldefs,
+        }
+    }
+
+    fn init_root(&self) -> Self::Root {
+        relm4::view! {
+            root = gtk::Box {
+                set_widget_name: "vim-messages",
+                set_spacing: 10,
+                set_orientation: gtk::Orientation::Vertical,
+            }
+        }
+
+        root
+    }
+
+    // fn update(&mut self, message: Self::Input, sender: FactorySender<Self>) {
+    fn update(&mut self, message: Self::Input, sender: FactorySender<Self>) {
         match self.kind {
             MessageKind::Echo => {
                 let _message = String::new();
@@ -119,89 +162,87 @@ impl FactoryPrototype for VimMessage {
         }
     }
 
-    fn position(
-        &self,
-        _: &<Self::Factory as relm4::factory::Factory<Self, Self::View>>::Key,
-    ) -> <Self::View as relm4::factory::FactoryView<Self::Root>>::Position {
-    }
-
-    fn root_widget(widgets: &Self::Widgets) -> &Self::Root {
-        &widgets.view
+    fn update_view(&self, widgets: &mut Self::Widgets, _sender: FactorySender<Self>) {
+        //
     }
 }
 
-impl Model for VimNotifactions {
-    type Msg = VimNotifactionEvent;
-    type Widgets = VimNotifactionsWidgets;
-    type Components = ();
+#[derive(Debug)]
+pub struct VimNotifactions {
+    visible: bool,
+    hldefs: Rc<RwLock<HighlightDefinitions>>,
+    messages: FactoryVecDeque<VimMessage>,
 }
 
-impl ComponentUpdate<AppModel> for VimNotifactions {
-    fn init_model(parent_model: &AppModel) -> Self {
-        VimNotifactions {
-            visible: false,
-            hldefs: parent_model.hldefs.clone(),
-            messages: FactoryVec::new(),
+#[relm4::component]
+impl Component for VimNotifactions {
+    type Init = Rc<RwLock<HighlightDefinitions>>;
+    type Input = VimNotifactionEvent;
+    type Output = ();
+    type CommandOutput = ();
+    view! {
+        #[local_ref]
+        messagebox -> gtk::Box {
+            #[watch]
+            set_visible: model.visible,
+            set_widget_name: "vim-messages",
+            set_spacing: 10,
+            set_orientation: gtk::Orientation::Vertical,
         }
     }
 
-    fn update(
-        &mut self,
-        event: VimNotifactionEvent,
-        _components: &(),
-        _sender: Sender<VimNotifactionEvent>,
-        _parent_sender: Sender<AppMessage>,
-    ) {
-        match event {
+    fn init(
+        hldefs: Rc<RwLock<HighlightDefinitions>>,
+        root: &Self::Root,
+        sender: ComponentSender<Self>,
+    ) -> ComponentParts<Self> {
+        let messages = FactoryVecDeque::new(root, sender.input_sender());
+        let model = VimNotifactions {
+            hldefs,
+            visible: false,
+            messages,
+        };
+
+        let messagebox = model.messages.widget();
+
+        let widgets = view_output!();
+
+        ComponentParts { model, widgets }
+    }
+
+    fn update(&mut self, message: Self::Input, sender: ComponentSender<Self>, root: &Self::Root) {
+        let guard = self.messages.guard();
+        match message {
             VimNotifactionEvent::Clear => {
-                log::info!("Messages cleared.");
-                self.messages.clear();
+                info!("Messages cleared.");
+                guard.clear();
                 self.visible = false;
             }
             VimNotifactionEvent::Show(kind, content, replace_last) => {
                 self.visible = true;
                 if replace_last && !self.messages.is_empty() {
-                    self.messages.pop();
+                    guard.pop_back();
                 }
-                self.messages.push(VimMessage {
-                    kind,
-                    content,
-                    hldefs: self.hldefs.clone(),
-                })
+                guard.push_back((kind, content, self.hldefs.clone()));
             }
             VimNotifactionEvent::Ruler(ruler) => {
-                log::error!("Ruler not supported yet {:?}.", ruler);
+                error!("Ruler not supported yet {:?}.", ruler);
             }
             VimNotifactionEvent::Histories(entries) => {
-                log::error!("History not supported yet {:?}", entries);
+                error!("History not supported yet {:?}", entries);
             }
             VimNotifactionEvent::Mode(mode) => {
-                log::info!("Current mode: {:?}", mode);
+                info!("Current mode: {:?}", mode);
             }
             VimNotifactionEvent::SetPosition(pos) => {
                 unimplemented!("where to show {:?}", pos);
             }
         }
     }
+    // }
 }
 
 #[derive(Debug)]
-pub struct VimNotifactionWidgets {
-    view: gtk::Frame,
-}
-
-#[relm_macros::widget(pub)]
-impl Widgets<VimNotifactions, AppModel> for VimNotifactionsWidgets {
-    view! {
-        view = gtk::Box {
-            set_visible: watch!(model.visible),
-            set_widget_name: "vim-messages",
-            set_spacing: 10,
-            factory!(model.messages),
-        }
-    }
-}
-
 struct VimCommandPrompt {
     level: u64,
     changed: Cell<bool>,
@@ -233,36 +274,43 @@ pub enum VimCmdEvent {
     BlockHide,
 }
 
-#[derive(Derivative)]
+#[derive(debug::Debug)]
 pub struct VimCmdPrompts {
     hldefs: Rc<RwLock<HighlightDefinitions>>,
     prompts: LinkedList<VimCommandPrompt>,
-    #[derivative(Debug = "ignore")]
+    #[debug(skip)]
     removed: Cell<Option<Vec<gtk::Popover>>>,
 }
 
-impl Model for VimCmdPrompts {
-    type Msg = VimCmdEvent;
-    type Widgets = VimCmdPromptWidgets;
-    type Components = ();
-}
+//impl Model for VimCmdPrompts {
+//    type Msg = VimCmdEvent;
+//    type Widgets = VimCmdPromptWidgets;
+//    type Components = ();
+//}
 
-impl ComponentUpdate<AppModel> for VimCmdPrompts {
-    fn init_model(parent_model: &AppModel) -> Self {
-        VimCmdPrompts {
-            hldefs: parent_model.hldefs.clone(),
+#[relm4::component]
+impl Component for VimCmdPrompts {
+    type CommandOutput = ();
+    type Input = VimCmdEvent;
+    type Output = ();
+    type Init = Rc<RwLock<HighlightDefinitions>>;
+    fn init(
+        hldefs: Rc<RwLock<HighlightDefinitions>>,
+        root: &Self::Root,
+        sender: ComponentSender<Self>,
+    ) -> ComponentParts<Self> {
+        let model = VimCmdPrompts {
+            hldefs,
             removed: Cell::new(None),
             prompts: LinkedList::new(),
-        }
+        };
+
+        let widgets = view_output!();
+
+        ComponentParts { model, widgets }
     }
 
-    fn update(
-        &mut self,
-        event: VimCmdEvent,
-        _components: &(),
-        _sender: Sender<VimCmdEvent>,
-        _parent_sender: Sender<AppMessage>,
-    ) {
+    fn update(&mut self, event: VimCmdEvent, sender: ComponentSender<Self>, root: &Self::Root) {
         const U16MAX: f32 = u16::MAX as f32;
         match event {
             VimCmdEvent::BlockHide => {
@@ -281,14 +329,9 @@ impl ComponentUpdate<AppModel> for VimCmdPrompts {
             }
             VimCmdEvent::Show(styled_content, position, start, prompt, indent, level) => {
                 let indent = indent as usize;
-                log::info!(
+                info!(
                     "cmd event level={} indent={} position={} start={} prompt={} {:?}",
-                    level,
-                    indent,
-                    position,
-                    start,
-                    prompt,
-                    styled_content
+                    level, indent, position, start, prompt, styled_content
                 );
                 let (name, length) = if !start.is_empty() {
                     ("vim-input-command", start.len())
@@ -331,7 +374,7 @@ impl ComponentUpdate<AppModel> for VimCmdPrompts {
 
                 prompt.position = position;
 
-                let hldefs = self.hldefs.read();
+                let hldefs = self.hldefs.read().unwrap();
                 let defaults = hldefs.defaults().unwrap();
                 let attrs = &prompt.attrs;
                 for (hldef, s) in styled_content {
@@ -404,21 +447,18 @@ impl ComponentUpdate<AppModel> for VimCmdPrompts {
             }
         }
     }
-}
 
-#[relm_macros::widget(pub)]
-impl Widgets<VimCmdPrompts, AppModel> for VimCmdPromptWidgets {
     view! {
         view = gtk::Fixed {
             set_visible: false,
-            inline_css: b"border: 0 solid #e5e7eb;",
+            inline_css: "border: 0 solid #e5e7eb;",
         }
     }
 
     fn pre_view() {
         if let Some(removed) = model.removed.take() {
             for popover in removed.into_iter() {
-                self.view.remove(&popover);
+                view.remove(&popover);
             }
         }
 
@@ -451,7 +491,7 @@ impl Widgets<VimCmdPrompts, AppModel> for VimCmdPromptWidgets {
             });
             // ensure root widget has at least one child.
             if popover.parent().is_none() {
-                popover.set_parent(&self.view);
+                popover.set_parent(view);
             }
             popover.show();
             popover.present();
@@ -471,7 +511,7 @@ impl Widgets<VimCmdPrompts, AppModel> for VimCmdPromptWidgets {
                         .position(gtk::PositionType::Bottom)
                         .build();
                     if popover.parent().is_none() {
-                        popover.set_parent(&self.view);
+                        popover.set_parent(view);
                     }
                     popover.show();
                     popover.present();
@@ -482,7 +522,7 @@ impl Widgets<VimCmdPrompts, AppModel> for VimCmdPromptWidgets {
         let mut iter = model.prompts.iter().peekable();
         while let Some(prompt) = iter.next() {
             unsafe { prompt.widget.get_unchecked() }
-                .insert_before(&self.view, iter.peek().and_then(|p| p.widget.get()));
+                .insert_before(view, iter.peek().and_then(|p| p.widget.get()));
             if prompt.changed.replace(false) {
                 let popover = unsafe { prompt.widget.get_unchecked() };
                 if popover.child().is_none() {

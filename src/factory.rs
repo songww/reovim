@@ -1,24 +1,12 @@
 use std::cell::RefCell;
 use std::fmt::Debug;
 
-use gtk::glib::Sender;
-use relm4::factory::{Factory, FactoryPrototype, FactoryView};
+use relm4::factory::sync::{ComponentStorage, FactoryBuilder};
+use relm4::factory::{FactoryComponent, FactoryView};
+use relm4::prelude::*;
+use relm4::Sender;
 use rustc_hash::FxHashMap;
 use vector_map::VecMap;
-
-struct Widgets<Widgets: Debug, Root: Debug> {
-    widgets: Widgets,
-    root: Root,
-}
-
-impl<WidgetsType: Debug, Root: Debug> Debug for Widgets<WidgetsType, Root> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Widgets")
-            .field("widgets", &self.widgets)
-            .field("root", &self.root)
-            .finish()
-    }
-}
 
 #[derive(Clone, Copy, Debug)]
 enum ChangeType {
@@ -35,55 +23,53 @@ impl Default for ChangeType {
 }
 
 /// A container similar to [`HashMap`] that implements [`Factory`].
-#[allow(clippy::type_complexity)]
-#[derive(Default, Debug)]
-pub struct FactoryMap<Data>
-where
-    Data: FactoryPrototype,
-{
-    data: FxHashMap<u64, Data>,
-    widgets: RefCell<
-        FxHashMap<u64, Widgets<Data::Widgets, <Data::View as FactoryView<Data::Root>>::Root>>,
-    >,
-    staged: RefCell<VecMap<u64, ChangeType>>,
-    flushes: RefCell<VecMap<u64, ChangeType>>,
+#[derive(Debug)]
+pub struct Factory<C: FactoryComponent> {
+    widget: C::ParentWidget,
+    parent_sender: Sender<C::ParentInput>,
+    components: FxHashMap<u64, ComponentStorage<C>>,
+    staged: VecMap<u64, ChangeType>,
+    flushes: VecMap<u64, ChangeType>,
 }
 
-impl<Data> FactoryMap<Data>
-where
-    Data: FactoryPrototype,
-{
-    /// Create a new [`FactoryMap].
-    #[must_use]
-    pub fn new() -> Self {
-        FactoryMap {
-            data: FxHashMap::default(),
-            widgets: RefCell::new(FxHashMap::default()),
-            staged: RefCell::new(VecMap::new()),
-            flushes: RefCell::new(VecMap::new()),
+impl<C: FactoryComponent> Factory<C> {
+    /// Create a new [`Factory].
+    pub fn new(widget: C::ParentWidget, parent_sender: &Sender<C::ParentInput>) -> Self {
+        Factory {
+            widget,
+            parent_sender: parent_sender.clone(),
+            components: FxHashMap::default(),
+            staged: VecMap::new(),
+            flushes: VecMap::new(),
         }
     }
 
     /// Initialize a new [`FactoryMap`] with a normal [`Vec`].
     #[must_use]
-    pub fn from_hashmap(data: FxHashMap<u64, Data>) -> Self {
-        let length = data.len();
+    pub fn from_hashmap(
+        base: FxHashMap<u64, C::Init>,
+        widget: C::ParentWidget,
+        parent_sender: &Sender<C::ParentInput>,
+    ) -> Self {
+        let length = base.len();
 
         let mut staged = VecMap::default();
-        staged.reserve(length);
         let mut flushes = VecMap::default();
+        let mut components = FxHashMap::default();
+        staged.reserve(length);
         flushes.reserve(length);
-        data.keys().for_each(|k| {
-            staged.insert(*k, ChangeType::Add);
+        components.reserve(length);
+        let mut factory = Factory {
+            widget,
+            staged,
+            flushes,
+            components,
+            parent_sender: parent_sender.clone(),
+        };
+        base.into_iter().map(|(k, init)| {
+            factory.insert(k, init);
         });
-        let mut widgets = FxHashMap::default();
-        widgets.reserve(length);
-        FactoryMap {
-            data,
-            widgets: RefCell::new(widgets),
-            staged: RefCell::new(staged),
-            flushes: RefCell::new(flushes),
-        }
+        factory
     }
 
     /// Get a slice of the internal data of a [`FactoryMap`].
@@ -94,55 +80,61 @@ where
 
     /// Get the internal data of the [`FactoryMap`].
     #[must_use]
-    pub fn into_hashmap(self) -> FxHashMap<u64, Data> {
-        self.data
+    pub fn into_hashmap(self) -> FxHashMap<u64, C> {
+        self.components
+            .into_iter()
+            .map(|(k, v)| (k, ComponentStorage::extract(v)))
+            .collect()
     }
 
     /// Remove all data from the [`FactoryMap`].
     pub fn clear(&mut self) {
-        let stage = &mut self.staged.borrow_mut();
+        let stage = &mut self.staged;
 
-        for key in self.data.keys() {
+        for key in self.components.keys() {
             stage.insert(*key, ChangeType::Remove);
         }
-        self.data.clear();
+        self.components.clear();
     }
 
     /// Returns the length as amount of elements stored in this type.
     pub fn len(&self) -> usize {
-        self.data.len()
+        self.components.len()
     }
 
     /// Returns [`true`] if the length of this type is `0`.
     pub fn is_empty(&self) -> bool {
-        self.data.is_empty()
+        self.components.is_empty()
     }
 
     /// Insert an element at the end of a [`FactoryMap`].
-    pub fn insert(&mut self, key: u64, data: Data) {
-        self.data.insert(key, data);
+    pub fn insert(&mut self, key: u64, init: C::Init) {
+        let builder = FactoryBuilder::new(&DynamicIndex::new(0), init);
 
-        let change = match self.staged.borrow().get(&key) {
+        self.components
+            .insert(key, ComponentStorage::Builder(builder));
+
+        let changed = match self.staged.get(&key) {
             Some(ChangeType::Recreate | ChangeType::Remove) => ChangeType::Recreate,
             _ => ChangeType::Add,
         };
-        self.staged.borrow_mut().insert(key, change);
+        self.staged.insert(key, changed);
     }
 
     /// Remove an element of a [`FactoryMap].
-    pub fn remove(&mut self, key: u64) -> Option<Data> {
-        let data = self.data.remove(&key);
-        if data.is_some() {
-            self.staged.borrow_mut().insert(key, ChangeType::Remove);
+    pub fn remove(&mut self, key: u64) -> Option<C> {
+        let component = self.components.remove(&key).map(ComponentStorage::extract);
+        if component.is_some() {
+            self.staged.insert(key, ChangeType::Remove);
         }
 
-        data
+        component
     }
 
     /// Get a reference to data stored by `key`.
     #[must_use]
-    pub fn get(&self, key: u64) -> Option<&Data> {
-        self.data.get(&key)
+    pub fn get(&self, key: u64) -> Option<&C> {
+        self.components.get(&key).map(ComponentStorage::get)
     }
 
     /// Get a mutable reference to data stored at `key`.
@@ -150,18 +142,18 @@ where
     /// Assumes that the data will be modified and the corresponding widget
     /// needs to be updated.
     #[must_use]
-    pub fn get_mut(&mut self, key: u64) -> Option<&mut Data> {
-        let mut staged = self.staged.borrow_mut();
+    pub fn get_mut(&mut self, key: u64) -> Option<&mut C> {
+        let mut staged = &mut self.staged;
         if !staged.contains_key(&key) {
             staged.insert(key, ChangeType::Update);
         }
 
-        self.data.get_mut(&key)
+        self.components.get_mut(&key).map(ComponentStorage::get_mut)
     }
 
     pub fn flush(&mut self) {
-        let mut staged = self.staged.borrow_mut();
-        let mut flushes = self.flushes.borrow_mut();
+        let mut staged = &mut self.staged;
+        let mut flushes = &mut self.flushes;
         for (k, v) in staged.iter() {
             flushes.insert(*k, *v);
         }
@@ -169,74 +161,57 @@ where
     }
 }
 
-impl<Data, View> Factory<Data, View> for FactoryMap<Data>
+impl<C> Factory<C>
 where
-    Data: FactoryPrototype<Factory = Self, View = View>,
-    View: FactoryView<Data::Root>,
+    C: FactoryComponent,
 {
-    type Key = u64;
-
-    fn generate(&self, view: &View, sender: Sender<Data::Msg>) {
-        for (index, change) in self.flushes.borrow().iter() {
-            let mut widgets = self.widgets.borrow_mut();
+    fn render_changes(&mut self) {
+        for (index, change) in self.flushes.drain() {
+            let mut widget = &mut self.widget;
 
             match change {
                 ChangeType::Add => {
-                    let data = self.data.get(index).unwrap();
-                    let new_widgets = data.init_view(index, sender.clone());
-                    let position = data.position(index);
-                    let root = view.add(Data::root_widget(&new_widgets), &position);
-                    widgets.insert(
-                        *index,
-                        Widgets {
-                            widgets: new_widgets,
-                            root,
-                        },
-                    );
+                    let component = self.components.get(&index).unwrap();
+                    let widget = component.returned_widget().unwrap();
+                    let position = component.get().position(0);
+                    let root = self.widget.factory_append(widget, &position);
                 }
                 ChangeType::Update => {
-                    self.data
-                        .get(index)
-                        .unwrap()
-                        .view(index, &widgets.get(index).unwrap().widgets);
+                    let component = self.components.get(&index).unwrap();
+                    let position = component.get().position(0);
+                    self.widget
+                        .factory_update_position(component.returned_widget().unwrap(), &position);
                 }
                 ChangeType::Remove => {
-                    widgets
-                        .remove(index)
-                        .map(|widget| view.remove(&widget.root));
+                    let component = self.components.get(&index).unwrap();
+                    self.widget
+                        .factory_remove(component.returned_widget().unwrap());
                 }
                 ChangeType::Recreate => {
-                    let remove_widget = widgets.remove(index).unwrap();
-                    view.remove(&remove_widget.root);
-                    let data = self.data.get(index).unwrap();
-                    let new_widgets = data.init_view(index, sender.clone());
-                    let position = data.position(index);
-                    let root = view.add(Data::root_widget(&new_widgets), &position);
-                    widgets.insert(
-                        *index,
-                        Widgets {
-                            widgets: new_widgets,
-                            root,
-                        },
-                    );
+                    let component = self.components.get(&index).unwrap();
+                    let position = component.get().position(0);
+                    self.widget
+                        .factory_remove(component.returned_widget().unwrap());
+                    self.widget
+                        .factory_append(&component.returned_widget().unwrap(), &position);
                 }
             }
         }
-        self.flushes.borrow_mut().clear();
+        self.flushes.clear();
     }
 }
 
-impl<Data, View> FactoryMap<Data>
-where
-    Data: FactoryPrototype<Factory = Self, View = View>,
-    View: FactoryView<Data::Root>,
-{
+impl<C: FactoryComponent> Factory<C> {
     /// Get an immutable iterator for this type
-    pub fn iter(&self) -> std::collections::hash_map::Iter<'_, u64, Data> {
-        self.data.iter()
+    pub fn iter(&self) -> impl Iterator<Item = (u64, &C)> {
+        self.components
+            .iter()
+            .map(|(k, v)| (*k, ComponentStorage::get(v)))
     }
     /// Get an immutable iterator for this type
-    pub fn iter_mut(&mut self) -> std::collections::hash_map::IterMut<'_, u64, Data> {
-        self.data.iter_mut()
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (u64, &mut C)> {
+        self.components
+            .iter_mut()
+            .map(|(k, v)| (*k, ComponentStorage::get_mut(v)))
     }
 }

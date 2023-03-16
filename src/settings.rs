@@ -1,12 +1,13 @@
-use log::trace;
-use nvim::{Neovim, Value};
-use once_cell::sync::Lazy;
-use parking_lot::RwLock;
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
     convert::TryInto,
+    sync::RwLock,
 };
+
+use nvim::{Neovim, Value};
+use once_cell::sync::Lazy;
+use tracing::trace;
 
 use crate::bridge::TxWrapper;
 
@@ -50,24 +51,23 @@ impl Settings {
     ) {
         self.listeners
             .write()
+            .unwrap()
             .insert(String::from(property_name), update_func);
         self.readers
             .write()
+            .unwrap()
             .insert(String::from(property_name), reader_func);
     }
 
     pub fn set<T: Clone + Send + Sync + 'static>(&self, t: &T) {
         let type_id: TypeId = TypeId::of::<T>();
         let t: T = (*t).clone();
-        unsafe {
-            self.settings.force_unlock_write();
-        }
-        let mut write_lock = self.settings.write();
+        let mut write_lock = self.settings.write().unwrap();
         write_lock.insert(type_id, Box::new(t));
     }
 
     pub fn get<T: Clone + Send + Sync + 'static>(&'_ self) -> T {
-        let read_lock = self.settings.read();
+        let read_lock = self.settings.read().unwrap();
         let boxed = &read_lock
             .get(&TypeId::of::<T>())
             .expect("Trying to retrieve a settings object that doesn't exist: {:?}");
@@ -78,17 +78,17 @@ impl Settings {
     }
 
     pub async fn read_initial_values(&self, nvim: &Neovim<TxWrapper>) {
-        let keys: Vec<String> = self.listeners.read().keys().cloned().collect();
+        let keys: Vec<String> = self.listeners.read().unwrap().keys().cloned().collect();
 
         for name in keys {
             let variable_name = format!("neovide_{}", name);
             match nvim.get_var(&variable_name).await {
                 Ok(value) => {
-                    self.listeners.read().get(&name).unwrap()(value);
+                    self.listeners.read().unwrap().get(&name).unwrap()(value);
                 }
                 Err(error) => {
                     trace!("Initial value load failed for {}: {}", name, error);
-                    let setting = self.readers.read().get(&name).unwrap()();
+                    let setting = self.readers.read().unwrap().get(&name).unwrap()();
                     nvim.set_var(&variable_name, setting).await.ok();
                 }
             }
@@ -96,7 +96,7 @@ impl Settings {
     }
 
     pub async fn setup_changed_listeners(&self, nvim: &Neovim<TxWrapper>) {
-        let keys: Vec<String> = self.listeners.read().keys().cloned().collect();
+        let keys: Vec<String> = self.listeners.read().unwrap().keys().cloned().collect();
 
         for name in keys {
             let vimscript = format!(
@@ -122,7 +122,7 @@ impl Settings {
         let name: Result<String, _> = name.try_into();
         let name = name.unwrap();
 
-        self.listeners.read().get(&name).unwrap()(value);
+        self.listeners.read().unwrap().get(&name).unwrap()(value);
     }
 }
 
@@ -167,8 +167,8 @@ mod tests {
         }
 
         settings.set_setting_handlers(property_name, noop_update, noop_read);
-        let listeners = settings.listeners.read();
-        let readers = settings.readers.read();
+        let listeners = settings.listeners.read().unwrap();
+        let readers = settings.readers.read().unwrap();
         let listener = listeners.get(property_name).unwrap();
         let reader = readers.get(property_name).unwrap();
         assert_eq!(&(noop_update as UpdateHandlerFunc), listener);
@@ -186,7 +186,7 @@ mod tests {
         let v3: u32 = 2;
 
         settings.set(&v1);
-        let values = settings.settings.read();
+        let values = settings.settings.read().unwrap();
         let r1 = values.get(&vt1).unwrap().downcast_ref::<u32>().unwrap();
         assert_eq!(v1, *r1);
 
@@ -210,13 +210,9 @@ mod tests {
         let vt1 = TypeId::of::<u32>();
         let vt2 = TypeId::of::<f32>();
 
-        let mut values = settings.settings.write();
+        let mut values = settings.settings.write().unwrap();
         values.insert(vt1, Box::new(v1.clone()));
         values.insert(vt2, Box::new(v2.clone()));
-
-        unsafe {
-            settings.settings.force_unlock_write();
-        }
 
         let r1 = settings.get::<u32>();
         let r2 = settings.get::<f32>();
@@ -251,21 +247,13 @@ mod tests {
             Value::from("baz".to_string())
         }
 
-        let mut listeners = settings.listeners.write();
+        let mut listeners = settings.listeners.write().unwrap();
         listeners.insert(v1.clone(), noop_update);
         listeners.insert(v2.clone(), noop_update);
 
-        unsafe {
-            settings.listeners.force_unlock_write();
-        }
-
-        let mut readers = settings.readers.write();
+        let mut readers = settings.readers.write().unwrap();
         readers.insert(v1.clone(), noop_read);
         readers.insert(v2.clone(), noop_read);
-
-        unsafe {
-            settings.readers.force_unlock_write();
-        }
 
         settings.read_initial_values(&nvim).await;
 

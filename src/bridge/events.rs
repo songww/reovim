@@ -4,8 +4,8 @@ use std::{
     fmt::{self, Debug},
 };
 
-use log::debug;
 use nvim::Value;
+use tracing::debug;
 
 use crate::color::{Color, Colors};
 use crate::cursor::{CursorMode, CursorShape};
@@ -158,8 +158,7 @@ pub enum EditorMode {
     Unknown(String),
 }
 
-#[derive(Clone, Derivative)]
-#[derivative(Debug)]
+#[derive(Clone, debug::Debug)]
 pub enum RedrawEvent {
     SetTitle {
         title: String,
@@ -223,7 +222,7 @@ pub enum RedrawEvent {
     },
     WindowPosition {
         grid: u64,
-        #[derivative(Debug = "ignore")]
+        #[debug(skip)]
         window: nvim::Window<TxWrapper>,
         start_row: u64,
         start_column: u64,
@@ -256,7 +255,7 @@ pub enum RedrawEvent {
     },
     WindowViewport {
         grid: u64,
-        #[derivative(Debug = "ignore")]
+        #[debug(skip)]
         window: nvim::Window<TxWrapper>,
         top_line: f64,
         bottom_line: f64,

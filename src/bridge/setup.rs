@@ -1,4 +1,4 @@
-use log::{info, warn};
+use tracing::{info, warn};
 use nvim::{Neovim, Value};
 
 use crate::bridge::{events::*, TxWrapper};

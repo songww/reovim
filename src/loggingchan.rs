@@ -3,7 +3,7 @@ use std::{
     sync::mpsc::{SendError, Sender},
 };
 
-use log::trace;
+use tracing::trace;
 use tokio::sync::mpsc::{error::SendError as TokioSendError, UnboundedSender};
 
 #[derive(Clone)]

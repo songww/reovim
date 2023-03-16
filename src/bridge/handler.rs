@@ -1,6 +1,6 @@
 use async_trait::async_trait;
-use log::trace;
 use nvim::{Handler, Neovim, Value};
+use tracing::{error, trace};
 
 //use crate::bridge::clipboard::{get_remote_clipboard, set_remote_clipboard};
 #[cfg(windows)]
@@ -92,7 +92,7 @@ impl Handler for NeovimHandler {
             }
             "neovide.set_clipboard" => {
                 // set_remote_clipboard(arguments).ok();
-                log::error!("set remote clipboard ignored.")
+                error!("set remote clipboard ignored.")
             }
             _ => {}
         }

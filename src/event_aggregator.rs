@@ -2,10 +2,10 @@ use std::{
     any::{type_name, Any, TypeId},
     collections::{hash_map::Entry, HashMap},
     fmt::Debug,
+    sync::{Mutex, RwLock},
 };
 
 use once_cell::sync::Lazy;
-use parking_lot::{Mutex, RwLock};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
 use crate::loggingchan::*;
@@ -32,9 +32,14 @@ impl Default for EventAggregator {
 
 impl EventAggregator {
     fn get_sender<T: Any + Clone + Debug + Send>(&self) -> LoggingTx<T> {
-        match self.parent_senders.write().entry(TypeId::of::<T>()) {
+        match self
+            .parent_senders
+            .write()
+            .unwrap()
+            .entry(TypeId::of::<T>())
+        {
             Entry::Occupied(entry) => {
-                let sender = entry.get().lock();
+                let sender = entry.get().lock().unwrap();
                 sender.downcast_ref::<LoggingTx<T>>().unwrap().clone()
             }
             Entry::Vacant(entry) => {
@@ -43,6 +48,7 @@ impl EventAggregator {
                 entry.insert(Mutex::new(Box::new(logging_tx.clone())));
                 self.unclaimed_receivers
                     .write()
+                    .unwrap()
                     .insert(TypeId::of::<T>(), Box::new(receiver));
                 logging_tx
             }
@@ -57,13 +63,13 @@ impl EventAggregator {
     pub fn register_event<T: Any + Clone + Debug + Send>(&self) -> UnboundedReceiver<T> {
         let type_id = TypeId::of::<T>();
 
-        if let Some(receiver) = self.unclaimed_receivers.write().remove(&type_id) {
+        if let Some(receiver) = self.unclaimed_receivers.write().unwrap().remove(&type_id) {
             *receiver.downcast::<UnboundedReceiver<T>>().unwrap()
         } else {
             let (sender, receiver) = unbounded_channel();
             let logging_sender = LoggingTx::attach(sender, type_name::<T>().to_owned());
 
-            match self.parent_senders.write().entry(type_id) {
+            match self.parent_senders.write().unwrap().entry(type_id) {
                 Entry::Occupied(_) => panic!("EventAggregator: type already registered"),
                 Entry::Vacant(entry) => {
                     entry.insert(Mutex::new(Box::new(logging_sender)));
