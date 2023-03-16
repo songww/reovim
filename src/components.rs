@@ -181,6 +181,7 @@ impl Component for VimNotifactions {
     type Output = ();
     type CommandOutput = ();
     view! {
+        #[root]
         #[local_ref]
         messagebox -> gtk::Box {
             #[watch]

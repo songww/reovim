@@ -1,5 +1,6 @@
 use glib::subclass::types::FromObject;
 use gtk::prelude::FixedExt;
+use gtk::traits::WidgetExt;
 
 mod imp {
     use gtk::subclass::prelude::*;
@@ -44,6 +45,20 @@ impl Default for Board {
     fn default() -> Self {
         Self::new()
     }
+}
+
+impl relm4::RelmSetChildExt for Board {
+    fn container_set_child(&self, widget: Option<&impl AsRef<gtk::Widget>>) {
+        widget.map(|widget| self.put(widget.as_ref(), 0., 0.));
+    }
+
+    fn container_get_child(&self) -> Option<gtk::Widget> {
+        self.first_child()
+    }
+}
+
+impl relm4::ContainerChild for Board {
+    type Child = gtk::Widget;
 }
 
 impl relm4::factory::FactoryView for Board {

@@ -151,6 +151,11 @@ impl<C: FactoryComponent> Factory<C> {
         self.components.get_mut(&key).map(ComponentStorage::get_mut)
     }
 
+    /// Returns the widget all components are attached to.
+    pub const fn widget(&self) -> &C::ParentWidget {
+        &self.widget
+    }
+
     pub fn flush(&mut self) {
         let mut staged = &mut self.staged;
         let mut flushes = &mut self.flushes;
@@ -165,7 +170,7 @@ impl<C> Factory<C>
 where
     C: FactoryComponent,
 {
-    fn render_changes(&mut self) {
+    fn render_changes(&mut self) where <<C as relm4::factory::FactoryComponent>::ParentWidget as FactoryView>::ReturnedWidget: AsRef<<<C as relm4::factory::FactoryComponent>::ParentWidget as FactoryView>::Children> {
         for (index, change) in self.flushes.drain() {
             let mut widget = &mut self.widget;
 

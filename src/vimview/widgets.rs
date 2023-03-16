@@ -190,7 +190,7 @@ impl Position<crate::widgets::board::BoardPosition> for VimGrid {
 impl FactoryComponent for VimGrid {
     type Widgets = VimGridWidgets;
     type ParentWidget = crate::widgets::board::Board;
-    type ParentInput = ();
+    type ParentInput = AppMessage;
     type CommandOutput = AppMessage;
     type Input = ();
     type Output = ();

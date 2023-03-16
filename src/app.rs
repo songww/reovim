@@ -556,8 +556,8 @@ impl Component for AppModel {
 
             background_changed: Rc::new(false.into()),
 
-            vgrids: crate::factory::Factory::new(main_window, sender.input_sender()),
-            messages: FactoryVecDeque::new(main_window, sender.input_sender()),
+            vgrids: crate::factory::Factory::new(Board::default(), sender.input_sender()),
+            messages: FactoryVecDeque::new(gtk::Box::default(), sender.input_sender()),
             cmd_prompt: VimCmdPrompts::builder()
                 // .transient_for(main_window)
                 .launch(hldefs.clone())
