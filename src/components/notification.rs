@@ -1,14 +1,13 @@
-use std::{cell::Cell, collections::LinkedList, rc::Rc, sync::RwLock};
+use std::{rc::Rc, sync::RwLock};
 
 use adw::prelude::*;
 use relm4::{
     factory::{FactoryComponent, FactoryVecDeque},
     prelude::*,
 };
-use tracing::{debug, error, info};
+use tracing::{error, info};
 
 use crate::{
-    app::{App, AppMessage},
     bridge::{MessageKind, StyledContent},
     vimview::{self, HighlightDefinitions},
 };
@@ -50,10 +49,10 @@ impl FactoryComponent for VimMessage {
 
     fn init_widgets(
         &mut self,
-        index: &DynamicIndex,
+        _index: &DynamicIndex,
         root: &Self::Root,
-        returned_widget: &<Self::ParentWidget as relm4::factory::FactoryView>::ReturnedWidget,
-        sender: FactorySender<Self>,
+        _returned_widget: &<Self::ParentWidget as relm4::factory::FactoryView>::ReturnedWidget,
+        _sender: FactorySender<Self>,
     ) -> Self::Widgets {
         let child = gtk::TextView::builder()
             .name("vim-message-text")
@@ -79,8 +78,8 @@ impl FactoryComponent for VimMessage {
 
     fn init_model(
         (kind, content, hldefs): Self::Init,
-        index: &DynamicIndex,
-        sender: FactorySender<Self>,
+        _index: &DynamicIndex,
+        _sender: FactorySender<Self>,
     ) -> Self {
         VimMessage {
             kind,
@@ -102,7 +101,7 @@ impl FactoryComponent for VimMessage {
     }
 
     // fn update(&mut self, message: Self::Input, sender: FactorySender<Self>) {
-    fn update(&mut self, message: Self::Input, sender: FactorySender<Self>) {
+    fn update(&mut self, _message: Self::Input, _sender: FactorySender<Self>) {
         match self.kind {
             MessageKind::Echo => {
                 let _message = String::new();
@@ -154,7 +153,7 @@ impl FactoryComponent for VimMessage {
         }
     }
 
-    fn update_view(&self, widgets: &mut Self::Widgets, _sender: FactorySender<Self>) {
+    fn update_view(&self, _widgets: &mut Self::Widgets, _sender: FactorySender<Self>) {
         //
     }
 }
@@ -205,7 +204,7 @@ impl Component for VimNotification {
         ComponentParts { model, widgets }
     }
 
-    fn update(&mut self, message: Self::Input, sender: ComponentSender<Self>, root: &Self::Root) {
+    fn update(&mut self, message: Self::Input, _sender: ComponentSender<Self>, _root: &Self::Root) {
         let mut guard = self.messages.guard();
         match message {
             VimNotificationMessage::Clear => {

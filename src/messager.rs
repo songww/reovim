@@ -1,8 +1,8 @@
-use relm4::{prelude::*, Worker};
+use relm4::{prelude::*};
 use tracing::{info, trace};
 
 use crate::{
-    app::{self, AppMessage},
+    app::{AppMessage},
     bridge::{RedrawEvent, UiCommand},
     event_aggregator::EVENT_AGGREGATOR,
     running_tracker::RUNNING_TRACKER,
@@ -13,7 +13,7 @@ pub struct VimMessager {}
 
 impl Component for VimMessager {
     type Init = ();
-    type Input = RedrawEvent;
+    type Input = UiCommand;
     type Output = ();
     type Root = ();
     type Widgets = ();
@@ -64,6 +64,6 @@ impl Component for VimMessager {
     }
 
     fn update(&mut self, message: Self::Input, _sender: ComponentSender<Self>, _: &Self::Root) {
-        EVENT_AGGREGATOR.send::<RedrawEvent>(message);
+        EVENT_AGGREGATOR.send::<UiCommand>(message);
     }
 }

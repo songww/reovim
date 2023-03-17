@@ -11,11 +11,11 @@ impl relm4::Component for VimBridge {
 
     fn init(
         opts: Self::Init,
-        root: &Self::Root,
+        _root: &Self::Root,
         sender: relm4::ComponentSender<Self>,
     ) -> relm4::ComponentParts<Self> {
         //
-        sender.command(|out, shutdown| {
+        sender.command(|_out, shutdown| {
             shutdown
                 .register(async move { crate::bridge::open(opts).await })
                 .drop_on_shutdown()
@@ -32,9 +32,9 @@ impl relm4::Component for VimBridge {
 
     fn update(
         &mut self,
-        message: Self::Input,
-        sender: relm4::ComponentSender<Self>,
-        root: &Self::Root,
+        _message: Self::Input,
+        _sender: relm4::ComponentSender<Self>,
+        _root: &Self::Root,
     ) {
         //
     }

@@ -91,11 +91,11 @@ impl relm4::factory::FactoryView for Board {
         widget.clone()
     }
 
-    fn factory_move_after(&self, widget: &Self::ReturnedWidget, other: &Self::ReturnedWidget) {
+    fn factory_move_after(&self, _widget: &Self::ReturnedWidget, _other: &Self::ReturnedWidget) {
         //
     }
 
-    fn factory_move_start(&self, widget: &Self::ReturnedWidget) {
+    fn factory_move_start(&self, _widget: &Self::ReturnedWidget) {
         //
     }
 
@@ -103,7 +103,7 @@ impl relm4::factory::FactoryView for Board {
         &self,
         widget: impl AsRef<Self::Children>,
         position: &Self::Position,
-        other: &Self::ReturnedWidget,
+        _other: &Self::ReturnedWidget,
     ) -> Self::ReturnedWidget {
         let widget = widget.as_ref();
         self.put(widget, position.x, position.y);

@@ -7,11 +7,10 @@ use relm4::{factory::FactoryView, prelude::*};
 use crate::{
     app::AppMessage,
     bridge::{MessageKind, StyledContent},
-    messager,
     metrics::Metrics,
 };
 
-use super::{HighlightDefinitions, VimGrid};
+use super::{HighlightDefinitions};
 
 mod imp {
     use std::{cell::Cell, rc::Rc, sync::RwLock};
@@ -310,10 +309,10 @@ impl FactoryComponent for VimMessage {
 
     fn init_widgets(
         &mut self,
-        id: &DynamicIndex,
+        _id: &DynamicIndex,
         view: &Self::Root,
-        returned_widget: &<Self::ParentWidget as FactoryView>::ReturnedWidget,
-        sender: FactorySender<Self>,
+        _returned_widget: &<Self::ParentWidget as FactoryView>::ReturnedWidget,
+        _sender: FactorySender<Self>,
     ) -> Self::Widgets {
         let guard = self.hldefs.read().unwrap();
         let colors = guard.defaults().unwrap();
@@ -340,7 +339,7 @@ impl FactoryComponent for VimMessage {
         widgets
     }
 
-    fn output_to_parent_input(output: Self::Output) -> Option<AppMessage> {
+    fn output_to_parent_input(_output: Self::Output) -> Option<AppMessage> {
         todo!()
     }
 

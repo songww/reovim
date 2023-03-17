@@ -3,15 +3,13 @@ use std::{cell::Cell, collections::LinkedList, rc::Rc, sync::RwLock};
 use gtk::prelude::*;
 use once_cell::sync::OnceCell;
 use relm4::{
-    factory::{FactoryComponent, FactoryVecDeque},
     prelude::*,
 };
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 
 use crate::{
-    app::{App, AppMessage},
-    bridge::{MessageKind, StyledContent},
-    vimview::{self, HighlightDefinitions},
+    bridge::{StyledContent},
+    vimview::{HighlightDefinitions},
 };
 
 pub static PROMPT_BROKER: relm4::MessageBroker<CommandPromptMessage> = relm4::MessageBroker::new();
@@ -71,7 +69,7 @@ impl Component for VimCommandPrompt {
     fn init(
         hldefs: Rc<RwLock<HighlightDefinitions>>,
         root: &Self::Root,
-        sender: ComponentSender<Self>,
+        _sender: ComponentSender<Self>,
     ) -> ComponentParts<Self> {
         let model = VimCommandPrompt {
             hldefs,
@@ -87,8 +85,8 @@ impl Component for VimCommandPrompt {
     fn update(
         &mut self,
         event: CommandPromptMessage,
-        sender: ComponentSender<Self>,
-        root: &Self::Root,
+        _sender: ComponentSender<Self>,
+        _root: &Self::Root,
     ) {
         const U16MAX: f32 = u16::MAX as f32;
         match event {

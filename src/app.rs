@@ -1,5 +1,5 @@
 use std::cell::{Cell, RefCell};
-use std::convert::identity;
+
 use std::rc::Rc;
 use std::sync::{atomic, Arc, RwLock};
 
@@ -20,13 +20,13 @@ use crate::bridge::{
 };
 use crate::components::bridge::VimBridge;
 use crate::components::{CommandPromptMessage, VimCommandPrompt, PROMPT_BROKER};
-use crate::cursor::{CursorMode, VimCursor};
+use crate::cursor::CursorMode;
 use crate::event_aggregator::EVENT_AGGREGATOR;
 use crate::grapheme::Coord;
 use crate::keys::ToInput;
 use crate::messager::VimMessager;
 use crate::metrics::Metrics;
-use crate::vimview::{self, VimGrid, VimMessage};
+use crate::vimview::{self};
 use crate::widgets::board::Board;
 use crate::Opts;
 
@@ -94,7 +94,6 @@ pub struct App {
 
     pub messager: Controller<VimMessager>,
     pub bridge: Option<Controller<VimBridge>>,
-    // pub rt: tokio::runtime::Runtime,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -173,11 +172,11 @@ impl App {
         self.metrics.replace(metrics);
     }
 
-    fn post_init(&mut self, widgets: &AppWidgets, sender: ComponentSender<Self>) {
+    fn post_init(&mut self, widgets: &AppWidgets, _sender: ComponentSender<Self>) {
         let AppWidgets {
             ref main_window,
             ref da,
-            ref vbox,
+            vbox: _,
             ref overlays,
             ref vimgrids,
             ref vimmessages,
@@ -225,6 +224,8 @@ impl App {
         self.bridge
             .replace(VimBridge::builder().launch(opts).detach());
 
+        let messager_sender = self.messager.sender().clone();
+
         da.queue_allocate();
         da.queue_resize();
         da.queue_draw();
@@ -252,10 +253,10 @@ impl App {
         //     debug!("preedit changed, '{}'", im_context.preedit_string().0);
         // });
 
-        im_context.connect_commit(gtk::glib::clone!(@strong sender => move |ctx, text| {
+        im_context.connect_commit(gtk::glib::clone!(@strong messager_sender as sender => move |ctx, text| {
             debug!("im-context({}) commit '{}'", ctx.context_id(), text);
             sender
-                .output(UiCommand::Serial(SerialCommand::Keyboard(text.replace("<", "<lt>").into())).into());
+                .send(UiCommand::Serial(SerialCommand::Keyboard(text.replace("<", "<lt>"))).into());
         }));
 
         main_window.set_focus_widget(Some(overlays));
@@ -267,7 +268,7 @@ impl App {
             .flags(gtk::EventControllerScrollFlags::all())
             .name("vimview-scrolling-listener")
             .build();
-        listener.connect_scroll(glib::clone!(@strong sender, @strong self.mouse_on as mouse_on, @strong grids_container => move |c, x, y| {
+        listener.connect_scroll(glib::clone!(@strong messager_sender as sender, @strong self.mouse_on as mouse_on, @strong grids_container => move |c, x, y| {
             if !mouse_on.load(atomic::Ordering::Relaxed) {
                 return gtk::Inhibit(false)
             }
@@ -293,7 +294,7 @@ impl App {
             };
             debug!("scrolling grid {} x: {}, y: {} {}", id, x, y, &direction);
             let command = UiCommand::Serial(SerialCommand::Scroll { direction: direction.into(), grid_id: id, position: (0, 1), modifier });
-            sender.output(AppMessage::UiCommand(command)).unwrap();
+            sender.send(command).unwrap();
             gtk::Inhibit(false)
         }));
 
@@ -303,17 +304,17 @@ impl App {
             .name("vimview-focus-controller")
             .build();
         focus_controller.connect_enter(
-            glib::clone!(@strong sender, @strong im_context => move |_| {
+            glib::clone!(@strong messager_sender as sender, @strong im_context => move |_| {
                 info!("FocusGained");
                 im_context.focus_in();
-                sender.output(UiCommand::Parallel(ParallelCommand::FocusGained).into()).unwrap();
+                sender.send(UiCommand::Parallel(ParallelCommand::FocusGained)).unwrap();
             }),
         );
         focus_controller.connect_leave(
-            glib::clone!(@strong sender, @strong im_context  => move |_| {
+            glib::clone!(@strong messager_sender as sender, @strong im_context  => move |_| {
                 info!("FocusLost");
                 im_context.focus_out();
-                sender.output(UiCommand::Parallel(ParallelCommand::FocusLost).into()).unwrap();
+                sender.send(UiCommand::Parallel(ParallelCommand::FocusLost)).unwrap();
             }),
         );
         main_window.add_controller(focus_controller);
@@ -323,7 +324,7 @@ impl App {
             .build();
         key_controller.set_im_context(Some(&im_context));
         key_controller.connect_key_pressed(
-            glib::clone!(@strong sender => move |c, keyval, _keycode, modifier| {
+            glib::clone!(@strong messager_sender as sender => move |c, keyval, _keycode, modifier| {
                 let event = c.current_event().unwrap();
 
                 if let Some(true) = c.im_context().map(|imctx|imctx.filter_keypress(&event)) {
@@ -334,7 +335,7 @@ impl App {
                 debug!("keypress : {:?}", keypress);
                 if let Some(keypress) = keypress.to_input() {
                     debug!("keypress {} sent to neovim.", keypress);
-                    sender.output(UiCommand::Serial(SerialCommand::Keyboard(keypress)).into()).unwrap();
+                    sender.send(UiCommand::Serial(SerialCommand::Keyboard(keypress)).into()).unwrap();
                     gtk::Inhibit(true)
                 } else {
                     info!("keypress ignored: {:?}", keyval.name());
@@ -388,7 +389,7 @@ impl Component for App {
                         set_vexpand: true,
                         set_focus_on_click: false,
                         set_overflow: gtk::Overflow::Hidden,
-                        connect_resize[sender = sender.clone(), metrics = model.metrics.clone(), size = model.size.clone()] => move |da, width, height| {
+                        connect_resize[sender = model.messager.sender().clone(), metrics = model.metrics.clone(), size = model.size.clone()] => move |da, width, height| {
                             debug!("da resizing width: {}, height: {}", width, height);
                             size.set((width, height));
                             let metrics = metrics.get();
@@ -396,12 +397,11 @@ impl Component for App {
                             let cols = da.width() as f64 / metrics.width();
                             debug!("da resizing rows: {} cols: {}", rows, cols);
                             sender
-                                .output(
+                                .send(
                                     UiCommand::Parallel(ParallelCommand::Resize {
                                         width: cols as _,
                                         height: rows as _,
                                     })
-                                    .into(),
                                 )
                                 .unwrap();
                         },
@@ -418,8 +418,8 @@ impl Component for App {
                     },
                 }
             },
-            connect_close_request[sender = sender.clone()] => move |_| {
-                sender.output(AppMessage::UiCommand(UiCommand::Parallel(ParallelCommand::Quit))).ok();
+            connect_close_request[sender = model.messager.sender().clone()] => move |_| {
+                sender.send(UiCommand::Parallel(ParallelCommand::Quit)).unwrap();
                 gtk::Inhibit(true)
             },
         }
@@ -504,11 +504,6 @@ impl Component for App {
         main_window: &Self::Root,
         sender: ComponentSender<Self>,
     ) -> ComponentParts<App> {
-        // let rt = tokio::runtime::Builder::new_multi_thread()
-        //     .enable_time()
-        //     .enable_io()
-        //     .build()
-        //     .unwrap();
         let font_desc = FontDescription::from_string("monospace 11");
         let size = Rc::new(Cell::new((opts.width, opts.height)));
         let pctx: Rc<pango::Context> = {
@@ -582,7 +577,7 @@ impl Component for App {
         };
 
         let vboard = model.vgrids.widget();
-        let messagebox = model.messages.widget();
+        let _messagebox = model.messages.widget();
 
         let vimfloatwins = gtk::Fixed::new();
         let vimmessages = gtk::Box::default();
@@ -602,7 +597,7 @@ impl Component for App {
         ComponentParts { model, widgets }
     }
 
-    fn update(&mut self, message: Self::Input, sender: ComponentSender<Self>, root: &Self::Root) {
+    fn update(&mut self, message: Self::Input, sender: ComponentSender<Self>, _root: &Self::Root) {
         match message {
             AppMessage::UiCommand(ui_command) => {
                 trace!("ui-commad {:?}", ui_command);
@@ -728,7 +723,7 @@ impl Component for App {
                         let coord = &self.cursor_coord;
                         let cursor_grid = self.cursor_grid;
                         if cursor_grid == grid && row as f64 == coord.row {
-                            if let Some(cell) = vgrid
+                            if let Some(_cell) = vgrid
                                 .textbuf()
                                 .borrow()
                                 .cell(coord.row.floor() as usize, coord.col.floor() as usize)
@@ -910,12 +905,12 @@ impl Component for App {
                         let leftop = vgrid.coord();
                         let row = row as usize;
                         let column = column as usize;
-                        if let Some(cell) = vgrid.textbuf().borrow().cell(row, column) {
+                        if let Some(_cell) = vgrid.textbuf().borrow().cell(row, column) {
                             info!(
                                 "cursor goto {}x{} of grid {}, grid at {}x{}",
                                 column, row, grid, leftop.col, leftop.row
                             );
-                            let coord: Coord =
+                            let _coord: Coord =
                                 (leftop.col + column as f64, leftop.row + row as f64).into();
                             self.cursor_grid = grid;
                             self.cursor_coord.col = column as _;
@@ -942,7 +937,7 @@ impl Component for App {
                     RedrawEvent::ModeInfoSet { cursor_modes } => {
                         self.cursor_modes = cursor_modes;
 
-                        let mode = self.cursor_modes.get(self.cursor_mode).unwrap().clone();
+                        let _mode = self.cursor_modes.get(self.cursor_mode).unwrap().clone();
                         // self.cursor
                         //     .model_mut()
                         //     .map(|mut m| {

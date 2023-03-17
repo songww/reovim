@@ -74,7 +74,7 @@ impl SimpleComponent for VimCursor {
         ComponentParts { model, widgets }
     }
 
-    fn update(&mut self, message: Self::Input, sender: ComponentSender<Self>) {
+    fn update(&mut self, message: Self::Input, _sender: ComponentSender<Self>) {
         match message {
             CursorMessage::Goto(grid, coord, cell) => {
                 self.grid = grid;

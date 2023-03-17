@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+
 use std::fmt::Debug;
 
 use relm4::factory::sync::{ComponentStorage, FactoryBuilder};
@@ -143,7 +143,7 @@ impl<C: FactoryComponent> Factory<C> {
     /// needs to be updated.
     #[must_use]
     pub fn get_mut(&mut self, key: u64) -> Option<&mut C> {
-        let mut staged = &mut self.staged;
+        let staged = &mut self.staged;
         if !staged.contains_key(&key) {
             staged.insert(key, ChangeType::Update);
         }
@@ -157,8 +157,8 @@ impl<C: FactoryComponent> Factory<C> {
     }
 
     pub fn flush(&mut self) {
-        let mut staged = &mut self.staged;
-        let mut flushes = &mut self.flushes;
+        let staged = &mut self.staged;
+        let flushes = &mut self.flushes;
         for (k, v) in staged.iter() {
             flushes.insert(*k, *v);
         }
@@ -172,14 +172,14 @@ where
 {
     fn render_changes(&mut self) where <<C as relm4::factory::FactoryComponent>::ParentWidget as FactoryView>::ReturnedWidget: AsRef<<<C as relm4::factory::FactoryComponent>::ParentWidget as FactoryView>::Children> {
         for (index, change) in self.flushes.drain() {
-            let mut widget = &mut self.widget;
+            let _widget = &mut self.widget;
 
             match change {
                 ChangeType::Add => {
                     let component = self.components.get(&index).unwrap();
                     let widget = component.returned_widget().unwrap();
                     let position = component.get().position(0);
-                    let root = self.widget.factory_append(widget, &position);
+                    let _root = self.widget.factory_append(widget, &position);
                 }
                 ChangeType::Update => {
                     let component = self.components.get(&index).unwrap();

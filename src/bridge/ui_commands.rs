@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use nvim::{call_args, rpc::model::IntoVal, Neovim};
 use tokio::sync::mpsc::unbounded_channel;
-use tracing::{error, info, trace};
+use tracing::{info, trace};
 
 #[cfg(windows)]
 use crate::windows_utils::{

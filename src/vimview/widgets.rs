@@ -12,7 +12,7 @@ use crate::app::{self, AppMessage, Dragging};
 use crate::bridge::{MouseAction, MouseButton, SerialCommand, UiCommand};
 use crate::event_aggregator::EVENT_AGGREGATOR;
 use crate::grapheme::{Coord, Pos, Rectangle};
-use crate::metrics;
+
 
 use super::gridview::VimGridView;
 use super::TextBuf;
@@ -222,8 +222,8 @@ impl FactoryComponent for VimGrid {
 
     fn init_model(
         (id, winid, coord, rect, hldefs, dragging, metrics, font_description): Self::Init,
-        index: &DynamicIndex,
-        sender: FactorySender<Self>,
+        _index: &DynamicIndex,
+        _sender: FactorySender<Self>,
     ) -> Self {
         VimGrid::new(
             id,
@@ -240,7 +240,7 @@ impl FactoryComponent for VimGrid {
         &mut self,
         _index: &DynamicIndex,
         view: &Self::Root,
-        returned_widget: &<Self::ParentWidget as FactoryView>::ReturnedWidget,
+        _returned_widget: &<Self::ParentWidget as FactoryView>::ReturnedWidget,
         sender: FactorySender<Self>,
     ) -> VimGridWidgets {
         let widgets = view_output!();
