@@ -47,9 +47,9 @@ tokio-util = { version = "0.7", features = ["compat"] }
 git = "https://github.com/songww/Relm4"
 branch = "next"
 # path = "./relm/relm4"
-package = "relm4"
 # version = "0.6.0-alpha.1"
-features = ["gnome_43", "libadwaita", "macros"]
+package = "relm4"
+features = ["libadwaita", "macros"]
 
 # [dependencies.relm-macros]
 # git = "https://github.com/Relm4/Relm4"

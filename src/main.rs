@@ -101,6 +101,7 @@ fn main() {
     let app = Opts::command().allow_missing_positional(true);
     let title = app.get_bin_name().unwrap_or("rv");
     opts.title = title.to_string();
+
     trace!("opts: {:?}", opts);
     // let model = app::AppModel::new(opts);
     let relm =

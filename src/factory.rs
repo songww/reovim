@@ -66,7 +66,7 @@ impl<C: FactoryComponent> Factory<C> {
             components,
             parent_sender: parent_sender.clone(),
         };
-        base.into_iter().map(|(k, init)| {
+        base.into_iter().for_each(|(k, init)| {
             factory.insert(k, init);
         });
         factory

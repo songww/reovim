@@ -287,7 +287,7 @@ impl FactoryComponent for VimGrid {
         );
         click_listener.connect_released(
             glib::clone!(@strong sender, @weak self.dragging as dragging, @weak self.metrics as metrics => move |c, n_press, x, y| {
-                sender.command_sender().send(app::AppMessage::ShowPointer);
+                sender.command_sender().send(app::AppMessage::ShowPointer).unwrap();
                 let metrics = metrics.get();
                 let width = metrics.width();
                 let height = metrics.height();
@@ -322,7 +322,7 @@ impl FactoryComponent for VimGrid {
             app::GridActived.store(grid_id, atomic::Ordering::Relaxed);
         });
         motion_listener.connect_motion(glib::clone!(@strong sender, @weak self.dragging as dragging, @weak self.metrics as metrics => move |c, x, y| {
-            sender.command_sender().send(app::AppMessage::ShowPointer);
+            sender.command_sender().send(app::AppMessage::ShowPointer).unwrap();
             trace!("cursor motion {} {}", x, y);
             if let Some(Dragging { btn, pos }) = dragging.get() {
                 let metrics = metrics.get();

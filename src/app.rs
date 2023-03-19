@@ -1,5 +1,6 @@
 use std::cell::{Cell, RefCell};
 
+use std::convert::identity;
 use std::rc::Rc;
 use std::sync::{atomic, Arc, RwLock};
 
@@ -20,13 +21,13 @@ use crate::bridge::{
 };
 use crate::components::bridge::VimBridge;
 use crate::components::{CommandPromptMessage, VimCommandPrompt, PROMPT_BROKER};
-use crate::cursor::CursorMode;
+use crate::cursor::{CursorMessage, CursorMode, VimCursor};
 use crate::event_aggregator::EVENT_AGGREGATOR;
 use crate::grapheme::Coord;
 use crate::keys::ToInput;
 use crate::messager::VimMessager;
 use crate::metrics::Metrics;
-use crate::vimview::{self};
+use crate::vimview;
 use crate::widgets::board::Board;
 use crate::Opts;
 
@@ -69,7 +70,7 @@ pub struct App {
     pub mode: EditorMode,
 
     pub mouse_on: Rc<atomic::AtomicBool>,
-    // pub cursor: Component<VimCursor>,
+    pub cursor: Controller<VimCursor>,
     pub cursor_grid: u64,
     pub cursor_coord: Coord,
     pub cursor_coord_changed: atomic::AtomicBool,
@@ -256,7 +257,7 @@ impl App {
         im_context.connect_commit(gtk::glib::clone!(@strong messager_sender as sender => move |ctx, text| {
             debug!("im-context({}) commit '{}'", ctx.context_id(), text);
             sender
-                .send(UiCommand::Serial(SerialCommand::Keyboard(text.replace("<", "<lt>"))).into());
+                .send(UiCommand::Serial(SerialCommand::Keyboard(text.replace("<", "<lt>")))).unwrap();
         }));
 
         main_window.set_focus_widget(Some(overlays));
@@ -354,7 +355,7 @@ impl Component for App {
 
     type Input = AppMessage;
     type Output = AppMessage;
-    type CommandOutput = ();
+    type CommandOutput = AppMessage;
 
     view! {
         main_window = gtk::ApplicationWindow {
@@ -487,8 +488,10 @@ impl Component for App {
                 "trying resize nvim to {}x{} original {}x{} {:?}",
                 rows, cols, width, height, metrics
             );
-            sender
-                .output(
+            model
+                .messager
+                .sender()
+                .send(
                     UiCommand::Parallel(ParallelCommand::Resize {
                         width: cols as _,
                         height: rows as _,
@@ -523,7 +526,7 @@ impl Component for App {
             ctx.into()
         };
         let hldefs = Rc::new(RwLock::new(vimview::HighlightDefinitions::new()));
-        let metrics = Rc::new(Metrics::new().into());
+        let metrics: Rc<Cell<Metrics>> = Rc::new(Metrics::new().into());
 
         let mut model = App {
             size,
@@ -538,10 +541,9 @@ impl Component for App {
             mode: EditorMode::Normal,
 
             mouse_on: Rc::new(false.into()),
-            // cursor: MicroComponent::new(
-            //     VimCursor::new(pctx.clone(), Rc::clone(&metrics), hldefs.clone()),
-            //     (),
-            // ),
+            cursor: VimCursor::builder()
+                .launch(((*pctx).clone(), metrics.clone(), hldefs.clone()))
+                .detach(),
             cursor_grid: 0,
             cursor_mode: 0,
             cursor_modes: Vec::new(),
@@ -568,7 +570,9 @@ impl Component for App {
                 // .transient_for(main_window)
                 .launch_with_broker(hldefs.clone(), &PROMPT_BROKER)
                 .detach(),
-            messager: VimMessager::builder().launch(()).detach(),
+            messager: VimMessager::builder()
+                .launch(())
+                .forward(sender.input_sender(), identity),
 
             dragging: Rc::new(Cell::new(None)),
             show_pointer: true.into(),
@@ -723,16 +727,15 @@ impl Component for App {
                         let coord = &self.cursor_coord;
                         let cursor_grid = self.cursor_grid;
                         if cursor_grid == grid && row as f64 == coord.row {
-                            if let Some(_cell) = vgrid
+                            if let Some(cell) = vgrid
                                 .textbuf()
                                 .borrow()
                                 .cell(coord.row.floor() as usize, coord.col.floor() as usize)
                             {
-                                // self.cursor
-                                //     .model_mut()
-                                //     .map(|mut m| m.set_cell(cell))
-                                //     .unwrap();
-                                // self.cursor.update_view().unwrap();
+                                self.cursor
+                                    .sender()
+                                    .send(CursorMessage::SetCell(cell))
+                                    .unwrap();
                                 trace!("set cursor cell.");
                             } else {
                                 error!(
@@ -774,11 +777,10 @@ impl Component for App {
                                 .cell((coord.row).floor() as usize, (coord.col).floor() as usize)
                                 .unwrap();
                             debug!("cursor character change to {}", cell.text);
-                            // self.cursor
-                            //     .model_mut()
-                            //     .map(|mut m| m.set_cell(cell))
-                            //     .unwrap();
-                            // self.cursor.update_view().unwrap();
+                            self.cursor
+                                .sender()
+                                .send(CursorMessage::SetCell(cell))
+                                .unwrap();
                         }
                     }
                     RedrawEvent::Resize {
@@ -905,25 +907,20 @@ impl Component for App {
                         let leftop = vgrid.coord();
                         let row = row as usize;
                         let column = column as usize;
-                        if let Some(_cell) = vgrid.textbuf().borrow().cell(row, column) {
+                        if let Some(cell) = vgrid.textbuf().borrow().cell(row, column) {
                             info!(
                                 "cursor goto {}x{} of grid {}, grid at {}x{}",
                                 column, row, grid, leftop.col, leftop.row
                             );
-                            let _coord: Coord =
+                            let coord: Coord =
                                 (leftop.col + column as f64, leftop.row + row as f64).into();
                             self.cursor_grid = grid;
                             self.cursor_coord.col = column as _;
                             self.cursor_coord.row = row as _;
-                            // self.cursor
-                            //     .model_mut()
-                            //     .map(|mut m| {
-                            //         m.set_cell(cell);
-                            //         m.set_grid(grid);
-                            //         m.set_coord(coord);
-                            //     })
-                            //     .unwrap();
-                            // self.cursor.update_view().unwrap();
+                            self.cursor
+                                .sender()
+                                .send(CursorMessage::Goto(grid, coord, cell))
+                                .unwrap();
                         } else {
                             warn!(
                                 "Cursor pos {}x{} of grid {} dose not exists",
@@ -937,38 +934,36 @@ impl Component for App {
                     RedrawEvent::ModeInfoSet { cursor_modes } => {
                         self.cursor_modes = cursor_modes;
 
-                        let _mode = self.cursor_modes.get(self.cursor_mode).unwrap().clone();
-                        // self.cursor
-                        //     .model_mut()
-                        //     .map(|mut m| {
-                        //         m.set_mode(mode);
-                        //     })
-                        //     .unwrap();
-                        // self.cursor.update_view().unwrap();
+                        let mode = self.cursor_modes.get(self.cursor_mode).unwrap().clone();
+                        self.cursor
+                            .sender()
+                            .send(CursorMessage::SetMode(mode))
+                            .unwrap();
                     }
                     RedrawEvent::ModeChange { mode, mode_index } => {
                         self.mode = mode;
                         self.cursor_mode = mode_index as _;
                         let cursor_mode = self.cursor_modes.get(self.cursor_mode).unwrap().clone();
                         info!("Mode Change to {:?} {:?}", &self.mode, cursor_mode);
-                        // self.cursor
-                        //     .model_mut()
-                        //     .map(|mut m| {
-                        //         m.set_mode(cursor_mode);
-                        //     })
-                        //     .unwrap();
-                        // self.cursor.update_view().unwrap();
+                        self.cursor
+                            .sender()
+                            .send(CursorMessage::SetMode(cursor_mode))
+                            .unwrap();
                         if matches!(self.mode, EditorMode::Normal | EditorMode::Unknown(_)) {
-                            sender.output(AppMessage::ShowPointer).unwrap();
+                            // sender
+                            //     .command_sender()
+                            //     .send(AppMessage::ShowPointer)
+                            //     .unwrap();
+                            sender.input(AppMessage::ShowPointer);
                         }
                     }
                     RedrawEvent::BusyStart => {
                         debug!("Ignored BusyStart.");
-                        sender.output(AppMessage::ShowPointer).unwrap();
+                        sender.input(AppMessage::ShowPointer);
                     }
                     RedrawEvent::BusyStop => {
                         debug!("Ignored BusyStop.");
-                        sender.output(AppMessage::ShowPointer).unwrap();
+                        sender.input(AppMessage::ShowPointer);
                     }
                     RedrawEvent::MouseOn => {
                         self.mouse_on.store(true, atomic::Ordering::Relaxed);
