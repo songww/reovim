@@ -1,5 +1,5 @@
 use relm4::prelude::*;
-use tracing::{info, trace};
+use tracing::{info, trace, warn};
 
 use crate::{
     app::AppMessage,
@@ -69,7 +69,7 @@ impl Component for VimMessager {
         sender: ComponentSender<Self>,
         _root: &Self::Root,
     ) {
-        trace!("sending out {:?}", message);
+        warn!("sending out {:?}", message);
         sender.output(message).unwrap();
     }
 }

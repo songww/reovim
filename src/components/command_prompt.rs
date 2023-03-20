@@ -2,15 +2,10 @@ use std::{cell::Cell, collections::LinkedList, rc::Rc, sync::RwLock};
 
 use gtk::prelude::*;
 use once_cell::sync::OnceCell;
-use relm4::{
-    prelude::*,
-};
+use relm4::prelude::*;
 use tracing::{debug, info};
 
-use crate::{
-    bridge::{StyledContent},
-    vimview::{HighlightDefinitions},
-};
+use crate::{bridge::StyledContent, vimview::HighlightDefinitions};
 
 pub static PROMPT_BROKER: relm4::MessageBroker<CommandPromptMessage> = relm4::MessageBroker::new();
 

@@ -19,16 +19,17 @@ use crate::bridge;
 use crate::bridge::{
     EditorMode, MouseButton, ParallelCommand, RedrawEvent, SerialCommand, UiCommand, WindowAnchor,
 };
-use crate::components::bridge::VimBridge;
-use crate::components::{CommandPromptMessage, VimCommandPrompt, PROMPT_BROKER};
+use crate::components::{
+    bridge::VimBridge, vimgrids::GridEvent, CommandPromptMessage, VimCommandPrompt, VimGrids,
+    PROMPT_BROKER,
+};
 use crate::cursor::{CursorMessage, CursorMode, VimCursor};
 use crate::event_aggregator::EVENT_AGGREGATOR;
-use crate::grapheme::Coord;
+use crate::grapheme::{Coord, Rectangle};
 use crate::keys::ToInput;
 use crate::messager::VimMessager;
 use crate::metrics::Metrics;
 use crate::vimview;
-use crate::widgets::board::Board;
 use crate::Opts;
 
 #[allow(non_upper_case_globals)]
@@ -88,7 +89,7 @@ pub struct App {
 
     pub background_changed: Rc<atomic::AtomicBool>,
 
-    pub vgrids: crate::factory::Factory<vimview::VimGrid>,
+    pub vgrids: Controller<VimGrids>,
     pub messages: FactoryVecDeque<vimview::VimMessage>,
     pub dragging: Rc<Cell<Option<Dragging>>>,
     pub show_pointer: atomic::AtomicBool,
@@ -397,14 +398,20 @@ impl Component for App {
                             let rows = da.height() as f64 / metrics.height(); //  + metrics.linespace
                             let cols = da.width() as f64 / metrics.width();
                             debug!("da resizing rows: {} cols: {}", rows, cols);
-                            sender
-                                .send(
-                                    UiCommand::Parallel(ParallelCommand::Resize {
+                            EVENT_AGGREGATOR.send(
+                                UiCommand::Parallel(ParallelCommand::Resize {
                                         width: cols as _,
                                         height: rows as _,
                                     })
-                                )
-                                .unwrap();
+                );
+                            // sender
+                            //     .send(
+                            //         UiCommand::Parallel(ParallelCommand::Resize {
+                            //             width: cols as _,
+                            //             height: rows as _,
+                            //         })
+                            //     )
+                            //     .unwrap();
                         },
                         set_draw_func[hldefs = model.hldefs.clone()] => move |_da, cr, w, h| {
                             let hldefs = hldefs.read().unwrap();
@@ -420,7 +427,8 @@ impl Component for App {
                 }
             },
             connect_close_request[sender = model.messager.sender().clone()] => move |_| {
-                sender.send(UiCommand::Parallel(ParallelCommand::Quit)).unwrap();
+                EVENT_AGGREGATOR.send(UiCommand::Parallel(ParallelCommand::Quit));
+                // sender.send(UiCommand::Parallel(ParallelCommand::Quit)).unwrap();
                 gtk::Inhibit(true)
             },
         }
@@ -458,9 +466,14 @@ impl Component for App {
         ) {
             let coord = &model.cursor_coord;
             let metrics = model.metrics.get();
-            if let Some(base) = model.vgrids.get(model.cursor_grid).map(|vg| vg.coord()) {
-                let (col, row) = (base.col + coord.col, base.row + coord.row);
-                let (x, y) = (col * metrics.width(), row * metrics.height());
+            if let Some(base) = model
+                .vgrids
+                .model()
+                .get(model.cursor_grid)
+                .map(|vg| vg.coord().clone())
+            {
+                let coord = Coord::new(base.col + coord.col, base.row + coord.row);
+                let (x, y) = coord.to_physical(metrics);
                 let rect = gdk::Rectangle::new(
                     x as i32,
                     y as i32,
@@ -527,6 +540,7 @@ impl Component for App {
         };
         let hldefs = Rc::new(RwLock::new(vimview::HighlightDefinitions::new()));
         let metrics: Rc<Cell<Metrics>> = Rc::new(Metrics::new().into());
+        let font_description = Rc::new(RefCell::new(font_desc));
 
         let mut model = App {
             size,
@@ -550,12 +564,12 @@ impl Component for App {
             cursor_coord: Coord::default(),
             cursor_coord_changed: atomic::AtomicBool::new(false),
 
-            pctx,
+            pctx: pctx.clone(),
             gtksettings: OnceCell::new(),
             im_context: OnceCell::new(),
 
-            metrics,
-            font_description: Rc::new(RefCell::new(font_desc)),
+            metrics: metrics.clone(),
+            font_description: font_description.clone(),
             font_changed: Rc::new(false.into()),
 
             hldefs: hldefs.clone(),
@@ -564,7 +578,9 @@ impl Component for App {
             background_changed: Rc::new(false.into()),
 
             bridge: None,
-            vgrids: crate::factory::Factory::new(Board::default(), sender.input_sender()),
+            vgrids: VimGrids::builder()
+                .launch(((*pctx).clone(), metrics, font_description))
+                .forward(sender.input_sender(), identity),
             messages: FactoryVecDeque::new(gtk::Box::default(), sender.input_sender()),
             cmd_prompt: VimCommandPrompt::builder()
                 // .transient_for(main_window)
@@ -647,9 +663,7 @@ impl Component for App {
 
                                 self.calculate();
 
-                                self.vgrids
-                                    .iter_mut()
-                                    .for_each(|(_, vgrid)| vgrid.reset_cache());
+                                self.vgrids.sender().send(GridEvent::ResetCache).unwrap();
 
                                 self.font_changed.store(true, atomic::Ordering::Relaxed);
                                 self.cursor_coord_changed
@@ -698,7 +712,7 @@ impl Component for App {
                     }
                     RedrawEvent::Clear { grid } => {
                         debug!("cleared grid {}", grid);
-                        self.vgrids.get_mut(grid).map(|grid| grid.clear());
+                        self.vgrids.sender().send(GridEvent::Clear(grid)).unwrap();
                     }
                     RedrawEvent::GridLine {
                         grid,
@@ -714,11 +728,11 @@ impl Component for App {
                             column_start
                         );
 
-                        let grids: Vec<_> = self.vgrids.iter().map(|(k, _)| k).collect();
-                        let vgrid = self.vgrids.get_mut(grid).expect(&format!(
-                            "grid {} not found, valid grids {:?}",
-                            grid, &grids
-                        ));
+                        let grids: Vec<_> = self.vgrids.model().iter().map(|v| v.id()).collect();
+                        let vgrids = self.vgrids.model();
+                        let vgrid = vgrids.get(grid).unwrap_or_else(|| {
+                            panic!("grid {} not found, valid grids {:?}", grid, &grids)
+                        });
                         vgrid
                             .textbuf()
                             .borrow()
@@ -747,26 +761,28 @@ impl Component for App {
                     }
                     RedrawEvent::Scroll {
                         grid,
-                        top: _,
-                        bottom: _,
-                        left: _,
-                        right: _,
+                        top,
+                        bottom,
+                        left,
+                        right,
                         rows,
                         columns,
                     } => {
-                        let vgrid = self.vgrids.get_mut(grid).unwrap();
-                        if rows.is_positive() {
-                            vgrid.up(rows.abs() as _);
-                        } else if rows.is_negative() {
-                            vgrid.down(rows.abs() as _);
-                        } else if columns.is_positive() {
-                            unimplemented!("scroll left.");
-                        } else if columns.is_negative() {
-                            unimplemented!("scroll right.");
-                        } else {
-                            // rows and columns are both zero.
-                            unimplemented!("could not be there.");
-                        }
+                        self.vgrids
+                            .sender()
+                            .send(GridEvent::Scroll {
+                                grid,
+                                top,
+                                bottom,
+                                left,
+                                right,
+                                rows,
+                                columns,
+                            })
+                            .unwrap();
+                        let vgrids = self.vgrids.model();
+                        let vgrid = vgrids.get(grid).unwrap();
+
                         let cursor_grid = self.cursor_grid;
                         debug!("scrolling grid {} cursor at {}", grid, cursor_grid);
                         if cursor_grid == grid {
@@ -790,31 +806,28 @@ impl Component for App {
                     } => {
                         info!("Resizing grid {} to {}x{}.", grid, width, height);
 
-                        let exists = self.vgrids.get(grid).is_some();
-                        if exists {
+                        if self.vgrids.model().get(grid).is_some() {
                             self.vgrids
-                                .get_mut(grid)
-                                .unwrap()
-                                .resize(width as _, height as _);
+                                .sender()
+                                .send(GridEvent::Resize {
+                                    grid,
+                                    width,
+                                    height,
+                                })
+                                .unwrap();
                         } else {
                             debug!("Add grid {} to default window at left top.", grid);
-                            self.vgrids.insert(
-                                grid,
-                                (
-                                    grid,
-                                    0,
-                                    (0., 0.).into(),
-                                    (width, height).into(),
-                                    self.hldefs.clone(),
-                                    self.dragging.clone(),
-                                    self.metrics.clone(),
-                                    self.font_description.clone(),
-                                ),
-                            );
                             self.vgrids
-                                .get_mut(grid)
-                                .unwrap()
-                                .set_pango_context(self.pctx.clone());
+                                .sender()
+                                .send(GridEvent::Add {
+                                    grid,
+                                    win: 0,
+                                    coord: (0., 0.).into(),
+                                    rectangle: (width, height).into(),
+                                    hldefs: self.hldefs.clone(),
+                                    dragging: self.dragging.clone(),
+                                })
+                                .unwrap();
                         };
                     }
 
@@ -830,35 +843,38 @@ impl Component for App {
                         // let x = start_column as f64 * metrics.width();
                         // let y = start_row as f64 * metrics.height(); //;
 
-                        if self.vgrids.get(grid).is_none() {
+                        if self.vgrids.model().get(grid).is_none() {
                             // dose not exists, create
-                            self.vgrids.insert(
-                                grid,
-                                (
+                            self.vgrids
+                                .sender()
+                                .send(GridEvent::Add {
                                     grid,
-                                    0,
-                                    (column as usize, row as usize).into(),
-                                    (width, height).into(),
-                                    self.hldefs.clone(),
-                                    self.dragging.clone(),
-                                    self.metrics.clone(),
-                                    self.font_description.clone(),
-                                ),
-                            );
+                                    win: 0,
+                                    coord: (column as usize, row as usize).into(),
+                                    rectangle: (width, height).into(),
+                                    hldefs: self.hldefs.clone(),
+                                    dragging: self.dragging.clone(),
+                                })
+                                .unwrap();
                             // vgrid.set_pango_context(self.pctx.clone());
                             info!(
                                 "Add grid {} at {}x{} with {}x{}.",
                                 grid, column, row, height, width
                             );
                         } else {
-                            let vgrid = self.vgrids.get_mut(grid).unwrap();
-                            vgrid.resize(width as _, height as _);
-                            vgrid.set_coord(column as _, row as _);
+                            self.vgrids
+                                .sender()
+                                .send(GridEvent::AtPosition {
+                                    grid,
+                                    coord: Coord::new(column as _, row as _),
+                                    rectangle: Rectangle::new(width as _, height as _),
+                                })
+                                .unwrap();
                             debug!(
                                 "Move grid {} to {}x{} with {}x{}.",
                                 grid, column, row, height, width
                             );
-                            vgrid.show();
+                            // vgrid.show();
                         }
 
                         info!(
@@ -880,30 +896,36 @@ impl Component for App {
                              grid, top_line, bottom_line, current_line, current_column, line_count,
                         );
 
-                        if self.vgrids.get(grid).is_none() {
+                        if self.vgrids.model().get(grid).is_none() {
                             warn!("WindowViewport before create grid {}.", grid);
                         } else {
-                            let vgrid = self.vgrids.get_mut(grid).unwrap();
-                            vgrid.show();
+                            self.vgrids.sender().send(GridEvent::Show(grid)).unwrap();
                         }
                     }
                     RedrawEvent::WindowHide { grid } => {
                         info!("hide grid {}", grid);
-                        self.vgrids.get_mut(grid).unwrap().hide();
+                        self.vgrids
+                            .sender()
+                            .send(GridEvent::WindowHide(grid))
+                            .unwrap();
                     }
                     RedrawEvent::WindowClose { grid } => {
                         info!("grid {} closed", grid);
-                        self.vgrids.remove(grid);
+                        self.vgrids
+                            .sender()
+                            .send(GridEvent::WindowClose(grid))
+                            .unwrap();
                     }
                     RedrawEvent::Destroy { grid } => {
                         info!("grid {} destroyed", grid);
-                        self.vgrids.remove(grid);
+                        self.vgrids.sender().send(GridEvent::Destroy(grid)).unwrap();
                     }
                     RedrawEvent::Flush => {
-                        self.vgrids.flush();
+                        self.vgrids.sender().send(GridEvent::Flush).unwrap();
                     }
                     RedrawEvent::CursorGoto { grid, row, column } => {
-                        let vgrid = self.vgrids.get(grid).unwrap();
+                        let vgrids = self.vgrids.model();
+                        let vgrid = vgrids.get(grid).unwrap();
                         let leftop = vgrid.coord();
                         let row = row as usize;
                         let column = column as usize;
@@ -1007,34 +1029,40 @@ impl Component for App {
                             grid, row, scrolled, separator_character
                         );
                         // let metrics = self.metrics.get();
-                        // let y = row as f64 * metrics.height(); //;
-                        let width = self.vgrids.get(1).map(|vgrid| vgrid.width()).unwrap();
-                        if let Some(vgrid) = self.vgrids.get_mut(grid) {
-                            debug!(
-                                "moving message grid to 0x{} size {}x{}",
-                                row,
-                                width,
-                                vgrid.height()
-                            );
-                            vgrid.set_coord(0., row as f64);
-                            vgrid.resize(width, vgrid.height());
-                            vgrid.show();
+                        // let y = row as f64 * metrics.height();
+                        let ids: Vec<_> = self.vgrids.model().iter().map(|v| v.id()).collect();
+                        debug!("grids {:?}", ids);
+                        let width = self
+                            .vgrids
+                            .model()
+                            .get(1)
+                            .map(|vgrid| vgrid.width())
+                            .unwrap();
+                        let exists = self.vgrids.model().get(grid).is_some();
+                        if exists {
+                            debug!("moving message grid to 0x{} size {}x-", row, width,);
+                            self.vgrids
+                                .sender()
+                                .send(GridEvent::AtPosition {
+                                    grid,
+                                    coord: (0., row as f64).into(),
+                                    rectangle: (width, 0).into(),
+                                })
+                                .unwrap();
                         } else {
                             debug!("creating message grid at 0x{} size {}x{}", row, width, 1);
                             let row = row as usize;
-                            self.vgrids.insert(
-                                grid,
-                                (
+                            self.vgrids
+                                .sender()
+                                .send(GridEvent::Add {
                                     grid,
-                                    0,
-                                    (0, row).into(),
-                                    (width, 1).into(),
-                                    self.hldefs.clone(),
-                                    self.dragging.clone(),
-                                    self.metrics.clone(),
-                                    self.font_description.clone(),
-                                ),
-                            );
+                                    win: 0,
+                                    coord: (0, row).into(),
+                                    rectangle: (width, 1).into(),
+                                    hldefs: self.hldefs.clone(),
+                                    dragging: self.dragging.clone(),
+                                })
+                                .unwrap();
                             // let mut vgrid = VimGrid::new(
                             //     grid,
                             //     0,
@@ -1071,7 +1099,7 @@ impl Component for App {
                         info!(
                             "grid {} is float window exists in vgrids {} anchor {} {:?} pos {}x{} focusable {}",
                             grid,
-                            self.vgrids.get(grid).is_some(),
+                            self.vgrids.model().get(grid).is_some(),
                             anchor_grid,
                             anchor,
                             anchor_column,
@@ -1082,10 +1110,17 @@ impl Component for App {
                         let anchor_column = anchor_column.max(0.);
                         let anchor_row = anchor_row.max(0.);
                         info!("after clamp {}x{}", anchor_column, anchor_row);
-                        let coord = self.vgrids.get(anchor_grid).unwrap().coord().clone();
                         // let (left, top) = (basepos.x, basepos.y);
 
-                        let vgrid = self.vgrids.get_mut(grid).unwrap();
+                        let coord = self
+                            .vgrids
+                            .model()
+                            .get(anchor_grid)
+                            .unwrap()
+                            .coord()
+                            .clone();
+                        let vgrids = self.vgrids.model();
+                        let vgrid = vgrids.get(grid).unwrap();
 
                         let (col, row) = match anchor {
                             WindowAnchor::NorthWest => (anchor_column, anchor_row),
@@ -1105,9 +1140,14 @@ impl Component for App {
                         // let x = col * metrics.width();
                         // let y = row * metrics.height();
                         info!("moving float window {} to {}x{}", grid, col, row);
-                        vgrid.set_coord(coord.col + col.max(0.), coord.row + row.max(0.));
-                        vgrid.set_is_float(true);
-                        vgrid.set_focusable(focusable);
+                        self.vgrids
+                            .sender()
+                            .send(GridEvent::FloatPosition {
+                                grid,
+                                coord: (coord.col + col.max(0.), coord.row + row.max(0.)).into(),
+                                focusable,
+                            })
+                            .unwrap();
                     }
 
                     RedrawEvent::CommandLineShow {

@@ -90,7 +90,7 @@ package = "graphene-rs"
 [dependencies.gtk]
 version = "0.6"
 package = "gtk4"
-features = ["v4_6"]
+features = ["v4_6", "blueprint"]
 
 [dependencies.glib]
 version = "0.17"

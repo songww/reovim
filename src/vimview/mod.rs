@@ -1,9 +1,8 @@
 //mod commandview;
-mod gridview;
+mod bingrid;
 mod highlights;
 mod messageview;
 mod textbuf;
-mod widgets;
 
 use std::{
     cell::RefCell,
@@ -11,11 +10,10 @@ use std::{
     rc::Rc,
 };
 
-pub use gridview::VimGridView;
+pub use bingrid::BinGrid;
 pub use highlights::HighlightDefinitions;
 pub use messageview::{MessageViewWidgets, VimMessage, VimMessageView};
 pub use textbuf::{TextCell, TextLine};
-pub use widgets::{VimGrid, VimGridWidgets};
 
 #[derive(Clone, Debug)]
 pub struct TextBuf(Rc<RefCell<textbuf::TextBuf>>);

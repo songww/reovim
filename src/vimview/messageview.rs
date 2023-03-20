@@ -10,7 +10,7 @@ use crate::{
     metrics::Metrics,
 };
 
-use super::{HighlightDefinitions};
+use super::HighlightDefinitions;
 
 mod imp {
     use std::{cell::Cell, rc::Rc, sync::RwLock};
@@ -22,14 +22,14 @@ mod imp {
     use crate::{
         bridge::{GridLineCell, MessageKind, StyledContent},
         metrics::Metrics,
-        vimview::{HighlightDefinitions, VimGridView},
+        vimview::{BinGrid, HighlightDefinitions},
     };
 
     // #[derive(Derivative)]
     #[derive(Debug)]
     pub struct VimMessageView {
         kind: Cell<MessageKind>,
-        view: VimGridView,
+        view: BinGrid,
         metrics: OnceCell<Rc<Cell<crate::metrics::Metrics>>>,
     }
 
@@ -40,7 +40,7 @@ mod imp {
         type Type = super::VimMessageView;
 
         fn new() -> Self {
-            let view = VimGridView::new(u64::MAX, 1, 1);
+            let view = BinGrid::new(u64::MAX, 1, 1);
             Self {
                 view,
                 kind: Cell::new(MessageKind::Unknown),
