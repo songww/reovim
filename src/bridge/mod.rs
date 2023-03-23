@@ -9,8 +9,8 @@ mod ui_commands;
 
 use std::sync::Arc;
 
-use log::{error, info};
 use nvim::UiAttachOptions;
+use tracing::{error, info};
 
 use crate::{running_tracker::*, settings::*, ConnectionMode, Opts};
 
@@ -90,7 +90,7 @@ pub async fn open(opts: Opts) {
             running_tracker.quit("neovim processed failed");
         },
         _ = running_tracker.wait_quit() => {
-            log::info!("io-handler quit.");
+            info!("io-handler quit.");
         }
     }
 }

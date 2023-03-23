@@ -2,121 +2,116 @@ mod cursor;
 // mod state;
 // mod vfx;
 
-pub use cursor::{Cursor as VimCursor, CursorMode, CursorShape};
-use gtk::prelude::{StyleContextExt, WidgetExt};
+use std::cell::Cell;
+use std::rc::Rc;
+use std::sync::RwLock;
 
+pub use cursor::{Cursor as VimCursor, CursorMode, CursorShape};
+
+use gtk::prelude::{StyleContextExt, WidgetExt};
 use relm4::drawing::DrawContext;
-use relm4::{MicroModel, MicroWidgets, Sender};
+use relm4::prelude::*;
+use tracing::debug;
 
 use crate::grapheme::Coord;
+use crate::metrics::Metrics;
+use crate::vimview::HighlightDefinitions;
 use crate::vimview::TextCell;
 
-impl MicroModel for VimCursor {
-    type Msg = CursorMessage;
-    type Widgets = CursorWidgets;
-    type Data = ();
-
-    fn update(&mut self, _: CursorMessage, _data: &(), _sender: Sender<Self::Msg>) {}
-}
-
+#[derive(Debug)]
 pub enum CursorMessage {
     Goto(u64, Coord, TextCell),
     SetMode(CursorMode),
     SetCell(TextCell),
 }
 
-// impl MicroComponent<AppModel> for VimCursor {
-//     fn init_model(parent_model: &AppModel) -> Self {
-//         VimCursor::new(
-//             parent_model.pctx.clone(),
-//             parent_model.metrics.clone(),
-//             parent_model.hldefs.clone(),
-//         )
-//     }
+#[relm4::component(pub)]
+impl SimpleComponent for VimCursor {
+    type Widgets = CursorWidgets;
+    type Input = CursorMessage;
+    type Output = ();
+    type Init = (
+        pango::Context,
+        Rc<Cell<Metrics>>,
+        Rc<RwLock<HighlightDefinitions>>,
+    );
 
-//     fn update(
-//         &mut self,
-//         message: CursorMessage,
-//         _components: &(),
-//         _sender: Sender<CursorMessage>,
-//         _parent_sender: Sender<AppMessage>,
-//     ) {
-//         match message {
-//             CursorMessage::Goto(grid, coord, cell) => {
-//                 self.grid = grid;
-//                 self.coord = coord;
-//                 self.set_cell(cell);
-//             }
-//             CursorMessage::SetMode(mode) => {
-//                 self.set_mode(mode);
-//             }
-//             CursorMessage::SetCell(cell) => {
-//                 self.set_cell(cell);
-//             }
-//         }
-//     }
-// }
-
-#[derive(Debug)]
-pub struct CursorWidgets {
-    da: gtk::DrawingArea,
-    dh: relm4::drawing::DrawHandler,
-    css_provider: gtk::CssProvider,
-}
-
-impl MicroWidgets<VimCursor> for CursorWidgets {
-    type Root = gtk::DrawingArea;
-
-    fn init_view(_model: &VimCursor, _sender: Sender<<VimCursor as MicroModel>::Msg>) -> Self {
-        let da = gtk::DrawingArea::new();
-        da.set_widget_name("cursor");
-        da.set_visible(true);
-        da.set_hexpand(true);
-        da.set_vexpand(true);
-        da.set_can_focus(false);
-        da.set_sensitive(false);
-        da.set_focus_on_click(false);
-        da.set_css_classes(&["blink"]);
-
-        let css_provider = gtk::CssProvider::new();
-        let mut dh = relm4::drawing::DrawHandler::new().unwrap();
-        dh.init(&da);
-        da.style_context()
-            .add_provider(&css_provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
-
-        CursorWidgets {
-            da,
-            dh,
-            css_provider,
+    view! {
+        #[root]
+        drawing_area = gtk::DrawingArea {
+            set_widget_name: "cursor",
+            set_visible: true,
+            set_hexpand: true,
+            set_vexpand: true,
+            set_can_focus: false,
+            set_sensitive: false,
+            set_focus_on_click: false,
+            set_css_classes: &["blink"],
         }
     }
 
-    fn view(&mut self, vc: &VimCursor, _: Sender<CursorMessage>) {
-        log::trace!("start cursor view.");
-        let instant = std::time::Instant::now();
-        self.da.set_opacity(1.);
-        self.da.remove_css_class("blink");
-        self.da.style_context().remove_provider(&self.css_provider);
-        let cr = self.dh.get_context().unwrap();
-        vc.drawing(&cr);
-        self.da
+    additional_fields! {
+        handle: relm4::drawing::DrawHandler,
+        css_provider: gtk::CssProvider,
+    }
+
+    fn init(
+        (ctx, metrics, hldefs): Self::Init,
+        drawing_area: &Self::Root,
+        _sender: ComponentSender<Self>,
+    ) -> ComponentParts<Self> {
+        let model = VimCursor::new(ctx, metrics, hldefs);
+
+        let handle = relm4::drawing::DrawHandler::new_with_drawing_area(drawing_area.clone());
+
+        let css_provider = gtk::CssProvider::new();
+        drawing_area
             .style_context()
-            .add_provider(&self.css_provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
-        if let Some(blinking) = vc.maybe_blinking() {
-            self.css_provider.load_from_data(blinking.as_bytes());
-            self.da
-                .style_context()
-                .add_provider(&self.css_provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
-            self.da.add_css_class("blink");
+            .add_provider(&css_provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+
+        let widgets = view_output!();
+
+        ComponentParts { model, widgets }
+    }
+
+    fn update(&mut self, message: Self::Input, _sender: ComponentSender<Self>) {
+        match message {
+            CursorMessage::Goto(grid, coord, cell) => {
+                self.grid = grid;
+                self.coord = coord;
+                self.set_cell(cell);
+            }
+            CursorMessage::SetMode(mode) => {
+                self.set_mode(mode);
+            }
+            CursorMessage::SetCell(cell) => {
+                self.set_cell(cell);
+            }
         }
-        log::trace!(
+    }
+
+    fn post_view() {
+        tracing::trace!("start cursor view.");
+        let instant = std::time::Instant::now();
+        drawing_area.set_opacity(1.);
+        drawing_area.remove_css_class("blink");
+        drawing_area.style_context().remove_provider(css_provider);
+        let cr = handle.get_context();
+        self.drawing(&cr);
+        drawing_area
+            .style_context()
+            .add_provider(css_provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+        if let Some(blinking) = self.maybe_blinking() {
+            css_provider.load_from_data(&blinking);
+            drawing_area
+                .style_context()
+                .add_provider(css_provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+            drawing_area.add_css_class("blink");
+        }
+        tracing::trace!(
             "cursor view used {:.3}ms",
             instant.elapsed().as_secs_f32() * 1000.
         );
-    }
-
-    fn root_widget(&self) -> Self::Root {
-        self.da.clone()
     }
 }
 
@@ -142,7 +137,7 @@ impl VimCursor {
             blinkon + blinkoff,
             blinkon * 100 / (blinkon + blinkoff)
         );
-        log::debug!("css {} {}: \n{}", blinkon, blinkoff, &css);
+        debug!("css {} {}: \n{}", blinkon, blinkoff, &css);
         Some(css)
     }
 
@@ -158,7 +153,7 @@ impl VimCursor {
         let cell = self.cell();
         let metrics = self.metrics.get();
         let (x, y, width, height) = self.rectangle(metrics.width(), metrics.height());
-        log::debug!("drawing cursor at {}x{}.", x, y);
+        debug!("drawing cursor at {}x{}.", x, y);
         match self.shape {
             CursorShape::Block => {
                 use pango::AttrType;
@@ -181,7 +176,7 @@ impl VimCursor {
                         _ => None,
                     })
                     .for_each(|attr| attrs.insert(attr));
-                log::debug!("cursor cell '{}' wide {}", cell.text, self.width);
+                debug!("cursor cell '{}' wide {}", cell.text, self.width);
                 let itemized = &pango::itemize(
                     &self.pctx,
                     &cell.text,
@@ -200,7 +195,7 @@ impl VimCursor {
                     let x_offset = geometry.x_offset() - (geometry.width() - width) / 2;
                     geometry.set_width(width);
                     geometry.set_x_offset(x_offset);
-                    log::debug!("cursor glyph width {}", width);
+                    debug!("cursor glyph width {}", width);
                 }
                 // 试试汉字
                 cr.save().unwrap();
@@ -223,7 +218,7 @@ impl VimCursor {
                 pangocairo::show_glyph_string(cr, &itemized.analysis().font(), &mut glyph_string);
             }
             _ => {
-                log::debug!("drawing cursor with {}x{}", width, height);
+                debug!("drawing cursor with {}x{}", width, height);
                 cr.set_source_rgba(
                     bg.red() as f64,
                     bg.green() as f64,

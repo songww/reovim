@@ -1,6 +1,7 @@
 use std::sync::{atomic, Arc};
 
 use once_cell::sync::Lazy;
+use tracing::info;
 
 // pub static RUNNING_TRACKER: Lazy<Arc<tokio::sync::Notify>> =
 //     Lazy::new(|| Arc::new(tokio::sync::Notify::new()));
@@ -23,13 +24,13 @@ impl RunningTracker {
 
     pub fn quit(&self, reason: &str) {
         self.notify.notify_waiters();
-        log::info!("Quit {}", reason);
+        info!("Quit {}", reason);
     }
 
     pub fn quit_with_code(&self, code: i32, reason: &str) {
         self.notify.notify_waiters();
         self.exit_code.store(code, atomic::Ordering::Relaxed);
-        log::info!("Quit with code {}: {}", code, reason);
+        info!("Quit with code {}: {}", code, reason);
     }
 
     #[allow(unused)]

@@ -73,11 +73,11 @@ impl HighlightDefinitions {
     pub const DEFAULT: u64 = 0;
 
     pub fn new() -> HighlightDefinitions {
-        glib::Object::new::<Self>(&[]).expect("Failed to initialize Timer object")
+        glib::Object::new()
     }
 
     fn imp(&self) -> &imp::HighlightDefinitions {
-        imp::HighlightDefinitions::from_instance(self)
+        imp::HighlightDefinitions::from_obj(self)
     }
 
     pub fn get(&self, k: u64) -> Option<&style::Style> {

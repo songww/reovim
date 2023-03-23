@@ -1,9 +1,10 @@
 #[macro_use]
 extern crate derive_new;
-#[macro_use]
-extern crate derivative;
 
-use clap::{IntoApp, Parser};
+use clap::{CommandFactory, Parser};
+use relm4::RelmApp;
+
+use crate::app::{App, AppMessage};
 
 mod app;
 mod bridge;
@@ -21,6 +22,7 @@ mod running_tracker;
 mod settings;
 mod style;
 mod vimview;
+mod widgets;
 
 enum ConnectionMode {
     Child,
@@ -45,8 +47,8 @@ pub struct Opts {
     height: i32,
 
     /// A level of log, see: https://docs.rs/env_logger/latest/env_logger/#enabling-logging
-    #[clap(short, long, value_name = "RUST_LOG", parse(from_occurrences))]
-    verbose: i32,
+    #[clap(short, long, value_name = "RUST_LOG", action = clap::ArgAction::Count)]
+    verbose: u8,
 
     /// files to open.
     #[clap(env = "FILES", value_name = "FILES")]
@@ -74,23 +76,36 @@ impl Opts {
 }
 
 fn main() {
+    use tracing::trace;
+    use tracing_subscriber::{filter::LevelFilter, EnvFilter};
+
     let mut opts: Opts = Opts::parse();
-    let level = match opts.verbose {
-        0 => "error",
-        1 => "warn",
-        2 => "info",
-        3 => "debug",
-        _ => "trace",
+    let levelfilter = match opts.verbose {
+        0 => LevelFilter::OFF,
+        1 => LevelFilter::ERROR,
+        2 => LevelFilter::WARN,
+        3 => LevelFilter::INFO,
+        4 => LevelFilter::DEBUG,
+        _ => LevelFilter::TRACE,
     };
-    let env = env_logger::Env::default().default_filter_or(level);
-    env_logger::Builder::from_env(env).init();
-    log::trace!("command line options: {:?}", opts);
+
+    let subscriber = tracing_subscriber::fmt()
+        .compact()
+        .with_max_level(levelfilter);
+    if let Ok(filter) = EnvFilter::try_from_default_env() {
+        subscriber.with_env_filter(filter).init();
+    } else {
+        subscriber.init();
+    }
+
     let app = Opts::command().allow_missing_positional(true);
     let title = app.get_bin_name().unwrap_or("rv");
     opts.title = title.to_string();
-    log::trace!("opts: {:?}", opts);
-    let model = app::AppModel::new(opts);
-    let relm = relm4::RelmApp::new(model);
 
-    relm.run_with_args(&[title]);
+    trace!("opts: {:?}", opts);
+    // let model = app::AppModel::new(opts);
+    let relm =
+        RelmApp::<AppMessage>::new("me.songww.editor.reovim").with_args(vec![title.to_string()]);
+
+    relm.run::<App>(opts);
 }

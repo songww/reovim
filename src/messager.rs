@@ -1,43 +1,51 @@
-use relm4::{MessageHandler, Sender};
-// use tokio::runtime::{Builder, Runtime};
-// use tokio::sync::mpsc::unbounded_channel as unbound;
+use relm4::prelude::*;
+use tracing::{info, trace, warn};
 
 use crate::{
     app::AppMessage,
     bridge::{RedrawEvent, UiCommand},
     event_aggregator::EVENT_AGGREGATOR,
-    loggingchan::LoggingTx,
     running_tracker::RUNNING_TRACKER,
 };
 
+#[derive(Debug)]
 pub struct VimMessager {}
 
-impl MessageHandler<crate::app::AppModel> for VimMessager {
-    type Msg = RedrawEvent;
-    type Sender = LoggingTx<UiCommand>;
+impl Component for VimMessager {
+    type Init = ();
+    type Input = UiCommand;
+    type Output = AppMessage;
+    type Root = ();
+    type Widgets = ();
+    type CommandOutput = AppMessage;
 
-    fn init(app_model: &crate::app::AppModel, parent_sender: Sender<AppMessage>) -> Self {
+    fn init_root() -> Self::Root {
+        ()
+    }
+
+    fn init(_: Self::Init, _: &Self::Root, sender: ComponentSender<Self>) -> ComponentParts<Self> {
         let mut rx = EVENT_AGGREGATOR.register_event::<RedrawEvent>();
-        let sender = parent_sender.clone();
+        // let sender = sender.clone();
         let running_tracker = RUNNING_TRACKER.clone();
-        app_model.rt.spawn(async move {
+
+        sender.command(|sender, _| async move {
             loop {
                 tokio::select! {
                     _ = running_tracker.wait_quit() => {
-                        log::info!("messager quit.");
+                        info!("messager quit.");
                         sender.send(AppMessage::Quit).unwrap();
                         // 保证最后一个退出, 避免其他task还在写,这里已经关闭,报错.
                         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
                         break;
                     },
                     Some(event) = rx.recv() => {
-                        log::trace!("RedrawEvent {:?}", event);
+                        trace!("RedrawEvent {:?}", event);
                         sender
                             .send(AppMessage::RedrawEvent(event))
                             .expect("Failed to send RedrawEvent to main thread");
                     },
                     else => {
-                        log::info!("messager None RedrawEvent event received, quit.");
+                        info!("messager None RedrawEvent event received, quit.");
                         sender.send(AppMessage::Quit).unwrap();
                         break;
                     },
@@ -45,15 +53,23 @@ impl MessageHandler<crate::app::AppModel> for VimMessager {
             }
         });
 
-        VimMessager {}
+        ComponentParts {
+            model: VimMessager {},
+            widgets: (),
+        }
     }
 
-    fn send(&self, message: RedrawEvent) {
-        EVENT_AGGREGATOR.send::<RedrawEvent>(message);
+    fn update(&mut self, message: Self::Input, _sender: ComponentSender<Self>, _: &Self::Root) {
+        EVENT_AGGREGATOR.send::<UiCommand>(message);
     }
 
-    fn sender(&self) -> Self::Sender {
-        unimplemented!()
-        // self.sender.clone()
+    fn update_cmd(
+        &mut self,
+        message: Self::CommandOutput,
+        sender: ComponentSender<Self>,
+        _root: &Self::Root,
+    ) {
+        warn!("sending out {:?}", message);
+        sender.output(message).unwrap();
     }
 }

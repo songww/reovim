@@ -1,7 +1,8 @@
 use std::cell::Cell;
 use std::rc::Rc;
+use std::sync::RwLock;
 
-use parking_lot::RwLock;
+use tracing::debug;
 
 use crate::color::Color;
 use crate::grapheme::Coord;
@@ -53,14 +54,14 @@ pub struct Cursor {
     pub width: f64,
     pub cell: TextCell,
 
-    pub pctx: Rc<pango::Context>,
+    pub pctx: pango::Context,
     pub metrics: Rc<Cell<Metrics>>,
     pub hldefs: Rc<RwLock<HighlightDefinitions>>,
 }
 
 impl Cursor {
-    pub fn new(
-        pctx: Rc<pango::Context>,
+    pub(super) fn new(
+        pctx: pango::Context,
         metrics: Rc<Cell<Metrics>>,
         hldefs: Rc<RwLock<HighlightDefinitions>>,
     ) -> Cursor {
@@ -85,10 +86,9 @@ impl Cursor {
 
     pub fn rectangle(&self, width: f64, height: f64) -> (f64, f64, f64, f64) {
         let percentage = self.cell_percentage.unwrap_or(1.);
-        log::debug!(
+        debug!(
             "cursor percentage {:?} {}",
-            self.cell_percentage,
-            percentage
+            self.cell_percentage, percentage
         );
         match self.shape {
             CursorShape::Block => (
@@ -113,7 +113,7 @@ impl Cursor {
     }
 
     pub fn foreground(&self) -> Color {
-        let hldefs = self.hldefs.read();
+        let hldefs = self.hldefs.read().unwrap();
         let default_colors = hldefs.defaults().unwrap();
         if let Some(style_id) = self.style.filter(|&s| s != HighlightDefinitions::DEFAULT) {
             let style = hldefs.get(style_id).unwrap();
@@ -127,7 +127,7 @@ impl Cursor {
     }
 
     pub fn background(&self) -> Color {
-        let hldefs = self.hldefs.read();
+        let hldefs = self.hldefs.read().unwrap();
         let default_colors = hldefs.defaults().unwrap();
         let (mut color, blend) =
             if let Some(style_id) = self.style.filter(|&s| s != HighlightDefinitions::DEFAULT) {

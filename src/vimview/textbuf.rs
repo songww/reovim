@@ -1,35 +1,37 @@
 use std::cell::Cell;
 use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
+use std::sync::RwLock;
 
 use glib::subclass::prelude::*;
-use parking_lot::RwLock;
 
 use super::highlights::HighlightDefinitions;
 
 mod imp {
     use std::cell::Cell;
     use std::rc::Rc;
+    use std::sync::RwLock;
+    use std::sync::RwLockReadGuard;
 
     use glib::subclass::prelude::*;
-    use parking_lot::{RwLock, RwLockReadGuard};
+    use tracing::{debug, error, trace};
 
     use crate::vimview::HighlightDefinitions;
 
-    #[derive(Derivative)]
-    #[derivative(Debug)]
+    #[derive(debug::Debug)]
     pub struct _TextBuf {
         rows: usize,
         cols: usize,
 
-        #[derivative(Debug = "ignore")]
+        #[debug(skip)]
         cells: Box<[super::TextLine]>,
+
         metrics: Option<Rc<Cell<crate::metrics::Metrics>>>,
 
-        #[derivative(Debug = "ignore")]
+        #[debug(skip)]
         hldefs: Option<Rc<RwLock<HighlightDefinitions>>>,
 
-        #[derivative(Debug = "ignore")]
+        #[debug(skip)]
         pctx: Option<Rc<pango::Context>>,
     }
 
@@ -58,7 +60,7 @@ mod imp {
 
         fn reset_cache(&mut self) {
             let pctx = self.pctx.as_ref().unwrap();
-            let hldefs = self.hldefs.as_ref().unwrap().read();
+            let hldefs = self.hldefs.as_ref().unwrap().read().unwrap();
             let metrics = self.metrics.as_ref().unwrap().get();
             self.cells.iter_mut().for_each(|line| {
                 line.iter_mut().for_each(|cell| {
@@ -83,17 +85,16 @@ mod imp {
             let nrows = self.rows;
             let ncols = self.cols;
             if nrows <= row {
-                log::error!(
+                error!(
                     "set cells dest line {} dose not exists, total {} lines.",
-                    row,
-                    nrows
+                    row, nrows
                 );
                 return;
             }
             let line = &self.cells[row];
             line.cache.set(None);
             let pctx = self.pctx.as_ref().unwrap();
-            let hldefs = self.hldefs.as_ref().unwrap().read();
+            let hldefs = self.hldefs.as_ref().unwrap().read().unwrap();
             let metrics = self.metrics.as_ref().unwrap().get();
             let mut expands = Vec::with_capacity(line.len());
             let mut start_index = line.get(col).map(|cell| cell.start_index).unwrap_or(0);
@@ -117,7 +118,7 @@ mod imp {
                         end_index,
                     };
                     cell.reset_attrs(pctx, &hldefs, &metrics);
-                    log::trace!(
+                    trace!(
                         "Setting cell {}x{} start_index {} end_index {}",
                         row,
                         col + expands.len(),
@@ -134,14 +135,14 @@ mod imp {
             //     .skip(col)
             //     .take(expands.len())
             //     .for_each(|(idx, cell)| {
-            //         log::info!(
+            //         info!(
             //             "old cell {} start_index {} end_index {}",
             //             idx,
             //             cell.start_index,
             //             cell.end_index
             //         )
             //     });
-            log::debug!(
+            debug!(
                 "textbuf {}x{} setting line {} with {} cells from {} to {}",
                 ncols,
                 nrows,
@@ -191,18 +192,14 @@ mod imp {
         type ParentType = glib::Object;
     }
 
-    impl ObjectImpl for TextBuf {
-        fn constructed(&self, obj: &Self::Type) {
-            self.parent_constructed(obj);
-        }
-    }
+    impl ObjectImpl for TextBuf {}
 
     impl TextBuf {
         pub(super) fn up(&self, rows: usize) {
-            self.inner.write().up(rows);
+            self.inner.write().unwrap().up(rows);
         }
         pub(super) fn down(&self, rows: usize) {
-            self.inner.write().down(rows);
+            self.inner.write().unwrap().down(rows);
         }
 
         pub(super) fn set_cells(
@@ -211,23 +208,23 @@ mod imp {
             col: usize,
             cells: &[crate::bridge::GridLineCell],
         ) {
-            self.inner.write().set_cells(row, col, cells);
+            self.inner.write().unwrap().set_cells(row, col, cells);
         }
 
         pub(super) fn set_hldefs(&self, hldefs: Rc<RwLock<HighlightDefinitions>>) {
-            self.inner.write().set_hldefs(hldefs);
+            self.inner.write().unwrap().set_hldefs(hldefs);
         }
 
         pub(super) fn set_metrics(&self, metrics: Rc<Cell<crate::metrics::Metrics>>) {
-            self.inner.write().set_metrics(metrics);
+            self.inner.write().unwrap().set_metrics(metrics);
         }
 
         pub(super) fn set_pango_context(&self, pctx: Rc<pango::Context>) {
-            self.inner.write().set_pango_context(pctx);
+            self.inner.write().unwrap().set_pango_context(pctx);
         }
 
         pub(super) fn pango_context(&self) -> Rc<pango::Context> {
-            self.inner.write().pango_context()
+            self.inner.write().unwrap().pango_context()
         }
 
         pub fn cell(&self, row: usize, col: usize) -> Option<super::TextCell> {
@@ -238,39 +235,39 @@ mod imp {
         }
 
         pub(super) fn reset_cache(&self) {
-            log::debug!("textbuf rebuild cache");
-            self.inner.write().reset_cache();
+            debug!("textbuf rebuild cache");
+            self.inner.write().unwrap().reset_cache();
         }
 
         pub(super) fn clear(&self) {
-            log::debug!("textbuf cleared");
-            self.inner.write().clear();
+            debug!("textbuf cleared");
+            self.inner.write().unwrap().clear();
         }
 
         pub(super) fn resize(&self, rows: usize, cols: usize) {
-            self.inner.write().resize(rows, cols);
+            self.inner.write().unwrap().resize(rows, cols);
         }
 
         pub(super) fn rows(&self) -> usize {
-            self.inner.read().rows
+            self.inner.read().unwrap().rows
         }
 
         pub(super) fn cols(&self) -> usize {
-            self.inner.read().cols
+            self.inner.read().unwrap().cols
         }
 
         pub(super) fn lines(&self) -> Lines {
             Lines {
-                guard: self.inner.read(),
+                guard: self.inner.read().unwrap(),
             }
         }
 
         pub(super) fn hldefs(&self) -> Option<Rc<RwLock<HighlightDefinitions>>> {
-            self.inner.read().hldefs.clone()
+            self.inner.read().unwrap().hldefs.clone()
         }
 
         pub(super) fn metrics(&self) -> Option<Rc<Cell<crate::metrics::Metrics>>> {
-            self.inner.read().metrics.clone()
+            self.inner.read().unwrap().metrics.clone()
         }
     }
 
@@ -313,12 +310,9 @@ mod imp {
                 })
                 .collect();
 
-            log::debug!(
+            debug!(
                 "resizing buf cells from {}x{} to {}x{}",
-                old_cols,
-                old_rows,
-                cols,
-                rows
+                old_cols, old_rows, cols, rows
             );
 
             self.cells = cells.into_boxed_slice();
@@ -344,11 +338,11 @@ glib::wrapper! {
 
 impl TextBuf {
     pub fn new() -> Self {
-        glib::Object::new::<Self>(&[]).expect("Failed to initialize TextBuf object")
+        glib::Object::new()
     }
 
     fn imp(&self) -> &imp::TextBuf {
-        imp::TextBuf::from_instance(self)
+        imp::TextBuf::from_obj(self)
     }
 
     pub fn clear(&self) {
@@ -503,7 +497,7 @@ impl TextCell {
         // signal a transparent cursor.
         // let blend = u16::MAX as u32 * hldef.blend as u32 / 100;
         // let mut attr = pango::AttrInt::new_background_alpha(blend as u16);
-        // log::info!("blend {}", hldef.blend);
+        // info!("blend {}", hldef.blend);
         // attr.set_start_index(start_index as _);
         // attr.set_end_index(end_index as _);
         // attrs.insert(attr);
@@ -542,9 +536,11 @@ impl TextCell {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, debug::Debug)]
 pub struct TextLine {
+    #[debug(skip)]
     boxed: Box<[TextCell]>,
+    #[debug(skip)]
     cache: Cell<Option<(pango::Layout, pango::LayoutLine)>>,
 }
 

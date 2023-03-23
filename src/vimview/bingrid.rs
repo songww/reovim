@@ -2,11 +2,12 @@ mod imp {
     use core::f32;
     use std::cell::{Cell, Ref};
     use std::rc::Rc;
+    use std::sync::RwLock;
 
-    use glib::translate::{from_glib_none, ToGlibPtr};
-    use gtk::traits::WidgetExt;
-    use gtk::{gdk::prelude::*, graphene::Rect, subclass::prelude::*};
-    use parking_lot::RwLock;
+    use glib::{ParamSpec, Value as GValue};
+    use gtk::prelude::*;
+    use gtk::{graphene::Rect, subclass::prelude::*};
+    use tracing::{info, trace};
 
     use crate::metrics::Metrics;
     use crate::vimview::textbuf::Lines;
@@ -26,95 +27,82 @@ mod imp {
     }
 
     // #[derive(Debug)]
-    pub struct VimGridView {
-        id: Cell<u64>,
+    pub struct BinGrid {
+        gid: Cell<u64>,
         width: Cell<u64>,
         height: Cell<u64>,
-        is_float: Cell<bool>,
+        is_float_window: Cell<bool>,
         textbuf: Cell<TextBuf>,
     }
 
-    impl std::fmt::Debug for VimGridView {
+    impl std::fmt::Debug for BinGrid {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.debug_struct("VimGridView")
-                .field("grid", &self.id.get())
+            f.debug_struct("BinGrid")
+                .field("grid", &self.gid.get())
                 .field("width", &self.width.get())
                 .field("height", &self.height.get())
-                .field("is-float-window", &self.is_float.get())
+                .field("is-float-window", &self.is_float_window.get())
                 .finish_non_exhaustive()
         }
     }
 
     #[glib::object_subclass]
-    impl ObjectSubclass for VimGridView {
+    impl ObjectSubclass for BinGrid {
         const NAME: &'static str = "VimGridView";
         type ParentType = gtk::Widget;
-        type Type = super::VimGridView;
+        type Type = super::BinGrid;
 
         fn new() -> Self {
             Self {
-                id: 0.into(),
+                gid: 0.into(),
                 width: 0.into(),
                 height: 0.into(),
-                is_float: false.into(),
+                is_float_window: false.into(),
                 textbuf: TextBuf::default().into(),
             }
         }
     }
 
     // Trait shared by all GObjects
-    impl ObjectImpl for VimGridView {
-        fn constructed(&self, obj: &Self::Type) {
-            self.parent_constructed(obj);
-        }
-
+    impl ObjectImpl for BinGrid {
         fn properties() -> &'static [glib::ParamSpec] {
             use once_cell::sync::Lazy;
             static PROPERTIES: Lazy<Vec<glib::ParamSpec>> = Lazy::new(|| {
-                vec![
-                    glib::ParamSpecUInt64::new(
-                        "id",
-                        "grid-id",
-                        "id",
-                        1,
-                        u64::MAX,
-                        1,
-                        glib::ParamFlags::READWRITE,
-                    ),
-                    glib::ParamSpecUInt64::new(
-                        "width",
-                        "cols",
-                        "width",
-                        0,
-                        u64::MAX,
-                        0,
-                        glib::ParamFlags::READWRITE,
-                    ),
-                    glib::ParamSpecUInt64::new(
-                        "height",
-                        "rows",
-                        "height",
-                        0,
-                        u64::MAX,
-                        0,
-                        glib::ParamFlags::READWRITE,
-                    ),
-                ]
+                let mut id_builder = glib::ParamSpecUInt64::builder("id")
+                    .minimum(1)
+                    .maximum(u64::MAX)
+                    .default_value(1);
+                id_builder.set_nick("grid-id".into());
+                id_builder.set_blurb("gid".into());
+                id_builder.set_flags(glib::ParamFlags::READWRITE);
+                let id = id_builder.build();
+                let mut width_builder = glib::ParamSpecUInt64::builder("width")
+                    .minimum(0)
+                    .maximum(u64::MAX)
+                    .default_value(0);
+                width_builder.set_nick("cols".into());
+                width_builder.set_blurb("width".into());
+                width_builder.set_flags(glib::ParamFlags::READWRITE);
+                let width = width_builder.build();
+
+                let mut height_builder = glib::ParamSpecUInt64::builder("height")
+                    .minimum(0)
+                    .maximum(u64::MAX)
+                    .default_value(0);
+                height_builder.set_nick("rows".into());
+                height_builder.set_blurb("height".into());
+                height_builder.set_flags(glib::ParamFlags::READWRITE);
+                let height = height_builder.build();
+                vec![id, width, height]
             });
 
             PROPERTIES.as_ref()
         }
 
-        fn set_property(
-            &self,
-            _obj: &Self::Type,
-            _id: usize,
-            value: &glib::Value,
-            pspec: &glib::ParamSpec,
-        ) {
+        fn set_property(&self, _id: usize, value: &GValue, pspec: &ParamSpec) {
             match pspec.name() {
-                "id" => {
-                    self.id.replace(value.get::<u64>().unwrap());
+                "gid" => {
+                    self.gid.replace(value.get::<u64>().unwrap());
                 }
                 "width" => {
                     self.width.replace(value.get::<u64>().unwrap());
@@ -130,9 +118,9 @@ mod imp {
             }
         }
 
-        fn property(&self, _obj: &Self::Type, _id: usize, pspec: &glib::ParamSpec) -> glib::Value {
+        fn property(&self, _id: usize, pspec: &ParamSpec) -> GValue {
             match pspec.name() {
-                "id" => self.id.get().to_value(),
+                "gid" => self.gid.get().to_value(),
                 "width" => self.width.get().to_value(),
                 "height" => self.height.get().to_value(),
                 _ => unimplemented!(),
@@ -141,10 +129,10 @@ mod imp {
     }
 
     // Trait shared by all widgets
-    impl WidgetImpl for VimGridView {
-        fn snapshot(&self, widget: &Self::Type, snapshot: &gtk::Snapshot) {
+    impl WidgetImpl for BinGrid {
+        fn snapshot(&self, snapshot: &gtk::Snapshot) {
             let instant = std::time::Instant::now();
-            self.parent_snapshot(widget, snapshot);
+            self.parent_snapshot(snapshot);
             let textbuf = self.textbuf();
             let pctx = textbuf.pango_context();
             pctx.set_base_dir(pango::Direction::Ltr);
@@ -152,7 +140,7 @@ mod imp {
             let (width, height) = self.size_required();
 
             let hldefs = textbuf.hldefs().unwrap();
-            let hldefs = hldefs.read();
+            let hldefs = hldefs.read().unwrap();
 
             let metrics = textbuf.metrics().unwrap().get();
 
@@ -163,7 +151,7 @@ mod imp {
                 .map(|style| &style.colors)
                 .and_then(|colors| colors.background)
                 .unwrap();
-            if self.is_float.get() {
+            if self.is_float_window.get() {
                 // float window should respect blend for background.
                 let blend = hldef.map(|style| style.blend).unwrap_or(0);
                 let alpha = (100 - blend) as f32 / 100.;
@@ -171,7 +159,8 @@ mod imp {
             }
             snapshot.append_color(&background, &rect);
 
-            let scale_factor = widget.scale_factor();
+            let scale_factor = self.obj().scale_factor();
+            // let scale_factor = self.scale_factor();
             let cr = snapshot.append_cairo(&rect);
             cr.target()
                 .set_device_scale(scale_factor as f64, scale_factor as f64);
@@ -179,7 +168,7 @@ mod imp {
             let mut y = metrics.ascent();
 
             let rows = textbuf.rows();
-            log::debug!("text to render:");
+            trace!("text to render:");
             let desc = pctx.font_description();
             let mut layout = pango::Layout::new(&pctx);
             layout.set_auto_dir(false);
@@ -191,48 +180,48 @@ mod imp {
                 y += metrics.height();
                 let line = lines.get(lineno).unwrap();
                 let layoutline = if let Some((layout, layoutline)) = line.cache() {
+                    let layout = layout.as_ptr();
                     unsafe {
-                        let layout: *mut pango::ffi::PangoLayout = layout.to_glib_none().0;
-                        (*layoutline.to_glib_none().0).layout = layout;
+                        (*layoutline.as_ptr()).layout = layout;
                     };
-                    pangocairo::update_layout(&cr, &layout);
                     layoutline
                 } else {
                     let layoutline = self.layoutline(&mut layout, &lines, lineno, &metrics);
-                    line.set_cache(layout.copy().unwrap(), layoutline.clone());
-                    pangocairo::update_layout(&cr, &layout);
+                    line.set_cache(layout.copy(), layoutline.clone());
                     layoutline
                 };
+                pangocairo::update_layout(&cr, &layout);
                 pangocairo::show_layout_line(&cr, &layoutline);
             }
             let elapsed = instant.elapsed().as_secs_f32() * 1000.;
-            log::info!("snapshot used: {:.3}ms", elapsed);
+            info!("snapshot used: {:.3}ms", elapsed);
         }
 
-        fn measure(
-            &self,
-            widget: &Self::Type,
-            orientation: gtk::Orientation,
-            for_size: i32,
-        ) -> (i32, i32, i32, i32) {
+        fn measure(&self, orientation: gtk::Orientation, for_size: i32) -> (i32, i32, i32, i32) {
             let (w, h) = self.size_required();
-            log::debug!(
-                "measuring grid {} orientation {} for_size {} size_required {}x{}",
-                self.id.get(),
-                orientation,
+            trace!(
+                id = self.gid.get(),
                 for_size,
                 w,
                 h,
+                "measuring orientation = {}",
+                orientation,
             );
             match orientation {
                 gtk::Orientation::Vertical => (h, h, -1, -1),
                 gtk::Orientation::Horizontal => (w, w, -1, -1),
-                _ => self.parent_measure(widget, orientation, for_size),
+                _ => self.parent_measure(orientation, for_size),
             }
         }
     }
 
-    impl VimGridView {
+    impl adw::subclass::prelude::BinImpl for BinGrid {}
+
+    impl BinGrid {
+        pub(super) fn set_gid(&self, gid: u64) {
+            self.gid.replace(gid);
+        }
+
         pub(super) fn set_hldefs(&self, hldefs: Rc<RwLock<HighlightDefinitions>>) {
             self.textbuf().set_hldefs(hldefs);
         }
@@ -253,8 +242,8 @@ mod imp {
             self.height.replace(height);
         }
 
-        pub(super) fn set_is_float(&self, is_float: bool) {
-            self.is_float.replace(is_float);
+        pub(super) fn set_float(&self, float: bool) {
+            self.is_float_window.replace(float);
         }
 
         pub(super) fn set_metrics(&self, metrics: Rc<Cell<crate::metrics::Metrics>>) {
@@ -335,15 +324,15 @@ mod imp {
             layout.set_text(&text);
             layout.set_attributes(Some(&attrs));
             let unknown_glyphs = layout.unknown_glyphs_count();
-            log::trace!(
-                "grid {} line {} baseline {} line-height {} space {} char-height {} unknown_glyphs {}",
-                self.id.get(),
+            trace!(
+                grid = self.gid.get(),
                 lineno,
-                layout.baseline(),
-                layout.line_readonly(0).unwrap().height(),
-                metrics.linespace(),
-                metrics.charheight() * PANGO_SCALE,
-                unknown_glyphs
+                baseline = layout.baseline(),
+                line_height = layout.line_readonly(0).unwrap().height(),
+                linespace = metrics.linespace(),
+                char_height = metrics.charheight() * PANGO_SCALE,
+                unknown_glyphs,
+                "layouting line",
             );
 
             let required_lineheight = metrics.charheight() * PANGO_SCALE;
@@ -361,9 +350,8 @@ mod imp {
                 layout.context_changed();
             }
             if required_lineheight as i32 != layout.line_readonly(0).unwrap().height() {
-                log::debug!("Scale line height failed.");
+                info!("Scale line height failed.");
             }
-
 
             let layoutline: pango::LayoutLine = unsafe { self.align(layout, &chars, &metrics) };
             layoutline
@@ -376,7 +364,8 @@ mod imp {
             metrics: &Metrics,
         ) -> pango::LayoutLine {
             // let _baseline = pango::ffi::pango_layout_get_baseline(layout.to_glib_none().0);
-            let layoutline = pango::ffi::pango_layout_get_line(layout.to_glib_none().0, 0);
+            let ll = layout.line(0).unwrap();
+            let layoutline = ll.as_ptr();
             let mut runs = (*layoutline).runs;
             loop {
                 let run = (*runs).data as *mut pango::ffi::PangoLayoutRun;
@@ -401,8 +390,8 @@ mod imp {
                     ink_rect,
                     &mut logical_rect,
                 );
-                log::trace!("{} glyphs item.offset {}", num_glyphs, (*item).offset);
-                log::trace!("log_clusters{:?}", log_clusters);
+                trace!("{} glyphs item.offset {}", num_glyphs, (*item).offset);
+                trace!("log_clusters {:?}", log_clusters);
                 for (glyph, log_cluster) in glyphs.iter_mut().zip(log_clusters) {
                     let index = ((*item).offset + log_cluster) as usize;
                     let isfirst = index == 0;
@@ -411,13 +400,13 @@ mod imp {
                         panic!("index {} out of range, {:?}", index, &chars)
                     });
                     if charattr.viswidth == 0. {
-                        log::debug!("Skipping zerowidth: {}", charattr.cell.text);
+                        trace!("Skipping zerowidth: {}", charattr.cell.text);
                         continue;
                     }
                     let width = metrics.charwidth() * charattr.viswidth * PANGO_SCALE;
                     let width = width.ceil() as i32;
                     let geometry = &mut glyph.geometry;
-                    // log::info!("{} char-cell {:?}", index, charattr.cell);
+                    // info!("{} char-cell {:?}", index, charattr.cell);
                     if geometry.width > 0 && geometry.width != width {
                         let x_offset = if isfirst {
                             geometry.x_offset
@@ -427,7 +416,7 @@ mod imp {
                         let y_offset = geometry.y_offset
                             - (logical_rect.height / pango::SCALE - metrics.height() as i32) / 2;
                         // 啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊啊
-                        log::debug!(
+                        trace!(
                             "adjusting ({})  width {}->{}  x-offset {}->{} y-offset {} -> {} is-start-char {}",
                             charattr.c,
                             geometry.width,
@@ -448,40 +437,54 @@ mod imp {
                     break;
                 }
             }
-            from_glib_none(layoutline)
+            ll
         }
     }
 }
 
 use std::cell::{Cell, Ref};
 use std::rc::Rc;
+use std::sync::RwLock;
 
 use glib::subclass::prelude::*;
 use gtk::prelude::*;
-use parking_lot::RwLock;
 
 use super::{HighlightDefinitions, TextBuf};
 
 glib::wrapper! {
-    pub struct VimGridView(ObjectSubclass<imp::VimGridView>)
-        @extends gtk::Widget,
-        @implements gtk::Accessible, gtk::Actionable, gtk::Buildable, gtk::ConstraintTarget;
+    pub struct BinGrid(ObjectSubclass<imp::BinGrid>)
+        @extends adw::Bin,
+        @implements gtk::Accessible, gtk::Actionable, gtk::Buildable, gtk::ConstraintTarget, gtk::Widget;
 }
 
-impl Default for VimGridView {
+impl Default for BinGrid {
     fn default() -> Self {
-        VimGridView::new(u64::MAX, 0, 0)
+        BinGrid::new(0, 0, 0)
     }
 }
 
-impl VimGridView {
-    pub fn new(id: u64, width: u64, height: u64) -> VimGridView {
-        glib::Object::new(&[("id", &id), ("width", &width), ("height", &height)])
-            .expect("Failed to create `VimGridView`.")
+impl BinGrid {
+    pub fn new(gid: u64, width: u64, height: u64) -> BinGrid {
+        glib::Object::builder()
+            .property("gid", &gid)
+            .property("width", &width)
+            .property("height", &height)
+            .build()
     }
 
-    fn imp(&self) -> &imp::VimGridView {
-        imp::VimGridView::from_instance(self)
+    fn imp(&self) -> &imp::BinGrid {
+        imp::BinGrid::from_obj(self)
+    }
+
+    pub fn set_gid(&self, gid: u64) {
+        self.imp().set_gid(gid);
+    }
+
+    pub fn set_width(&self, width: u64) {
+        self.imp().set_width(width);
+    }
+    pub fn set_height(&self, height: u64) {
+        self.imp().set_height(height);
     }
 
     pub fn set_hldefs(&self, hldefs: Rc<RwLock<HighlightDefinitions>>) {
@@ -492,12 +495,12 @@ impl VimGridView {
         self.imp().set_textbuf(textbuf);
     }
 
-    pub fn set_is_float(&self, is_float: bool) {
-        self.imp().set_is_float(is_float);
+    pub fn set_float(&self, float: bool) {
+        self.imp().set_float(float);
     }
 
     pub fn set_font_description(&self, desc: &pango::FontDescription) {
-        self.pango_context().set_font_description(desc);
+        self.pango_context().set_font_description(Some(desc));
     }
 
     pub fn set_metrics(&self, metrics: Rc<Cell<crate::metrics::Metrics>>) {

@@ -11,7 +11,6 @@ use tokio::{
     io::split,
     net::{TcpStream, ToSocketAddrs},
     process::Command,
-    spawn,
     task::JoinHandle,
 };
 use tokio_util::compat::TokioAsyncReadCompatExt;
@@ -30,7 +29,7 @@ where
     let stream = TcpStream::connect(addr).await?;
     let (reader, writer) = split(stream);
     let (neovim, io) = Neovim::<TxWrapper>::new(reader.compat(), writer.wrap_tx(), handler);
-    let io_handle = spawn(io);
+    let io_handle = tokio::spawn(io);
 
     Ok((neovim, io_handle))
 }
@@ -58,7 +57,7 @@ where
         .wrap_tx();
 
     let (neovim, io) = Neovim::<TxWrapper>::new(stdout, stdin, handler);
-    let io_handle = spawn(io);
+    let io_handle = tokio::spawn(io);
 
     Ok((neovim, io_handle))
 }

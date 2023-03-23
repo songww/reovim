@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use nvim::{call_args, rpc::model::IntoVal, Neovim};
 use tokio::sync::mpsc::unbounded_channel;
+use tracing::{info, trace};
 
 #[cfg(windows)]
 use crate::windows_utils::{
@@ -132,7 +133,7 @@ impl SerialCommand {
     async fn execute(self, nvim: &Neovim<TxWrapper>) {
         match self {
             SerialCommand::Keyboard(input_command) => {
-                log::trace!("Keyboard Input Sent: {}", input_command);
+                trace!("Keyboard Input Sent: {}", input_command);
                 nvim.input(&input_command).await.expect("Input failed");
             }
             SerialCommand::MouseButton {
@@ -145,7 +146,7 @@ impl SerialCommand {
                 let action: &str = &action;
                 let button: &str = &button;
                 let modifier: &str = &modifier.to_input().unwrap();
-                log::trace!(
+                trace!(
                     "input mouse button='{}' action='{}' modifier='{}' {}<({}, {})>",
                     button,
                     action,
@@ -171,7 +172,7 @@ impl SerialCommand {
                 position: (grid_x, grid_y),
                 modifier,
             } => {
-                log::trace!(
+                trace!(
                     "Mouse Wheel Sent: {} {}<{:?}> ({})",
                     direction,
                     grid_id,
@@ -297,18 +298,18 @@ impl ParallelCommand {
                     let msg =
                         "Could not unregister previous menu item. Possibly already registered.";
                     nvim.err_writeln(msg).await.ok();
-                    log::error!("{}", msg);
+                    error!("{}", msg);
                 }
                 if !register_rightclick_directory() {
                     let msg = "Could not register directory context menu item. Possibly already registered.";
                     nvim.err_writeln(msg).await.ok();
-                    log::error!("{}", msg);
+                    error!("{}", msg);
                 }
                 if !register_rightclick_file() {
                     let msg =
                         "Could not register file context menu item. Possibly already registered.";
                     nvim.err_writeln(msg).await.ok();
-                    log::error!("{}", msg);
+                    error!("{}", msg);
                 }
             }
             #[cfg(windows)]
@@ -316,7 +317,7 @@ impl ParallelCommand {
                 if !unregister_rightclick() {
                     let msg = "Could not remove context menu items. Possibly already removed.";
                     nvim.err_writeln(msg).await.ok();
-                    log::error!("{}", msg);
+                    error!("{}", msg);
                 }
             }
         }
@@ -350,7 +351,7 @@ pub fn start_ui_command_handler(nvim: Arc<Neovim<TxWrapper>>) {
         loop {
             tokio::select! {
                 _ = running_tracker.wait_quit() => {
-                    log::info!("ui command executor quit.");
+                    info!("ui command executor quit.");
                     break;
                 }
                 Some(ui_command) = ui_command_receiver.recv() => {
@@ -361,7 +362,7 @@ pub fn start_ui_command_handler(nvim: Arc<Neovim<TxWrapper>>) {
                         UiCommand::Parallel(parallel_command) => {
                             let ui_command_nvim = ui_command_nvim.clone();
                             tokio::spawn(async move {
-                                log::trace!("aggregated parallel ui-command");
+                                trace!("aggregated parallel ui-command");
                                 parallel_command.execute(&ui_command_nvim).await;
                             });
                         }
@@ -379,11 +380,11 @@ pub fn start_ui_command_handler(nvim: Arc<Neovim<TxWrapper>>) {
         loop {
             tokio::select! {
                 _ =  running_tracker.wait_quit() => {
-                    log::info!("serial ui command executor quit.");
+                    info!("serial ui command executor quit.");
                     break;
                 },
                 Some(serial_command) = serial_rx.recv() => {
-                    log::trace!("aggregated serial ui-command");
+                    trace!("aggregated serial ui-command");
                     serial_command.execute(&nvim).await;
                 },
                 else => {
@@ -396,7 +397,7 @@ pub fn start_ui_command_handler(nvim: Arc<Neovim<TxWrapper>>) {
         while RUNNING_TRACKER.is_running() {
             match serial_rx.recv().await {
                 Some(serial_command) => {
-                    log::trace!("aggregated serial ui-command");
+                    trace!("aggregated serial ui-command");
                     serial_command.execute(&nvim).await;
                 }
                 None => {

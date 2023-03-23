@@ -1,9 +1,21 @@
 use relm4::factory::positions::FixedPosition;
 
+use crate::metrics::Metrics;
+
 #[derive(Debug, Clone, Default)]
 pub struct Coord {
     pub col: f64,
     pub row: f64,
+}
+
+impl Coord {
+    pub fn new(col: f64, row: f64) -> Coord {
+        Coord { col, row }
+    }
+
+    pub fn to_physical(&self, metrics: Metrics) -> (f64, f64) {
+        (self.row * metrics.height(), self.col * metrics.width())
+    }
 }
 
 impl From<(usize, usize)> for Coord {
@@ -55,7 +67,7 @@ pub struct Rectangle {
 }
 
 impl Rectangle {
-    fn new(width: usize, height: usize) -> Rectangle {
+    pub fn new(width: usize, height: usize) -> Rectangle {
         Rectangle { width, height }
     }
 }

@@ -39,7 +39,7 @@
                                 provider.load_from_data(css.as_bytes());
                                 // FIXME: add once.
                                 context.add_provider(&provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
-                                log::debug!("css {} {}: \n{}", blinkon, blinkoff, &css);
+                                debug!("css {} {}: \n{}", blinkon, blinkoff, &css);
                                 da.add_css_class("blink");
                             }
                             let hldefs = hldefs.read();
@@ -49,7 +49,7 @@
                             let cell = cursor.cell();
                             let metrics = metrics.get();
                             let (x, y, width, height)  = cursor.rectangle(metrics.width(), metrics.height());
-                            log::debug!("drawing cursor at {}x{}.", x, y);
+                            debug!("drawing cursor at {}x{}.", x, y);
                             match cursor.shape {
                                 CursorShape::Block => {
                                     use pango::AttrType;
@@ -65,7 +65,7 @@
                                             _ => None
                                         }
                                     }).for_each(|attr| attrs.insert(attr));
-                                    log::debug!("cursor cell '{}' wide {}", cell.text, cursor.width);
+                                    debug!("cursor cell '{}' wide {}", cell.text, cursor.width);
                                     let itemized = &pango::itemize(&pctx, &cell.text, 0, cell.text.len() as _, &attrs, None)[0];
                                     let mut glyph_string = pango::GlyphString::new();
                                     pango::shape(&cell.text, itemized.analysis(), &mut glyph_string);
@@ -77,7 +77,7 @@
                                         let x_offset =geometry.x_offset() - (geometry.width() - width) / 2;
                                         geometry.set_width(width);
                                         geometry.set_x_offset(x_offset);
-                                        log::debug!("cursor glyph width {}", width);
+                                        debug!("cursor glyph width {}", width);
                                     }
                                     // 试试汉字
                                     cr.save().unwrap();
@@ -90,7 +90,7 @@
                                     pangocairo::show_glyph_string(cr, &itemized.analysis().font(), &mut glyph_string);
                                 }
                                 _ => {
-                                    log::debug!("drawing cursor with {}x{}", width, height);
+                                    debug!("drawing cursor with {}x{}", width, height);
                                     cr.set_source_rgba(bg.red() as f64, bg.green() as f64, bg.blue() as f64, bg.alpha() as f64);
                                     cr.rectangle(x, y, width, height);
                                     cr.fill().unwrap();
