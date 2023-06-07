@@ -52,7 +52,7 @@ package = "pango"
 features = [ "v1_50" ]
 
 [dependencies.pangocairo]
-version = "0.15"
+version = "0.17"
 package = "pangocairo"
 
 [dependencies.graphene]
